@@ -1,6 +1,9 @@
-[package]
-name = "alloy_tools"
-version = "0.1.0"
-edition = "2021"
+[workspace]
+resolver = "2"
+members = ["crates/*"]
 
-[dependencies]
+[workspace.package]
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Alloy-Tools/alloy_tools"
+edition = "2021"

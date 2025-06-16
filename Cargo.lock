@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "alloy_tools"
+name = "al_tui"
 version = "0.1.0"
