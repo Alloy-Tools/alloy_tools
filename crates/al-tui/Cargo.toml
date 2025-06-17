@@ -1,5 +1,5 @@
 [package]
-name = "al_tui"
+name = "al-tui"
 version.workspace = true
 license.workspace = true
 repository.workspace = true
