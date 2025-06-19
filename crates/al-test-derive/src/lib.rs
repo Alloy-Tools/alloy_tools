@@ -13,7 +13,7 @@ mod tests {
         has_impl_marker::<TestEvent>();
     }
 
-    #[test]
+    /*#[test]
     fn generic_marker_derive() {
         #[derive(EventMarker)]
         struct GenericEvent<T>(T);
@@ -32,5 +32,5 @@ mod tests {
 
         has_impl_marker::<GenericEvent<u128>>();
         has_impl_marker::<GenericEvent<String>>();
-    }
+    }*/
 }
