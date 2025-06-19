@@ -1,6 +1,8 @@
 use crate::event::Event;
 use std::hash::Hash;
 
+#[cfg_attr(feature = "json", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "binary", derive(bincode::Encode, bincode::Decode))]
 #[derive(Clone, Default, PartialEq, Hash, std::fmt::Debug)]
 pub enum Command {
     Event(Box<dyn Event>),
@@ -25,6 +27,54 @@ impl PartialEq for Box<dyn Event> {
 impl Hash for Box<dyn Event> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self._hash_event(state);
+    }
+}
+
+#[cfg(feature = "json")]
+impl serde::Serialize for Box<dyn Event> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        todo!()
+    }
+}
+
+#[cfg(feature = "json")]
+impl<'a> serde::Deserialize<'a> for Box<dyn Event> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'a>,
+    {
+        todo!()
+    }
+}
+
+#[cfg(feature = "binary")]
+impl bincode::Encode for Box<dyn Event> {
+    fn encode<E: bincode::enc::Encoder>(
+        &self,
+        encoder: &mut E,
+    ) -> Result<(), bincode::error::EncodeError> {
+        todo!()
+    }
+}
+
+#[cfg(feature = "binary")]
+impl<Context> bincode::Decode<Context> for Box<dyn Event> {
+    fn decode<D: bincode::de::Decoder<Context = Context>>(
+        decoder: &mut D,
+    ) -> Result<Self, bincode::error::DecodeError> {
+        todo!()
+    }
+}
+
+#[cfg(feature = "binary")]
+impl<'de, Context> bincode::BorrowDecode<'de, Context> for Box<dyn Event> {
+    fn borrow_decode<D: bincode::de::BorrowDecoder<'de, Context = Context>>(
+        decoder: &mut D,
+    ) -> Result<Self, bincode::error::DecodeError> {
+        todo!()
     }
 }
 

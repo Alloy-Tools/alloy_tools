@@ -8,18 +8,28 @@ pub use markers::EventMarker;
 
 #[cfg(test)]
 mod tests {
-    use std::hash::{DefaultHasher, Hash, Hasher};
     use crate::command::Command;
     use crate::event::Event;
     use crate::markers::EventMarker;
     use al_derive::EventMarker;
+    #[cfg(feature = "binary")]
+    use bincode::{Decode, Encode};
+    #[cfg(feature = "json")]
+    use serde::{Deserialize, Serialize};
+    use std::hash::{DefaultHasher, Hash, Hasher};
 
+    #[cfg_attr(feature = "json", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "binary", derive(bincode::Encode, bincode::Decode))]
     #[derive(Clone, Default, PartialEq, Hash, Debug, EventMarker)]
     struct TestEventA;
 
+    #[cfg_attr(feature = "json", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "binary", derive(bincode::Encode, bincode::Decode))]
     #[derive(Clone, Default, PartialEq, Hash, Debug, EventMarker)]
     struct TestEventB;
 
+    #[cfg_attr(feature = "json", derive(serde::Serialize, serde::Deserialize))]
+    #[cfg_attr(feature = "binary", derive(bincode::Encode, bincode::Decode))]
     #[derive(Clone, Default, PartialEq, Hash, Debug, EventMarker)]
     struct TestEventPayload {
         value: u128,
@@ -69,17 +79,19 @@ mod tests {
         mod crate_a {
             use super::*;
 
-            #[derive(Clone, Default, PartialEq, Hash, Debug)]
+            #[cfg_attr(feature = "json", derive(serde::Serialize, serde::Deserialize))]
+            #[cfg_attr(feature = "binary", derive(bincode::Encode, bincode::Decode))]
+            #[derive(Clone, Default, PartialEq, Hash, Debug, EventMarker)]
             pub struct DuplicateEvent;
-            impl EventMarker for DuplicateEvent {}
         }
 
         mod crate_b {
             use super::*;
 
-            #[derive(Clone, Default, PartialEq, Hash, Debug)]
+            #[cfg_attr(feature = "json", derive(serde::Serialize, serde::Deserialize))]
+            #[cfg_attr(feature = "binary", derive(bincode::Encode, bincode::Decode))]
+            #[derive(Clone, Default, PartialEq, Hash, Debug, EventMarker)]
             pub struct DuplicateEvent;
-            impl EventMarker for DuplicateEvent {}
         }
 
         assert_ne!(
@@ -98,7 +110,7 @@ mod tests {
             message: TEST_MSG.to_string(),
         };
         let event_diff_val = TestEventPayload {
-            value: TEST_VAL+1,
+            value: TEST_VAL + 1,
             message: TEST_MSG.to_string(),
         };
         let event_diff_msg = TestEventPayload {
@@ -145,7 +157,7 @@ mod tests {
         }
         .to_cmd();
         let cmd_diff_val = TestEventPayload {
-            value: TEST_VAL+1,
+            value: TEST_VAL + 1,
             message: TEST_MSG.to_string(),
         }
         .to_cmd();
@@ -239,6 +251,18 @@ mod tests {
         assert_eq!(Command::Stop, Command::Stop);
     }
 
+    #[cfg(feature = "json")]
+    #[test]
+    fn event_json() {
+        todo!()
+    }
+
+    #[cfg(feature = "binary")]
+    #[test]
+    fn event_binary() {
+        todo!()
+    }
+
     #[test]
     fn event_marker_thread_safety() {
         fn has_marker_requirements<
@@ -249,5 +273,23 @@ mod tests {
         has_marker_requirements::<TestEventA>();
         has_marker_requirements::<TestEventB>();
         has_marker_requirements::<TestEventPayload>();
+
+        #[cfg(feature = "json")]
+        {
+            fn has_json_requirements<T: serde::Serialize + for<'a> serde::Deserialize<'a>>() {}
+
+            has_json_requirements::<TestEventA>();
+            has_json_requirements::<TestEventB>();
+            has_json_requirements::<TestEventPayload>();
+        }
+
+        #[cfg(feature = "binary")]
+        {
+            fn has_binary_requirements<T: bincode::Encode + bincode::Decode<T>>() {}
+
+            has_binary_requirements::<TestEventA>();
+            has_binary_requirements::<TestEventB>();
+            has_binary_requirements::<TestEventPayload>();
+        }
     }
 }
