@@ -23,19 +23,42 @@ impl<'a> Hasher for EventHasher<'a> {
 /// Used to mark other code with required traits as valid for `Event` support
 // ----------------------------------------------------------
 mod sealed {
-    pub trait JsonFeature {}
+    #[cfg(feature = "json")]
+    use crate::EventMarker;
+
+    pub trait JsonFeature {
+        #[cfg(feature = "json")]
+        fn _to_json(&self) -> Result<String, serde_json::Error>;
+        #[cfg(feature = "json")]
+        fn _from_json<'de, R, D>(json: &'de str) -> Result<R, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+            R: serde::Deserialize<'de>;
+    }
+    #[cfg(feature = "json")]
+    impl<T: EventMarker + serde::Serialize + for<'a> serde::Deserialize<'a>> JsonFeature for T {
+        fn _to_json(&self) -> Result<String, serde_json::Error> {
+            serde_json::to_string::<T>(self)
+        }
+
+        fn _from_json<'de, R, D>(json: &'de str) -> Result<R, D::Error>
+                where
+                    D: serde::Deserializer<'de>,
+                    R: serde::Deserialize<'de> {
+            let mut deserializer = serde_json::Deserializer::from_str(json);
+            R::deserialize(&mut deserializer)
+            //serde_json::from_str::<R>(json)
+        }
+    }
+    #[cfg(not(feature = "json"))]
+    impl<T> JsonFeature for T {}
+
     pub trait BinaryFeature {}
+    #[cfg(feature = "binary")]
+    impl<T: bincode::Encode + bincode::Decode<T>> BinaryFeature for T {}
+    #[cfg(not(feature = "binary"))]
+    impl<T> BinaryFeature for T {}
 }
-
-#[cfg(feature = "json")]
-impl<T: serde::Serialize + for<'a> serde::Deserialize<'a>> sealed::JsonFeature for T {}
-#[cfg(not(feature = "json"))]
-impl<T> sealed::JsonFeature for T {}
-
-#[cfg(feature = "binary")]
-impl<T: bincode::Encode + bincode::Decode<T>> sealed::BinaryFeature for T {}
-#[cfg(not(feature = "binary"))]
-impl<T> sealed::BinaryFeature for T {}
 // ----------------------------------------------------------
 
 pub trait Event:
@@ -47,6 +70,8 @@ pub trait Event:
     fn _clone_event(&self) -> Box<dyn Event>;
     fn _partial_equals_event(&self, other: &dyn Any) -> bool;
     fn _hash_event(&self, state: &mut dyn Hasher);
+    //#[cfg(feature = "binary")]
+    //fn _to_binary(&self);
 
     fn to_cmd(self) -> Command
     where

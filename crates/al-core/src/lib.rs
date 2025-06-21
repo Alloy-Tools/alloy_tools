@@ -1,5 +1,7 @@
 mod command;
 mod event;
+#[cfg(feature = "json")]
+mod event_json;
 mod markers;
 
 pub use command::Command;
@@ -12,10 +14,6 @@ mod tests {
     use crate::event::Event;
     use crate::markers::EventMarker;
     use al_derive::EventMarker;
-    #[cfg(feature = "binary")]
-    use bincode::{Decode, Encode};
-    #[cfg(feature = "json")]
-    use serde::{Deserialize, Serialize};
     use std::hash::{DefaultHasher, Hash, Hasher};
 
     #[cfg_attr(feature = "json", derive(serde::Serialize, serde::Deserialize))]

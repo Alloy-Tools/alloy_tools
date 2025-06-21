@@ -36,6 +36,7 @@ impl serde::Serialize for Box<dyn Event> {
     where
         S: serde::Serializer,
     {
+        //self._to_json() // Would it be okay to skip the serializer? would it be the same type?
         todo!()
     }
 }
