@@ -20,5 +20,7 @@ pub trait AnyMarker: sealed::Marker {}
 impl<T: sealed::Marker> AnyMarker for T {}
 
 /// `EventMarker` trait acts as a marker for `Event` systems
-pub trait EventMarker: sealed::Marker {}
+pub trait EventMarker: sealed::Marker {
+    fn _type_name(&self) -> &'static str;
+}
 impl<T: EventMarker> sealed::Marker for T {}

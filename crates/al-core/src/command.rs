@@ -2,7 +2,7 @@ use crate::event::Event;
 use std::hash::Hash;
 
 #[cfg_attr(feature = "json", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "binary", derive(bincode::Encode, bincode::Decode))]
+//#[cfg_attr(feature = "binary", derive(bincode::Encode, bincode::Decode))]
 #[derive(Clone, Default, PartialEq, Hash, std::fmt::Debug)]
 pub enum Command {
     Event(Box<dyn Event>),
@@ -30,28 +30,42 @@ impl Hash for Box<dyn Event> {
     }
 }
 
+#[derive(serde::Serialize)]
+struct SerWrap<'a> {
+    #[serde(rename = "type")]
+    type_name: &'static str,
+    #[serde(flatten)]
+    data: &'a dyn erased_serde::Serialize,
+}
+
 #[cfg(feature = "json")]
 impl serde::Serialize for Box<dyn Event> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        //self._to_json() // Would it be okay to skip the serializer? would it be the same type?
-        todo!()
+        let wrapper = SerWrap {
+            type_name: self.type_name(),
+            data: self.as_ref(),
+        };
+        erased_serde::serialize(&wrapper, serializer)
     }
 }
 
 #[cfg(feature = "json")]
 impl<'a> serde::Deserialize<'a> for Box<dyn Event> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    fn deserialize<D>(_deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'a>,
     {
+        //TODO: Event registry system using the `Event::type_name` as the key
+        /*Event::_deserialize_event(&self, type_name, deserializer)
+        self._deserialize_event(deserializer)*/
         todo!()
     }
 }
 
-#[cfg(feature = "binary")]
+/*#[cfg(feature = "binary")]
 impl bincode::Encode for Box<dyn Event> {
     fn encode<E: bincode::enc::Encoder>(
         &self,
@@ -77,7 +91,7 @@ impl<'de, Context> bincode::BorrowDecode<'de, Context> for Box<dyn Event> {
     ) -> Result<Self, bincode::error::DecodeError> {
         todo!()
     }
-}
+}*/
 
 impl Command {
     pub fn is_event(&self) -> bool {

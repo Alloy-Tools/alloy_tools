@@ -11,5 +11,10 @@ pub fn event_marker_derive(input: TokenStream) -> TokenStream {
 fn derive_event_marker(input: DeriveInput) -> TokenStream {
     let name = &input.ident;
     let generics = &input.generics;
-    quote! { impl EventMarker for #name {} }.into()
+    quote! {impl EventMarker for #name {
+        fn _type_name(&self) -> &'static str {
+            concat!(module_path!(), "::", stringify!(#name))
+        }
+    }}
+    .into()
 }

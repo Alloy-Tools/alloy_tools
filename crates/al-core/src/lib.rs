@@ -17,17 +17,17 @@ mod tests {
     use std::hash::{DefaultHasher, Hash, Hasher};
 
     #[cfg_attr(feature = "json", derive(serde::Serialize, serde::Deserialize))]
-    #[cfg_attr(feature = "binary", derive(bincode::Encode, bincode::Decode))]
+    //#[cfg_attr(feature = "binary", derive(bincode::Encode, bincode::Decode))]
     #[derive(Clone, Default, PartialEq, Hash, Debug, EventMarker)]
     struct TestEventA;
 
     #[cfg_attr(feature = "json", derive(serde::Serialize, serde::Deserialize))]
-    #[cfg_attr(feature = "binary", derive(bincode::Encode, bincode::Decode))]
+    //#[cfg_attr(feature = "binary", derive(bincode::Encode, bincode::Decode))]
     #[derive(Clone, Default, PartialEq, Hash, Debug, EventMarker)]
     struct TestEventB;
 
     #[cfg_attr(feature = "json", derive(serde::Serialize, serde::Deserialize))]
-    #[cfg_attr(feature = "binary", derive(bincode::Encode, bincode::Decode))]
+    //#[cfg_attr(feature = "binary", derive(bincode::Encode, bincode::Decode))]
     #[derive(Clone, Default, PartialEq, Hash, Debug, EventMarker)]
     struct TestEventPayload {
         value: u128,
@@ -78,7 +78,7 @@ mod tests {
             use super::*;
 
             #[cfg_attr(feature = "json", derive(serde::Serialize, serde::Deserialize))]
-            #[cfg_attr(feature = "binary", derive(bincode::Encode, bincode::Decode))]
+            //#[cfg_attr(feature = "binary", derive(bincode::Encode, bincode::Decode))]
             #[derive(Clone, Default, PartialEq, Hash, Debug, EventMarker)]
             pub struct DuplicateEvent;
         }
@@ -87,7 +87,7 @@ mod tests {
             use super::*;
 
             #[cfg_attr(feature = "json", derive(serde::Serialize, serde::Deserialize))]
-            #[cfg_attr(feature = "binary", derive(bincode::Encode, bincode::Decode))]
+            //#[cfg_attr(feature = "binary", derive(bincode::Encode, bincode::Decode))]
             #[derive(Clone, Default, PartialEq, Hash, Debug, EventMarker)]
             pub struct DuplicateEvent;
         }
@@ -252,12 +252,106 @@ mod tests {
     #[cfg(feature = "json")]
     #[test]
     fn event_json() {
-        todo!()
+        let event = TestEventPayload {
+            value: TEST_VAL,
+            message: TEST_MSG.to_string(),
+        };
+        let event_same = TestEventPayload {
+            value: TEST_VAL,
+            message: TEST_MSG.to_string(),
+        };
+        let event_diff_val = TestEventPayload {
+            value: TEST_VAL + 1,
+            message: TEST_MSG.to_string(),
+        };
+        let event_diff_str = TestEventPayload {
+            value: TEST_VAL,
+            message: TEST_MSG[1..].to_string(),
+        };
+
+        assert_eq!(
+            serde_json::to_string(&event).unwrap(),
+            serde_json::to_string(&event).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_string(&event).unwrap(),
+            serde_json::to_string(&event_same).unwrap()
+        );
+        assert_ne!(
+            serde_json::to_string(&event).unwrap(),
+            serde_json::to_string(&event_diff_val).unwrap()
+        );
+        assert_ne!(
+            serde_json::to_string(&event).unwrap(),
+            serde_json::to_string(&event_diff_str).unwrap()
+        );
+        assert_ne!(
+            serde_json::to_string(&event).unwrap(),
+            serde_json::to_string(&TestEventA {}).unwrap()
+        );
+        //TODO: look into hooking any impl'd `EventMarker` serilize to serialize a wrapper with type_name, that way event type names can be inserted on event serialization layer rather than only command
+        //assert_ne!(serde_json::to_string(&TestEventA{}).unwrap(), serde_json::to_string(&TestEventB{}).unwrap());
+    }
+
+    #[cfg(feature = "json")]
+    #[test]
+    fn command_json() {
+        let cmd = TestEventPayload {
+            value: TEST_VAL,
+            message: TEST_MSG.to_string(),
+        }
+        .to_cmd();
+        let cmd_same = TestEventPayload {
+            value: TEST_VAL,
+            message: TEST_MSG.to_string(),
+        }
+        .to_cmd();
+        let cmd_diff_val = TestEventPayload {
+            value: TEST_VAL + 1,
+            message: TEST_MSG.to_string(),
+        }
+        .to_cmd();
+        let cmd_diff_str = TestEventPayload {
+            value: TEST_VAL,
+            message: TEST_MSG[1..].to_string(),
+        }
+        .to_cmd();
+
+        assert_eq!(
+            serde_json::to_string(&cmd).unwrap(),
+            serde_json::to_string(&cmd).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_string(&cmd).unwrap(),
+            serde_json::to_string(&cmd_same).unwrap()
+        );
+        assert_ne!(
+            serde_json::to_string(&cmd).unwrap(),
+            serde_json::to_string(&cmd_diff_val).unwrap()
+        );
+        assert_ne!(
+            serde_json::to_string(&cmd).unwrap(),
+            serde_json::to_string(&cmd_diff_str).unwrap()
+        );
+        assert_ne!(
+            serde_json::to_string(&cmd).unwrap(),
+            serde_json::to_string(&TestEventA.to_cmd()).unwrap()
+        );
+        assert_ne!(
+            serde_json::to_string(&TestEventA.to_cmd()).unwrap(),
+            serde_json::to_string(&TestEventB.to_cmd()).unwrap()
+        );
     }
 
     #[cfg(feature = "binary")]
     #[test]
     fn event_binary() {
+        todo!()
+    }
+
+    #[cfg(feature = "binary")]
+    #[test]
+    fn command_binary() {
         todo!()
     }
 
@@ -281,13 +375,13 @@ mod tests {
             has_json_requirements::<TestEventPayload>();
         }
 
-        #[cfg(feature = "binary")]
+        /*#[cfg(feature = "binary")]
         {
             fn has_binary_requirements<T: bincode::Encode + bincode::Decode<T>>() {}
 
             has_binary_requirements::<TestEventA>();
             has_binary_requirements::<TestEventB>();
             has_binary_requirements::<TestEventPayload>();
-        }
+        }*/
     }
 }
