@@ -34,7 +34,6 @@ impl Hash for Box<dyn Event> {
 struct SerWrap<'a> {
     #[serde(rename = "type")]
     type_name: &'static str,
-    #[serde(flatten)]
     data: &'a dyn erased_serde::Serialize,
 }
 

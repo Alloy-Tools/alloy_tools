@@ -55,14 +55,16 @@ impl<'a, 'de> Visitor<'de> for EventVisitor<'a, 'de> {
         A: MapAccess<'de>,
     {
         let mut type_name = None;
+        let mut wrapper = None;
         let mut event = None;
         while let Some(key) = map.next_key::<&str>()? {
             println!("Key: {key}");
             match key {
-                "Event" => event = Some(map.next_value_seed(EventSeed(self.0, self.1))),
+                "Event" => wrapper = Some(map.next_value_seed(EventSeed(self.0, self.1))),
                 "type" => type_name = Some(map.next_value::<String>()?),
+                "data" => todo!(),//event = Some(map.next_value_seed(seed)),
                 _ => {
-                    println!("Key: {key}");
+                    eprintln!("Unexpected key: {key}");
                     map.next_value::<serde::de::IgnoredAny>();
                 }
             }
