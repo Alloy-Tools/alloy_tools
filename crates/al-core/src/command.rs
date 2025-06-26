@@ -58,7 +58,7 @@ impl<'a> serde::Deserialize<'a> for Box<dyn Event> {
     where
         D: serde::Deserializer<'a>,
     {
-        //TODO: Event registry system using the `Event::type_name` as the key
+        //TODO: Event registry system using the `Event::type_name` as the key with (erased dyn) deserializers as the values
         /*Event::_deserialize_event(&self, type_name, deserializer)
         self._deserialize_event(deserializer)*/
         todo!()

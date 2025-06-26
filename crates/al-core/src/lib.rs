@@ -1,11 +1,13 @@
 mod command;
 mod event;
-#[cfg(feature = "json")]
-mod event_json;
+#[cfg(any(feature = "json", feature = "binary"))]
+mod event_registry;
 mod markers;
 
 pub use command::Command;
 pub use event::Event;
+#[cfg(any(feature = "json", feature = "binary"))]
+pub use event_registry::EventRegistry;
 pub use markers::EventMarker;
 
 #[cfg(test)]
@@ -269,33 +271,38 @@ mod tests {
             message: TEST_MSG[1..].to_string(),
         };
 
-        assert_eq!(
-            serde_json::to_string(&event).unwrap(),
-            serde_json::to_string(&event).unwrap()
-        );
-        assert_eq!(
-            serde_json::to_string(&event).unwrap(),
-            serde_json::to_string(&event_same).unwrap()
-        );
-        assert_ne!(
-            serde_json::to_string(&event).unwrap(),
-            serde_json::to_string(&event_diff_val).unwrap()
-        );
-        assert_ne!(
-            serde_json::to_string(&event).unwrap(),
-            serde_json::to_string(&event_diff_str).unwrap()
-        );
-        assert_ne!(
-            serde_json::to_string(&event).unwrap(),
-            serde_json::to_string(&TestEventA {}).unwrap()
-        );
+        let event_json = serde_json::to_string(&event).unwrap();
+        let same_json = serde_json::to_string(&event_same).unwrap();
+        let val_json = serde_json::to_string(&event_diff_val).unwrap();
+        let str_json = serde_json::to_string(&event_diff_str).unwrap();
+        let a_json = serde_json::to_string(&TestEventA {}).unwrap();
+
+        assert_eq!(event_json, serde_json::to_string(&event).unwrap());
+        assert_eq!(event_json, same_json);
+        assert_ne!(event_json, val_json);
+        assert_ne!(event_json, str_json);
+        assert_ne!(event_json, a_json);
         //TODO: look into hooking any impl'd `EventMarker` serilize to serialize a wrapper with type_name, that way event type names can be inserted on event serialization layer rather than only command
         //assert_ne!(serde_json::to_string(&TestEventA{}).unwrap(), serde_json::to_string(&TestEventB{}).unwrap());
+
+        let new_event: TestEventPayload = serde_json::from_str(&event_json).unwrap();
+        let new_same: TestEventPayload = serde_json::from_str(&same_json).unwrap();
+        let new_val: TestEventPayload = serde_json::from_str(&val_json).unwrap();
+        let new_str: TestEventPayload = serde_json::from_str(&str_json).unwrap();
+        let new_a: TestEventA = serde_json::from_str(&a_json).unwrap();
+
+        assert_eq!(event, new_event);
+        assert_eq!(event_same, new_same);
+        assert_eq!(event_diff_val, new_val);
+        assert_eq!(event_diff_str, new_str);
+        assert_eq!(TestEventA, new_a);
     }
 
     #[cfg(feature = "json")]
     #[test]
     fn command_json() {
+        use crate::event_registry::{EventRegistry, EventRegistryTrait};
+
         let cmd = TestEventPayload {
             value: TEST_VAL,
             message: TEST_MSG.to_string(),
@@ -317,30 +324,52 @@ mod tests {
         }
         .to_cmd();
 
-        assert_eq!(
-            serde_json::to_string(&cmd).unwrap(),
-            serde_json::to_string(&cmd).unwrap()
-        );
-        assert_eq!(
-            serde_json::to_string(&cmd).unwrap(),
-            serde_json::to_string(&cmd_same).unwrap()
-        );
-        assert_ne!(
-            serde_json::to_string(&cmd).unwrap(),
-            serde_json::to_string(&cmd_diff_val).unwrap()
-        );
-        assert_ne!(
-            serde_json::to_string(&cmd).unwrap(),
-            serde_json::to_string(&cmd_diff_str).unwrap()
-        );
-        assert_ne!(
-            serde_json::to_string(&cmd).unwrap(),
-            serde_json::to_string(&TestEventA.to_cmd()).unwrap()
-        );
-        assert_ne!(
-            serde_json::to_string(&TestEventA.to_cmd()).unwrap(),
-            serde_json::to_string(&TestEventB.to_cmd()).unwrap()
-        );
+        let cmd_json = serde_json::to_string(&cmd).unwrap();
+        let same_json = serde_json::to_string(&cmd_same).unwrap();
+        let val_json = serde_json::to_string(&cmd_diff_val).unwrap();
+        let str_json = serde_json::to_string(&cmd_diff_str).unwrap();
+        let a_json = serde_json::to_string(&TestEventA.to_cmd()).unwrap();
+        let b_json = serde_json::to_string(&TestEventB.to_cmd()).unwrap();
+
+        println!("{:?}", cmd_json);
+
+        assert_eq!(cmd_json, serde_json::to_string(&cmd).unwrap());
+        assert_eq!(cmd_json, same_json);
+        assert_ne!(cmd_json, val_json);
+        assert_ne!(cmd_json, str_json);
+        assert_ne!(cmd_json, a_json);
+        assert_ne!(a_json, b_json);
+
+        //TODO: DESERIALIZE THE ABOVE BACK AND CONFIRM THEY MATCH ABOVE COMMANDS
+        let mut event_reg = EventRegistry::default();
+        event_reg.register_event::<TestEventPayload>();
+        event_reg.register_event::<TestEventA>();
+        event_reg.register_event::<TestEventB>();
+
+        //TODO: I think I can do the below in one line as I shouldn't need to take ownership and could use &cmd_json with from_str
+        let new_command = {
+            let owned_json = cmd_json.as_bytes().to_vec();
+            let mut deserializer = serde_json::Deserializer::from_slice(&owned_json);
+            event_reg.deserialize(&mut deserializer).unwrap()
+
+            /*event_reg
+            .deserialize(&owned_json, &|data| {
+                let static_data: &'static mut [u8] = Box::leak(Box::from(data));
+                let mut de = serde_json::Deserializer::from_slice(static_data);
+                let erased = //: &'static mut dyn erased_serde::Deserializer =
+                    &mut <dyn erased_serde::Deserializer>::erase(&mut de);
+                /*let static_ref: &'static mut dyn erased_serde::Deserializer =
+                    unsafe { std::mem::transmute(erased) };
+                //NEED TO LEAK WHATEVER (ERASED?), THEN CALL BOX::FROM_RAW ON THE RETURNED TYPE (AFTER USED? IN deserialize FUNCTION?) AND DROP THAT BOX
+                Ok(Box::new(static_ref))*/
+                Ok(Box::new(erased))
+
+                /*let erased = Box::new(<dyn erased_serde::Deserializer>::erase(&mut de));
+                let leaked_ptr: &'static mut dyn erased_serde::Deserializer = Box::leak(erased);
+                Ok(leaked_ptr)*/
+            })
+            .unwrap()*/
+        };
     }
 
     #[cfg(feature = "binary")]

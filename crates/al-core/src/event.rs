@@ -90,31 +90,6 @@ pub trait Event:
     }
 }
 
-/*#[cfg(any(feature = "json", feature = "binary"))]
-pub fn register_event<T: Event + sealed::JsonFeature + sealed::BinaryFeature + 'static>() {
-    let key = std::any::type_name::<T>();
-    let deserializer = |de: &mut dyn erased_serde::Deserializer| {
-        let value: T = erased_serde::deserialize(de);
-
-    }
-}
-
-#[cfg(any(feature = "json", feature = "binary"))]
-pub fn deserialize_event(type_name: &str, deserializer: &mut dyn erased_serde::Deserializer) -> Result<Box<dyn Event>, erased_serde::Error> {
-
-}*/
-
-/*#[cfg(any(feature = "json", feature = "binary"))]
-impl erased_serde::Serialize for dyn Event {
-    fn erased_serialize(&self, serializer: &mut dyn erased_serde::Serializer) -> Result<(), erased_serde::Error> {
-        todo!()
-    }
-
-    fn do_erased_serialize(&self, serializer: &mut dyn erased_serde::Serializer) -> Result<(), ErrorImpl> {
-        todo!()
-    }
-}*/
-
 // Blanket implementation for all compatible types
 impl<
         T: EventMarker
