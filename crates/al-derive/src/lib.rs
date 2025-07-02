@@ -12,7 +12,7 @@ fn derive_event_marker(input: DeriveInput) -> TokenStream {
     let name = &input.ident;
     let generics = &input.generics;
     quote! {impl EventMarker for #name {
-        fn _type_name(&self) -> &'static str {
+        fn _type_name() -> &'static str {
             concat!(module_path!(), "::", stringify!(#name))
         }
     }}

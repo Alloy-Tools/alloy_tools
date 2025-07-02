@@ -115,7 +115,7 @@ impl<
     }
 
     fn type_name(&self) -> &'static str {
-        self._type_name()
+        T::_type_name()
     }
 
     fn _clone_event(&self) -> Box<dyn Event> {

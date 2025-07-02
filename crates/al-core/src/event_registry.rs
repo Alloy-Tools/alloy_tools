@@ -1,133 +1,53 @@
-use serde::de::{DeserializeSeed, MapAccess, Visitor};
-use std::{collections::HashMap, marker::PhantomData};
+use std::collections::HashMap;
+use std::sync::Mutex;
 
 use crate::Event;
 
-type DeserializeFn = Box<
-    dyn for<'de> Fn(
-            &'de mut dyn erased_serde::Deserializer<'static>,
-        ) -> Result<Box<dyn Event>, Box<dyn std::error::Error>>
-        + Send
-        + Sync,
->;
+type EventDeserializer = fn(&str) -> Box<dyn Event>;
 
-#[derive(Default)]
-pub struct EventRegistry {
-    deserializers: HashMap<&'static str, DeserializeFn>,
+lazy_static::lazy_static! {
+    static ref EVENT_REGISTRY: Mutex<HashMap<&'static str, EventDeserializer>> = Mutex::new(HashMap::new());
 }
 
-pub trait EventRegistryTrait: Default {
-    fn register_event<E: Event + Default + serde::Deserialize<'static> + 'static>(&mut self);
-    fn get_deserializer(&self, key: &str) -> Option<&DeserializeFn>;
-    /*fn deserialize(
-        &self,
-        data: &[u8],
-        deserializer_factory: &dyn Fn(
-            &[u8],
-        ) -> Result<
-            Box<dyn erased_serde::Deserializer<'static>>,
-            Box<dyn std::error::Error>,
-        >,
-    ) -> Result<Box<dyn Event>, Box<dyn std::error::Error>>;*/
-    fn deserialize<'de, D: serde::Deserializer<'de>>(
-        &self,
-        deserializer: D,
-    ) -> Result<Box<dyn Event>, D::Error>;
+pub fn register_event(type_name: &'static str, deserializer: EventDeserializer) {
+    let mut deserializers = EVENT_REGISTRY
+        .lock()
+        .expect("Failed to lock the event registry mutex");
+    deserializers.insert(type_name, deserializer);
 }
 
 #[derive(serde::Deserialize)]
-struct TaggedEvent {
+struct EventWrapper {
     #[serde(rename = "type")]
     type_name: String,
+    data: serde_json::Value,
 }
 
-struct EventVisitor<'a, 'de: 'a>(&'a EventRegistry, PhantomData<&'de ()>);
+pub fn deserialize_event(json: &str) -> Option<Box<dyn Event>> {
+    let outer: serde_json::Value = serde_json::from_str(json).ok()?;
+    let event_obj = outer.get("Event")?;
+    let wrapper: EventWrapper = serde_json::from_value(event_obj.clone()).ok()?;
+    let data_json = serde_json::to_string(&wrapper.data).ok()?;
 
-impl<'a, 'de> Visitor<'de> for EventVisitor<'a, 'de> {
-    type Value = Box<dyn Event>;
+    let registry = EVENT_REGISTRY
+        .lock()
+        .expect("Failed to lock the event registry mutex");
+    registry
+        .get(wrapper.type_name.as_str())
+        .map(|deserializer| deserializer(&data_json))
+}
 
-    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(formatter, "a type tagged event")
-    }
-
-    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-    where
-        A: MapAccess<'de>,
-    {
-        let mut type_name = None;
-        let mut wrapper = None;
-        let mut event = None;
-        while let Some(key) = map.next_key::<&str>()? {
-            println!("Key: {key}");
-            match key {
-                "Event" => wrapper = Some(map.next_value_seed(EventSeed(self.0, self.1))),
-                "type" => type_name = Some(map.next_value::<String>()?),
-                "data" => todo!(),//event = Some(map.next_value_seed(seed)),
-                _ => {
-                    eprintln!("Unexpected key: {key}");
-                    map.next_value::<serde::de::IgnoredAny>();
-                }
-            }
+#[macro_export]
+macro_rules! register_event_type {
+    ($event_type:ty) => {{
+        fn deserialize(json: &str) -> Box<dyn Event> {
+            let event: $event_type =
+                serde_json::from_str(json).expect("Failed to deserialize event");
+            Box::new(event)
         }
-
-        todo!()
-    }
-}
-
-struct EventSeed<'a, 'de: 'a>(&'a EventRegistry, PhantomData<&'de ()>);
-
-impl<'a, 'de> DeserializeSeed<'de> for EventSeed<'a, 'de> {
-    type Value = Box<dyn Event>;
-
-    fn deserialize<D: serde::Deserializer<'de>>(
-        self,
-        deserializer: D,
-    ) -> Result<Self::Value, D::Error> {
-        deserializer.deserialize_map(EventVisitor(self.0, self.1))
-    }
-}
-
-impl EventRegistryTrait for EventRegistry {
-    fn register_event<E: Event + Default + serde::Deserialize<'static> + 'static>(&mut self) {
-        let type_name = E::type_name(&E::default());
-        let de_fn: DeserializeFn = Box::new(|de: &mut dyn erased_serde::Deserializer| {
-            //let event = E::deserialize(<dyn erased_serde::Deserializer>::erase(de))?;
-            let event: E = erased_serde::deserialize(de)?;
-            Ok(Box::new(event) as Box<dyn Event>)
-        });
-        self.deserializers.insert(type_name, de_fn);
-    }
-
-    fn get_deserializer(&self, key: &str) -> Option<&DeserializeFn> {
-        self.deserializers.get(key)
-    }
-
-    fn deserialize<'de, D: serde::Deserializer<'de>>(
-        &self,
-        deserializer: D,
-    ) -> Result<Box<dyn Event>, D::Error> {
-        deserializer.deserialize_map(EventVisitor(self, PhantomData))
-    }
-
-    /*fn deserialize(
-        &self,
-        data: &[u8],
-        deserializer_factory: &dyn Fn(
-            &[u8],
-        ) -> Result<
-            Box<dyn erased_serde::Deserializer<'static>>,
-            Box<dyn std::error::Error>,
-        >,
-    ) -> Result<Box<dyn Event>, Box<dyn std::error::Error>> {
-        let mut deserializer = deserializer_factory(data)?;
-        let tag = TaggedEvent::deserialize(&mut *deserializer)?;
-
-        let deserialize_fn = self
-            .deserializers
-            .get(&tag.type_name.as_str())
-            .ok_or_else(|| format!("Unknown event type: {}", tag.type_name))?;
-
-        let mut deserializer = deserializer_factory(data)?;
-        deserialize_fn(&mut *deserializer)
-    }*/
+        $crate::event_registry::register_event(
+            <$event_type as $crate::EventMarker>::_type_name(),
+            deserialize,
+        );
+    }};
 }

@@ -6,8 +6,6 @@ mod markers;
 
 pub use command::Command;
 pub use event::Event;
-#[cfg(any(feature = "json", feature = "binary"))]
-pub use event_registry::EventRegistry;
 pub use markers::EventMarker;
 
 #[cfg(test)]
@@ -301,7 +299,7 @@ mod tests {
     #[cfg(feature = "json")]
     #[test]
     fn command_json() {
-        use crate::event_registry::{EventRegistry, EventRegistryTrait};
+        use crate::{event_registry::deserialize_event, register_event_type};
 
         let cmd = TestEventPayload {
             value: TEST_VAL,
@@ -331,8 +329,6 @@ mod tests {
         let a_json = serde_json::to_string(&TestEventA.to_cmd()).unwrap();
         let b_json = serde_json::to_string(&TestEventB.to_cmd()).unwrap();
 
-        println!("{:?}", cmd_json);
-
         assert_eq!(cmd_json, serde_json::to_string(&cmd).unwrap());
         assert_eq!(cmd_json, same_json);
         assert_ne!(cmd_json, val_json);
@@ -340,36 +336,31 @@ mod tests {
         assert_ne!(cmd_json, a_json);
         assert_ne!(a_json, b_json);
 
-        //TODO: DESERIALIZE THE ABOVE BACK AND CONFIRM THEY MATCH ABOVE COMMANDS
-        let mut event_reg = EventRegistry::default();
-        event_reg.register_event::<TestEventPayload>();
-        event_reg.register_event::<TestEventA>();
-        event_reg.register_event::<TestEventB>();
+        register_event_type!(TestEventPayload);
+        register_event_type!(TestEventA);
+        register_event_type!(TestEventB);
 
-        //TODO: I think I can do the below in one line as I shouldn't need to take ownership and could use &cmd_json with from_str
-        let new_command = {
-            let owned_json = cmd_json.as_bytes().to_vec();
-            let mut deserializer = serde_json::Deserializer::from_slice(&owned_json);
-            event_reg.deserialize(&mut deserializer).unwrap()
+        let new_cmd = deserialize_event(&cmd_json).unwrap();
+        let new_cmd_second = deserialize_event(&cmd_json).unwrap();
+        let new_cmd_same = deserialize_event(&same_json).unwrap();
+        let new_cmd_val = deserialize_event(&val_json).unwrap();
+        let new_cmd_str = deserialize_event(&str_json).unwrap();
+        let new_cmd_a = deserialize_event(&a_json).unwrap();
+        let new_cmd_b = deserialize_event(&b_json).unwrap();
 
-            /*event_reg
-            .deserialize(&owned_json, &|data| {
-                let static_data: &'static mut [u8] = Box::leak(Box::from(data));
-                let mut de = serde_json::Deserializer::from_slice(static_data);
-                let erased = //: &'static mut dyn erased_serde::Deserializer =
-                    &mut <dyn erased_serde::Deserializer>::erase(&mut de);
-                /*let static_ref: &'static mut dyn erased_serde::Deserializer =
-                    unsafe { std::mem::transmute(erased) };
-                //NEED TO LEAK WHATEVER (ERASED?), THEN CALL BOX::FROM_RAW ON THE RETURNED TYPE (AFTER USED? IN deserialize FUNCTION?) AND DROP THAT BOX
-                Ok(Box::new(static_ref))*/
-                Ok(Box::new(erased))
-
-                /*let erased = Box::new(<dyn erased_serde::Deserializer>::erase(&mut de));
-                let leaked_ptr: &'static mut dyn erased_serde::Deserializer = Box::leak(erased);
-                Ok(leaked_ptr)*/
-            })
-            .unwrap()*/
-        };
+        //Recast to concrete types to verify equality
+        let new_cmd = new_cmd.as_any().downcast_ref::<TestEventPayload>().unwrap();
+        let new_cmd_second = new_cmd_second.as_any().downcast_ref::<TestEventPayload>().unwrap();
+        let new_cmd_same = new_cmd_same.as_any().downcast_ref::<TestEventPayload>().unwrap();
+        let new_cmd_val = new_cmd_val.as_any().downcast_ref::<TestEventPayload>().unwrap();
+        let new_cmd_str = new_cmd_str.as_any().downcast_ref::<TestEventPayload>().unwrap();
+        
+        assert_eq!(new_cmd, new_cmd_second);
+        assert_eq!(new_cmd, new_cmd_same);
+        assert_ne!(new_cmd, new_cmd_val);
+        assert_ne!(new_cmd, new_cmd_str);
+        assert!(new_cmd_a.as_any().downcast_ref::<TestEventA>().is_some());
+        assert!(new_cmd_b.as_any().downcast_ref::<TestEventB>().is_some());
     }
 
     #[cfg(feature = "binary")]
