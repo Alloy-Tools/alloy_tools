@@ -66,6 +66,11 @@ mod sealed {
 }
 // ----------------------------------------------------------
 
+pub fn downcast_event_box<T: Any>(b: Box<dyn Event>) -> Result<Box<T>, Box<dyn Any>> {
+    let b = b as Box<dyn Any>;
+    b.downcast::<T>()
+}
+
 pub trait Event:
     Send + Sync + Debug + Any + sealed::JsonFeature + sealed::BinaryFeature + 'static
 {
