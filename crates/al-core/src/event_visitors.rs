@@ -104,9 +104,9 @@ impl<'de, 'a> DeserializeSeed<'de> for EventSeed<'a> {
     {
         let deser = self
             .registry
-            .get_deserializer(self.format, self.type_name)
+            .get_deserializer(self.format, self.type_name).map_err(|e| serde::de::Error::custom(format!("Registry error: {}", e)))?
             .ok_or_else(|| {
-                serde::de::Error::custom(format!("Unknown Event type: {}", self.type_name))
+                serde::de::Error::custom(format!("Error getting Event type: {}", self.type_name))
             })?;
         let mut erased = <dyn erased_serde::Deserializer>::erase(deserializer);
         deser(&mut erased).map_err(|e| serde::de::Error::custom(e.to_string()))

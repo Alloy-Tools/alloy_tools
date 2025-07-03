@@ -30,7 +30,7 @@ impl EventRegistry {
     >(
         &self,
         format: &'static str,
-    ) {
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let type_name = E::_type_name();
         let deserializer: EventDeserializer =
             Arc::new(move |de: &mut dyn erased_serde::Deserializer<'_>| {
@@ -38,19 +38,24 @@ impl EventRegistry {
                 Ok(Box::new(event))
             });
 
-        let mut deserializers = self
-            .deserializers
+        self.deserializers
             .lock()
-            .expect("Failed to lock the event registry mutex");
-        deserializers.insert((format, type_name), deserializer);
+            .map_err(|e| format!("Event registry mutex poisoned: {e}"))?
+            .insert((format, type_name), deserializer);
+        Ok(())
     }
 
-    pub fn get_deserializer(&self, format: &str, type_name: &str) -> Option<EventDeserializer> {
-        let deserializers = self
+    pub fn get_deserializer(
+        &self,
+        format: &str,
+        type_name: &str,
+    ) -> Result<Option<EventDeserializer>, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(self
             .deserializers
             .lock()
-            .expect("Failed to lock the event registry mutex");
-        deserializers.get(&(format, type_name)).cloned()
+            .map_err(|e| format!("Event registry mutex poisoned: {e}"))?
+            .get(&(format, type_name))
+            .cloned())
     }
 
     pub fn deserialize<'de, D: serde::Deserializer<'de>>(
@@ -68,6 +73,8 @@ impl EventRegistry {
 #[macro_export]
 macro_rules! register_event_type {
     ($registry:expr, $event_type:ty, $format:expr) => {{
-        $registry.register_event::<$event_type>($format);
+        if let Err(e) = $registry.register_event::<$event_type>($format){
+            panic!("Failed to register {} format for event type {}: {}", stringify!($format), stringify!($event_type), e);
+        }
     }};
 }

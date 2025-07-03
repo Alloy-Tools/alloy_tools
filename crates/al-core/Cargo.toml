@@ -13,6 +13,6 @@ serde_json = { version = "1.0.14", optional = true }
 #bincode = { version = "2.0.1", optional = true }
 
 [features]
-default = ["json", "binary"]
-json = ["dep:serde", "dep:erased-serde", "dep:serde_json"]
-binary = ["dep:serde", "dep:erased-serde"]                 #, "dep:bincode"]
+default = ["serde", "test-utils"]
+serde = ["dep:serde", "dep:erased-serde"]
+test-utils = ["serde", "dep:serde_json"]#, "dep:bincode"]

@@ -1,10 +1,10 @@
 use crate::event::Event;
 use std::hash::Hash;
 
-#[cfg_attr(feature = "json", derive(serde::Serialize, serde::Deserialize))]
-//#[cfg_attr(feature = "binary", derive(bincode::Encode, bincode::Decode))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Default, PartialEq, Hash, std::fmt::Debug)]
 pub enum Command {
+    #[serde(skip_deserializing)] // Skip deserialization as the `EventRegistry` handles it
     Event(Box<dyn Event>),
     Restart,
     Stop,
@@ -30,6 +30,7 @@ impl Hash for Box<dyn Event> {
     }
 }
 
+#[cfg(feature = "serde")]
 #[derive(serde::Serialize)]
 struct SerWrap<'a> {
     #[serde(rename = "type")]
@@ -37,7 +38,7 @@ struct SerWrap<'a> {
     data: &'a dyn erased_serde::Serialize,
 }
 
-#[cfg(feature = "json")]
+#[cfg(feature = "serde")]
 impl serde::Serialize for Box<dyn Event> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -50,47 +51,6 @@ impl serde::Serialize for Box<dyn Event> {
         erased_serde::serialize(&wrapper, serializer)
     }
 }
-
-#[cfg(feature = "json")]
-impl<'a> serde::Deserialize<'a> for Box<dyn Event> {
-    fn deserialize<D>(_deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'a>,
-    {
-        //TODO: Event registry system using the `Event::type_name` as the key with (erased dyn) deserializers as the values
-        /*Event::_deserialize_event(&self, type_name, deserializer)
-        self._deserialize_event(deserializer)*/
-        todo!()
-    }
-}
-
-/*#[cfg(feature = "binary")]
-impl bincode::Encode for Box<dyn Event> {
-    fn encode<E: bincode::enc::Encoder>(
-        &self,
-        encoder: &mut E,
-    ) -> Result<(), bincode::error::EncodeError> {
-        todo!()
-    }
-}
-
-#[cfg(feature = "binary")]
-impl<Context> bincode::Decode<Context> for Box<dyn Event> {
-    fn decode<D: bincode::de::Decoder<Context = Context>>(
-        decoder: &mut D,
-    ) -> Result<Self, bincode::error::DecodeError> {
-        todo!()
-    }
-}
-
-#[cfg(feature = "binary")]
-impl<'de, Context> bincode::BorrowDecode<'de, Context> for Box<dyn Event> {
-    fn borrow_decode<D: bincode::de::BorrowDecoder<'de, Context = Context>>(
-        decoder: &mut D,
-    ) -> Result<Self, bincode::error::DecodeError> {
-        todo!()
-    }
-}*/
 
 impl Command {
     pub fn is_event(&self) -> bool {

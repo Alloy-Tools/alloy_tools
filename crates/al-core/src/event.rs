@@ -6,7 +6,6 @@ use std::{
 };
 
 /// Used to wrap any passed hashers to support `Event::_hash_event()`
-// ----------------------------------------------------------
 struct EventHasher<'a>(&'a mut dyn Hasher);
 
 impl<'a> Hasher for EventHasher<'a> {
@@ -18,53 +17,22 @@ impl<'a> Hasher for EventHasher<'a> {
         self.0.write(bytes)
     }
 }
-// ----------------------------------------------------------
 
-/// Used to mark other code with required traits as valid for `Event` support
-// ----------------------------------------------------------
+/// Used to mark other code with required traits as valid for serde support
 mod sealed {
     use crate::EventMarker;
 
-    #[cfg(not(feature = "json"))]
-    pub trait JsonFeature {}
+    #[cfg(not(feature = "serde"))]
+    pub trait SerdeFeature {}
 
-    #[cfg(feature = "json")]
-    pub trait JsonFeature: erased_serde::Serialize {
-        fn _to_sealed_json(&self) -> Result<String, serde_json::Error>;
-        fn _from_sealed_json(json: &'static str) -> Result<Self, erased_serde::Error>
-        where
-            Self: Sized;
-    }
+    #[cfg(feature = "serde")]
+    pub trait SerdeFeature: erased_serde::Serialize {}
 
-    #[cfg(feature = "json")]
-    impl<T: EventMarker + serde::Serialize /*+ serde::Deserialize<'static>*/> JsonFeature for T {
-        fn _to_sealed_json(&self) -> Result<String, serde_json::Error> {
-            serde_json::to_string::<T>(self)
-        }
-
-        fn _from_sealed_json(_json: &'static str) -> Result<T, erased_serde::Error> {
-            todo!()
-            /*let deserializer = &mut serde_json::Deserializer::from_str(json);
-            let mut erased_deserializer = <dyn erased_serde::Deserializer>::erase(deserializer);
-            erased_serde::deserialize(&mut erased_deserializer)*/
-        }
-    }
-    #[cfg(not(feature = "json"))]
-    impl<T: EventMarker> JsonFeature for T {}
-
-    //#[cfg(not(feature = "binary"))]
-    pub trait BinaryFeature {}
-    //#[cfg(not(feature = "binary"))]
-    impl<T: EventMarker> BinaryFeature for T {}
-    /*#[cfg(feature = "binary")]
-    pub trait BinaryFeature: erased_serde::Serialize {}
-    #[cfg(feature = "binary")]
-    impl<T: EventMarker + erased_serde::Serialize + bincode::Encode + bincode::Decode<T>>
-        BinaryFeature for T
-    {
-    }*/
+    #[cfg(feature = "serde")]
+    impl<T: EventMarker + serde::Serialize> SerdeFeature for T {}
+    #[cfg(not(feature = "serde"))]
+    impl<T: EventMarker> SerdeFeature for T {}
 }
-// ----------------------------------------------------------
 
 pub fn downcast_event_box<T: Any>(b: Box<dyn Event>) -> Result<Box<T>, Box<dyn Any>> {
     let b = b as Box<dyn Any>;
@@ -72,7 +40,7 @@ pub fn downcast_event_box<T: Any>(b: Box<dyn Event>) -> Result<Box<T>, Box<dyn A
 }
 
 pub trait Event:
-    Send + Sync + Debug + Any + sealed::JsonFeature + sealed::BinaryFeature + 'static
+    Send + Sync + Debug + Any + sealed::SerdeFeature + 'static
 {
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
@@ -80,12 +48,6 @@ pub trait Event:
     fn _clone_event(&self) -> Box<dyn Event>;
     fn _partial_equals_event(&self, other: &dyn Any) -> bool;
     fn _hash_event(&self, state: &mut dyn Hasher);
-    #[cfg(feature = "json")]
-    fn _to_json(&self) -> Result<String, serde_json::Error>;
-    #[cfg(feature = "json")]
-    fn _from_json(json: &'static str) -> Result<Self, erased_serde::Error>
-    where
-        Self: Sized;
 
     fn to_cmd(self) -> Command
     where
@@ -107,8 +69,7 @@ impl<
             + Clone
             + Default
             + PartialEq
-            + sealed::JsonFeature
-            + sealed::BinaryFeature,
+            + sealed::SerdeFeature,
     > Event for T
 {
     fn as_any(&self) -> &dyn Any {
@@ -139,15 +100,5 @@ impl<
         let mut wrapper = EventHasher(state);
         self.type_name().hash(&mut wrapper);
         self.hash(&mut wrapper);
-    }
-
-    #[cfg(feature = "json")]
-    fn _to_json(&self) -> Result<String, serde_json::Error> {
-        self._to_sealed_json()
-    }
-
-    #[cfg(feature = "json")]
-    fn _from_json(json: &'static str) -> Result<T, erased_serde::Error> {
-        T::_from_sealed_json(json)
     }
 }
