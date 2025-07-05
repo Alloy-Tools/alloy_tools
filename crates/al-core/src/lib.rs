@@ -5,9 +5,13 @@ mod event_registry;
 #[cfg(feature = "serde")]
 mod event_visitors;
 mod markers;
+#[cfg(feature = "serde")]
+mod event_deserializer;
 
 pub use command::Command;
 pub use event::{downcast_event_box, Event};
+#[cfg(feature = "serde")]
+pub use event_deserializer::EventDeserializer;
 #[cfg(feature = "serde")]
 pub use event_registry::EventRegistry;
 pub use markers::EventMarker;
@@ -448,7 +452,7 @@ mod tests {
 
     #[cfg(feature = "test-utils")]
     #[test]
-    fn event_bincode() {
+    fn event_bitcode() {
         let event = TestEventPayload {
             value: TEST_VAL,
             message: TEST_MSG.to_string(),
@@ -466,25 +470,25 @@ mod tests {
             message: TEST_MSG[1..].to_string(),
         };
 
-        let event_binary = bincode::serialize(&event).unwrap();
-        let same_binary = bincode::serialize(&event_same).unwrap();
-        let val_binary = bincode::serialize(&event_diff_val).unwrap();
-        let str_binary = bincode::serialize(&event_diff_str).unwrap();
-        let a_binary = bincode::serialize(&TestEventA {}).unwrap();
+        let event_binary = bitcode::serialize(&event).unwrap();
+        let same_binary = bitcode::serialize(&event_same).unwrap();
+        let val_binary = bitcode::serialize(&event_diff_val).unwrap();
+        let str_binary = bitcode::serialize(&event_diff_str).unwrap();
+        let a_binary = bitcode::serialize(&TestEventA {}).unwrap();
 
-        assert_eq!(event_binary, bincode::serialize(&event).unwrap());
+        assert_eq!(event_binary, bitcode::serialize(&event).unwrap());
         assert_eq!(event_binary, same_binary);
         assert_ne!(event_binary, val_binary);
         assert_ne!(event_binary, str_binary);
         assert_ne!(event_binary, a_binary);
         //TODO: same as event_serde_json
-        //assert_ne!(encode_to_vec(&TestEventA{}, standard()).unwrap(), encode_to_vec(&TestEventB{}, standard()).unwrap());
+        //assert_ne!(bitcode::serialize(&TestEventA {}).unwrap(), bitcode::serialize(&TestEventB {}).unwrap());
 
-        let new_event: TestEventPayload = bincode::deserialize(&event_binary).unwrap();
-        let new_same: TestEventPayload = bincode::deserialize(&same_binary).unwrap();
-        let new_val: TestEventPayload = bincode::deserialize(&val_binary).unwrap();
-        let new_str: TestEventPayload = bincode::deserialize(&str_binary).unwrap();
-        let new_a: TestEventA = bincode::deserialize(&a_binary).unwrap();
+        let new_event: TestEventPayload = bitcode::deserialize(&event_binary).unwrap();
+        let new_same = bitcode::deserialize::<TestEventPayload>(&same_binary).unwrap();
+        let new_val: TestEventPayload = bitcode::deserialize(&val_binary).unwrap();
+        let new_str: TestEventPayload = bitcode::deserialize(&str_binary).unwrap();
+        let new_a: TestEventA = bitcode::deserialize(&a_binary).unwrap();
 
         assert_eq!(event, new_event);
         assert_eq!(event_same, new_same);
@@ -495,9 +499,7 @@ mod tests {
 
     #[cfg(feature = "test-utils")]
     #[test]
-    fn command_bincode() {
-        use bincode::Options;
-
+    fn command_bitcode() {
         use crate::{downcast_event_box, register_event_type, EventRegistry};
 
         let cmd = TestEventPayload {
@@ -521,12 +523,12 @@ mod tests {
         }
         .to_cmd();
 
-        let cmd_binary = bincode::serialize(&cmd).unwrap();
-        let same_binary = bincode::serialize(&cmd_same).unwrap();
-        let val_binary = bincode::serialize(&cmd_diff_val).unwrap();
-        let str_binary = bincode::serialize(&cmd_diff_str).unwrap();
-        let a_binary = bincode::serialize(&TestEventA.to_cmd()).unwrap();
-        let b_binary = bincode::serialize(&TestEventB.to_cmd()).unwrap();
+        let cmd_binary = bitcode::serialize(&cmd).unwrap();
+        let same_binary = bitcode::serialize(&cmd_same).unwrap();
+        let val_binary = bitcode::serialize(&cmd_diff_val).unwrap();
+        let str_binary = bitcode::serialize(&cmd_diff_str).unwrap();
+        let a_binary = bitcode::serialize(&TestEventA.to_cmd()).unwrap();
+        let b_binary = bitcode::serialize(&TestEventB.to_cmd()).unwrap();
 
         println!("cmd_binary: {:?}", cmd_binary);
         println!("same_binary: {:?}", same_binary);
@@ -535,7 +537,7 @@ mod tests {
         println!("a_binary: {:?}", a_binary);
         println!("b_binary: {:?}", b_binary);
 
-        assert_eq!(cmd_binary, bincode::serialize(&cmd).unwrap());
+        assert_eq!(cmd_binary, bitcode::serialize(&cmd).unwrap());
         assert_eq!(cmd_binary, same_binary);
         assert_ne!(cmd_binary, val_binary);
         assert_ne!(cmd_binary, str_binary);
@@ -544,9 +546,6 @@ mod tests {
 
         let event_registry = EventRegistry::new();
         let binary_format = "binary";
-        let options = bincode::config::DefaultOptions::new()
-            .with_fixint_encoding()
-            .allow_trailing_bytes();
 
         register_event_type!(event_registry, TestEventPayload, binary_format);
         register_event_type!(event_registry, TestEventA, binary_format);
@@ -554,7 +553,7 @@ mod tests {
 
         let new_cmd = event_registry.deserialize(
             binary_format,
-            &mut bincode::Deserializer::from_slice(&cmd_binary, options),
+            &mut bitcode::Deserializer//bincode::Deserializer::from_slice(&cmd_binary, options),
         );
         //.unwrap();
         println!("new_cmd: {:?}", new_cmd);
@@ -632,6 +631,6 @@ mod tests {
                 .clone()
                 .to_cmd(),
             TestEventB.to_cmd()
-        );
+        );*/
     }
 }
