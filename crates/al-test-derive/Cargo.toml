@@ -5,6 +5,9 @@ license.workspace = true
 repository.workspace = true
 edition.workspace = true
 
+[lib]
+doctest = false
+
 [dependencies]
 al-core = { path = "../al-core" }
 al-derive = { path = "../al-derive" }

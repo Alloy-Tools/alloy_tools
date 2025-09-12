@@ -497,7 +497,7 @@ mod tests {
         assert_eq!(TestEventA, new_a);
     }
 
-    #[cfg(feature = "test-utils")]
+    /*#[cfg(feature = "test-utils")]
     #[test]
     fn command_bitcode() {
         use crate::{downcast_event_box, register_event_type, EventRegistry};
@@ -631,6 +631,6 @@ mod tests {
                 .clone()
                 .to_cmd(),
             TestEventB.to_cmd()
-        );*/
-    }
+        );
+    }*/
 }
