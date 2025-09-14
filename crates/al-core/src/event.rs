@@ -5,19 +5,6 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-/// Used to wrap any passed hashers to support `Event::_hash_event()`
-struct EventHasher<'a>(&'a mut dyn Hasher);
-
-impl<'a> Hasher for EventHasher<'a> {
-    fn finish(&self) -> u64 {
-        self.0.finish()
-    }
-
-    fn write(&mut self, bytes: &[u8]) {
-        self.0.write(bytes)
-    }
-}
-
 /// Used to mark other code with required traits as valid for serde support
 mod sealed {
     use crate::EventMarker;
@@ -96,9 +83,8 @@ impl<
         }
     }
 
-    fn _hash_event(&self, state: &mut dyn Hasher) {
-        let mut wrapper = EventHasher(state);
-        self.type_name().hash(&mut wrapper);
-        self.hash(&mut wrapper);
+    fn _hash_event(&self, mut state: &mut dyn Hasher) {
+        self.type_name().hash(&mut state);
+        self.hash(&mut state);
     }
 }
