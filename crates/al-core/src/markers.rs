@@ -1,6 +1,20 @@
 mod sealed {
-    /// Private base `Marker` trait ensures all required traits are impl'd while users only need to impl their desired mark, the other traits offer distinct use cases
-    pub trait Marker:
+    /// Private marker traits ensure all required traits are impl'd while users only need to impl their desired mark
+    pub trait EventMarker:
+        'static
+        + Send
+        + Sync
+        + Clone
+        + Default
+        + PartialEq
+        + std::any::Any
+        + std::fmt::Debug
+        + std::hash::Hash
+    {
+    }
+
+    #[allow(unused)]
+    pub trait FormatMarker:
         'static
         + Send
         + Sync
@@ -14,13 +28,15 @@ mod sealed {
     }
 }
 
-#[allow(unused)]
-/// `AnyMarker` trait is blanked impl'd for every other marker to act as a generic for <T: AnyMarker> or similar situations
-pub trait AnyMarker: sealed::Marker {}
-impl<T: sealed::Marker> AnyMarker for T {}
-
-/// `EventMarker` trait acts as a marker for `Event` systems
-pub trait EventMarker: sealed::Marker {
+/// `EventMarker` trait acts as a marker for `Event` systems and should be derived for each event type
+/// It requires impl of `sealed::Marker` to ensure all required traits are impl'd
+/// _type_name is derived from the module_path and type name, eg. `my_crate::MyEvent`
+pub trait EventMarker: sealed::EventMarker {
     fn _type_name() -> &'static str;
 }
-impl<T: EventMarker> sealed::Marker for T {}
+impl<T: EventMarker> sealed::EventMarker for T {}
+
+pub trait FormatMarker: sealed::FormatMarker {
+    fn _type_name() -> &'static str;
+}
+impl<T: FormatMarker> sealed::FormatMarker for T {}

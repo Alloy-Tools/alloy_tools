@@ -1,98 +1,38 @@
 use serde::de::{DeserializeSeed, Visitor};
-use crate::EventRegistry;
 
-pub struct EventWrapper<'a> {
-    pub(crate) registry: &'a EventRegistry,
-    pub(crate) format: &'static str,
-}
-
-impl<'de, 'a> Visitor<'de> for EventWrapper<'a> {
-    type Value = Box<dyn crate::Event>;
-
-    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(formatter, "an event tagged with 'type' followed by 'data'")
-    }
-
-    fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
-    where
-        M: serde::de::MapAccess<'de>,
-    {
-        if let Some("Event") = map.next_key::<&str>()? {
-            map.next_value_seed(WrapperSeed {
-                registry: self.registry,
-                format: self.format,
-            })
-        } else {
-            Err(serde::de::Error::custom(
-                "Expected 'Event' key at the start of the map",
-            ))
-        }
-    }
-}
-
-struct WrapperSeed<'a> {
-    registry: &'a EventRegistry,
-    format: &'static str,
-}
-
-impl<'a, 'de> DeserializeSeed<'de> for WrapperSeed<'a> {
-    type Value = Box<dyn crate::Event>;
-
-    fn deserialize<D: serde::Deserializer<'de>>(
-        self,
-        deserializer: D,
-    ) -> Result<Self::Value, D::Error> {
-        deserializer.deserialize_map(EventVisitor {
-            registry: self.registry,
-            format: self.format,
-        })
-    }
-}
-
-struct EventVisitor<'a> {
-    registry: &'a EventRegistry,
-    format: &'static str,
+pub(crate) struct EventVisitor<'a> {
+    pub(crate) registry: &'a crate::registry::EventRegistry,
 }
 
 impl<'de, 'a> Visitor<'de> for EventVisitor<'a> {
     type Value = Box<dyn crate::Event>;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(formatter, "an event tagged with 'type' followed by 'data'")
+        write!(
+            formatter,
+            "an event with a sequence containing the event type followed by the event data"
+        )
     }
 
-    fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
     where
-        M: serde::de::MapAccess<'de>,
+        A: serde::de::SeqAccess<'de>,
     {
-        let mut type_name: Option<String> = None;
-
-        while let Some(key) = map.next_key::<&str>()? {
-            match key {
-                "type" => type_name = Some(map.next_value()?),
-                "data" => {
-                    let type_name =
-                        type_name.ok_or_else(|| serde::de::Error::missing_field("type"))?;
-                    return map.next_value_seed(EventSeed {
-                        registry: self.registry,
-                        format: self.format,
-                        type_name: &type_name,
-                    });
-                }
-                _ => {
-                    let _: serde::de::IgnoredAny = map.next_value()?;
-                }
-            }
-        }
-
-        Err(serde::de::Error::missing_field("data"))
+        let type_name = seq
+            .next_element_seed(StringSeed)?
+            .ok_or_else(|| serde::de::Error::custom("Expected event type name as first element"))?;
+        Ok(seq
+            .next_element_seed(EventSeed {
+                type_name: &type_name,
+                registry: self.registry,
+            })?
+            .ok_or_else(|| serde::de::Error::custom("Expected event data as second element"))?)
     }
 }
 
 struct EventSeed<'a> {
-    registry: &'a EventRegistry,
-    format: &'a str,
     type_name: &'a str,
+    registry: &'a crate::registry::EventRegistry,
 }
 
 impl<'de, 'a> DeserializeSeed<'de> for EventSeed<'a> {
@@ -104,11 +44,51 @@ impl<'de, 'a> DeserializeSeed<'de> for EventSeed<'a> {
     {
         let deser = self
             .registry
-            .get_deserializer(self.format, self.type_name).map_err(|e| serde::de::Error::custom(format!("Registry error: {}", e)))?
+            .get_deserializer(self.type_name)
+            .map_err(|e| serde::de::Error::custom(format!("Registry error: {}", e)))?
             .ok_or_else(|| {
-                serde::de::Error::custom(format!("Error getting Event type: {}", self.type_name))
+                serde::de::Error::custom(format!(
+                    "Error getting deserializer for Event type: {}",
+                    self.type_name
+                ))
             })?;
         let mut erased = <dyn erased_serde::Deserializer>::erase(deserializer);
         deser(&mut erased).map_err(|e| serde::de::Error::custom(e.to_string()))
+    }
+}
+
+//TODO: remove if bitcode doesn't require it. can use .next_element::<String>() directly
+struct StringSeed;
+
+impl<'de> DeserializeSeed<'de> for StringSeed {
+    type Value = String;
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_string(self)
+    }
+}
+
+impl<'de> Visitor<'de> for StringSeed {
+    type Value = String;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("a string")
+    }
+
+    fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(v)
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(v.to_string())
     }
 }

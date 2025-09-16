@@ -1,20 +1,28 @@
 mod command;
 mod event;
 #[cfg(feature = "serde")]
-mod event_registry;
-#[cfg(feature = "serde")]
 mod event_visitors;
 mod markers;
 #[cfg(feature = "serde")]
-mod event_deserializer;
+mod registry;
+#[cfg(feature = "serde")]
+mod serde_format;
 
 pub use command::Command;
+#[cfg(feature = "serde")]
+pub use event::EVENT_REGISTRY;
 pub use event::{downcast_event_box, Event};
-#[cfg(feature = "serde")]
-pub use event_deserializer::EventDeserializer;
-#[cfg(feature = "serde")]
-pub use event_registry::EventRegistry;
 pub use markers::EventMarker;
+#[cfg(feature = "serde")]
+pub use registry::Registry;
+#[cfg(feature = "serde")]
+pub use registry::SharedRegistry;
+#[cfg(all(feature = "serde", feature = "binary"))]
+pub use serde_format::BinarySerde;
+#[cfg(all(feature = "serde", feature = "json"))]
+pub use serde_format::JsonSerde;
+#[cfg(feature = "serde")]
+pub use serde_format::SerdeFormat;
 
 #[cfg(test)]
 mod tests {
@@ -57,7 +65,7 @@ mod tests {
     }
 
     #[test]
-    fn check_types() {
+    fn command_is_event() {
         let event_cmd = TestEventA.to_cmd();
         let restart_cmd = Command::Restart;
         let stop_cmd = Command::Stop;
@@ -100,6 +108,7 @@ mod tests {
             crate_b::DuplicateEvent.type_name()
         );
     }
+
     #[test]
     fn event_hash() {
         let event = TestEventPayload {
@@ -195,6 +204,17 @@ mod tests {
     }
 
     #[test]
+    fn event_clone() {
+        let original = TestEventPayload {
+            value: TEST_VAL,
+            message: TEST_MSG.to_string(),
+        };
+        let cloned = original.clone();
+
+        assert_eq!(original, cloned);
+    }
+
+    #[test]
     fn command_clone() {
         let original = TestEventPayload {
             value: TEST_VAL,
@@ -273,9 +293,11 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "test-utils")]
+    #[cfg(all(feature = "serde", feature = "json"))]
     #[test]
-    fn event_serde_json() {
+    fn event_json() {
+        use crate::{JsonSerde, SerdeFormat};
+
         let event = TestEventPayload {
             value: TEST_VAL,
             message: TEST_MSG.to_string(),
@@ -293,13 +315,13 @@ mod tests {
             message: TEST_MSG[1..].to_string(),
         };
 
-        let event_json = serde_json::to_string(&event).unwrap();
-        let same_json = serde_json::to_string(&event_same).unwrap();
-        let val_json = serde_json::to_string(&event_diff_val).unwrap();
-        let str_json = serde_json::to_string(&event_diff_str).unwrap();
-        let a_json = serde_json::to_string(&TestEventA {}).unwrap();
+        let event_json = JsonSerde.serialize_event(&event).unwrap();
+        let same_json = JsonSerde.serialize_event(&event_same).unwrap();
+        let val_json = JsonSerde.serialize_event(&event_diff_val).unwrap();
+        let str_json = JsonSerde.serialize_event(&event_diff_str).unwrap();
+        let a_json = JsonSerde.serialize_event(&TestEventA {}).unwrap();
 
-        assert_eq!(event_json, serde_json::to_string(&event).unwrap());
+        assert_eq!(event_json, JsonSerde.serialize_event(&event).unwrap());
         assert_eq!(event_json, same_json);
         assert_ne!(event_json, val_json);
         assert_ne!(event_json, str_json);
@@ -307,11 +329,11 @@ mod tests {
         //TODO: look into hooking any impl'd `EventMarker` serilize to serialize a wrapper with type_name, that way event type names can be inserted on event serialization layer rather than only command
         //assert_ne!(serde_json::to_string(&TestEventA{}).unwrap(), serde_json::to_string(&TestEventB{}).unwrap());
 
-        let new_event: TestEventPayload = serde_json::from_str(&event_json).unwrap();
-        let new_same: TestEventPayload = serde_json::from_str(&same_json).unwrap();
-        let new_val: TestEventPayload = serde_json::from_str(&val_json).unwrap();
-        let new_str: TestEventPayload = serde_json::from_str(&str_json).unwrap();
-        let new_a: TestEventA = serde_json::from_str(&a_json).unwrap();
+        let new_event: TestEventPayload = JsonSerde.deserialize_event(&event_json).unwrap();
+        let new_same: TestEventPayload = JsonSerde.deserialize_event(&same_json).unwrap();
+        let new_val: TestEventPayload = JsonSerde.deserialize_event(&val_json).unwrap();
+        let new_str: TestEventPayload = JsonSerde.deserialize_event(&str_json).unwrap();
+        let new_a: TestEventA = JsonSerde.deserialize_event(&a_json).unwrap();
 
         assert_eq!(event, new_event);
         assert_eq!(event_same, new_same);
@@ -320,10 +342,10 @@ mod tests {
         assert_eq!(TestEventA, new_a);
     }
 
-    #[cfg(feature = "test-utils")]
+    #[cfg(all(feature = "serde", feature = "json"))]
     #[test]
-    fn command_serde_json() {
-        use crate::{downcast_event_box, register_event_type, EventRegistry};
+    fn command_json() {
+        use crate::{register_event, JsonSerde, SerdeFormat, EVENT_REGISTRY};
 
         let cmd = TestEventPayload {
             value: TEST_VAL,
@@ -346,113 +368,60 @@ mod tests {
         }
         .to_cmd();
 
-        let cmd_json = serde_json::to_string(&cmd).unwrap();
-        let same_json = serde_json::to_string(&cmd_same).unwrap();
-        let val_json = serde_json::to_string(&cmd_diff_val).unwrap();
-        let str_json = serde_json::to_string(&cmd_diff_str).unwrap();
-        let a_json = serde_json::to_string(&TestEventA.to_cmd()).unwrap();
-        let b_json = serde_json::to_string(&TestEventB.to_cmd()).unwrap();
+        let cmd_json = JsonSerde.serialize_command(&cmd).unwrap();
+        let same_json = JsonSerde.serialize_command(&cmd_same).unwrap();
+        let val_json = JsonSerde.serialize_command(&cmd_diff_val).unwrap();
+        let str_json = JsonSerde.serialize_command(&cmd_diff_str).unwrap();
+        let a_json = JsonSerde.serialize_command(&TestEventA.to_cmd()).unwrap();
+        let b_json = JsonSerde.serialize_command(&TestEventB.to_cmd()).unwrap();
 
-        assert_eq!(cmd_json, serde_json::to_string(&cmd).unwrap());
+        assert_eq!(cmd_json, JsonSerde.serialize_command(&cmd).unwrap());
         assert_eq!(cmd_json, same_json);
         assert_ne!(cmd_json, val_json);
         assert_ne!(cmd_json, str_json);
         assert_ne!(cmd_json, a_json);
         assert_ne!(a_json, b_json);
 
-        let event_registry = EventRegistry::new();
-        let json_format = "json";
+        register_event!(EVENT_REGISTRY, TestEventPayload);
+        register_event!(EVENT_REGISTRY, TestEventA);
+        register_event!(EVENT_REGISTRY, TestEventB);
 
-        register_event_type!(event_registry, TestEventPayload, json_format);
-        register_event_type!(event_registry, TestEventA, json_format);
-        register_event_type!(event_registry, TestEventB, json_format);
-
-        let new_cmd = event_registry
-            .deserialize(
-                json_format,
-                &mut serde_json::Deserializer::from_str(&cmd_json),
-            )
-            .unwrap();
-        let new_cmd_second = event_registry
-            .deserialize(
-                json_format,
-                &mut serde_json::Deserializer::from_str(&cmd_json),
-            )
-            .unwrap();
-        let new_cmd_same = event_registry
-            .deserialize(
-                json_format,
-                &mut serde_json::Deserializer::from_str(&same_json),
-            )
-            .unwrap();
-        let new_cmd_val = event_registry
-            .deserialize(
-                json_format,
-                &mut serde_json::Deserializer::from_str(&val_json),
-            )
-            .unwrap();
-        let new_cmd_str = event_registry
-            .deserialize(
-                json_format,
-                &mut serde_json::Deserializer::from_str(&str_json),
-            )
-            .unwrap();
-        let new_cmd_a = event_registry
-            .deserialize(
-                json_format,
-                &mut serde_json::Deserializer::from_str(&a_json),
-            )
-            .unwrap();
-        let new_cmd_b = event_registry
-            .deserialize(
-                json_format,
-                &mut serde_json::Deserializer::from_str(&b_json),
-            )
-            .unwrap();
-
-        let new_cmd = downcast_event_box::<TestEventPayload>(new_cmd)
-            .unwrap()
-            .to_cmd();
-        let new_cmd_second = downcast_event_box::<TestEventPayload>(new_cmd_second)
-            .unwrap()
-            .to_cmd();
-        let new_cmd_same = downcast_event_box::<TestEventPayload>(new_cmd_same)
-            .unwrap()
-            .to_cmd();
-        let new_cmd_val = downcast_event_box::<TestEventPayload>(new_cmd_val)
-            .unwrap()
-            .to_cmd();
-        let new_cmd_str = downcast_event_box::<TestEventPayload>(new_cmd_str)
-            .unwrap()
-            .to_cmd();
+        let new_cmd: Command = JsonSerde.deserialize_command(&cmd_json).unwrap();
+        let new_cmd_second: Command = JsonSerde.deserialize_command(&cmd_json).unwrap();
+        let new_cmd_same: Command = JsonSerde.deserialize_command(&same_json).unwrap();
+        let new_cmd_val: Command = JsonSerde.deserialize_command(&val_json).unwrap();
+        let new_cmd_str: Command = JsonSerde.deserialize_command(&str_json).unwrap();
+        let new_cmd_a: Command = JsonSerde.deserialize_command(&a_json).unwrap();
+        let new_cmd_b: Command = JsonSerde.deserialize_command(&b_json).unwrap();
 
         assert_eq!(new_cmd, new_cmd_second);
         assert_eq!(new_cmd, new_cmd_same);
         assert_ne!(new_cmd, new_cmd_val);
         assert_ne!(new_cmd, new_cmd_str);
-        assert_eq!(
-            new_cmd_a
-                .as_any()
-                .downcast_ref::<TestEventA>()
-                .unwrap()
-                .clone()
-                .to_cmd(),
-            TestEventA.to_cmd()
-        );
-        assert_eq!(
-            new_cmd_b
-                .as_any()
-                .downcast_ref::<TestEventB>()
-                .unwrap()
-                .clone()
-                .to_cmd(),
-            TestEventB.to_cmd()
-        );
+        assert_eq!(new_cmd_a, TestEventA.to_cmd());
+        assert_eq!(new_cmd_b, TestEventB.to_cmd());
+
+        let cmd_event = new_cmd.downcast_event::<TestEventPayload>().unwrap();
+        let cmd_event_second = new_cmd_second.downcast_event::<TestEventPayload>().unwrap();
+        let cmd_event_same = new_cmd_same.downcast_event::<TestEventPayload>().unwrap();
+        let cmd_event_val = new_cmd_val.downcast_event::<TestEventPayload>().unwrap();
+        let cmd_event_str = new_cmd_str.downcast_event::<TestEventPayload>().unwrap();
+        let cmd_event_a = new_cmd_a.downcast_event::<TestEventA>().unwrap();
+        let cmd_event_b = new_cmd_b.downcast_event::<TestEventB>().unwrap();
+
+        assert_eq!(cmd_event, cmd_event_second);
+        assert_eq!(cmd_event, cmd_event_same);
+        assert_ne!(cmd_event, cmd_event_val);
+        assert_ne!(cmd_event, cmd_event_str);
+        assert_eq!(cmd_event_a, &TestEventA);
+        assert_eq!(cmd_event_b, &TestEventB);
     }
 
-    #[cfg(feature = "test-utils")]
+    #[cfg(all(feature = "serde", feature = "binary"))]
     #[test]
-    fn event_bitcode() {
+    fn event_binary() {
+        use crate::{BinarySerde, SerdeFormat};
+
         let event = TestEventPayload {
             value: TEST_VAL,
             message: TEST_MSG.to_string(),
@@ -470,11 +439,11 @@ mod tests {
             message: TEST_MSG[1..].to_string(),
         };
 
-        let event_binary = bitcode::serialize(&event).unwrap();
-        let same_binary = bitcode::serialize(&event_same).unwrap();
-        let val_binary = bitcode::serialize(&event_diff_val).unwrap();
-        let str_binary = bitcode::serialize(&event_diff_str).unwrap();
-        let a_binary = bitcode::serialize(&TestEventA {}).unwrap();
+        let event_binary = BinarySerde.serialize_event(&event).unwrap();
+        let same_binary = BinarySerde.serialize_event(&event_same).unwrap();
+        let val_binary = BinarySerde.serialize_event(&event_diff_val).unwrap();
+        let str_binary = BinarySerde.serialize_event(&event_diff_str).unwrap();
+        let a_binary = BinarySerde.serialize_event(&TestEventA {}).unwrap();
 
         assert_eq!(event_binary, bitcode::serialize(&event).unwrap());
         assert_eq!(event_binary, same_binary);
@@ -482,13 +451,13 @@ mod tests {
         assert_ne!(event_binary, str_binary);
         assert_ne!(event_binary, a_binary);
         //TODO: same as event_serde_json
-        //assert_ne!(bitcode::serialize(&TestEventA {}).unwrap(), bitcode::serialize(&TestEventB {}).unwrap());
+        //assert_ne!(BinarySerde.serialize_event(&TestEventA {}).unwrap(), BinarySerde.serialize_event(&TestEventB {}).unwrap());
 
-        let new_event: TestEventPayload = bitcode::deserialize(&event_binary).unwrap();
-        let new_same = bitcode::deserialize::<TestEventPayload>(&same_binary).unwrap();
-        let new_val: TestEventPayload = bitcode::deserialize(&val_binary).unwrap();
-        let new_str: TestEventPayload = bitcode::deserialize(&str_binary).unwrap();
-        let new_a: TestEventA = bitcode::deserialize(&a_binary).unwrap();
+        let new_event: TestEventPayload = BinarySerde.deserialize_event(&event_binary).unwrap();
+        let new_same: TestEventPayload = BinarySerde.deserialize_event(&same_binary).unwrap();
+        let new_val: TestEventPayload = BinarySerde.deserialize_event(&val_binary).unwrap();
+        let new_str: TestEventPayload = BinarySerde.deserialize_event(&str_binary).unwrap();
+        let new_a: TestEventA = BinarySerde.deserialize_event(&a_binary).unwrap();
 
         assert_eq!(event, new_event);
         assert_eq!(event_same, new_same);
@@ -497,10 +466,10 @@ mod tests {
         assert_eq!(TestEventA, new_a);
     }
 
-    /*#[cfg(feature = "test-utils")]
+    #[cfg(all(feature = "serde", feature = "binary"))]
     #[test]
-    fn command_bitcode() {
-        use crate::{downcast_event_box, register_event_type, EventRegistry};
+    fn command_binary() {
+        use crate::{register_event, BinarySerde, SerdeFormat, EVENT_REGISTRY};
 
         let cmd = TestEventPayload {
             value: TEST_VAL,
@@ -523,114 +492,54 @@ mod tests {
         }
         .to_cmd();
 
-        let cmd_binary = bitcode::serialize(&cmd).unwrap();
-        let same_binary = bitcode::serialize(&cmd_same).unwrap();
-        let val_binary = bitcode::serialize(&cmd_diff_val).unwrap();
-        let str_binary = bitcode::serialize(&cmd_diff_str).unwrap();
-        let a_binary = bitcode::serialize(&TestEventA.to_cmd()).unwrap();
-        let b_binary = bitcode::serialize(&TestEventB.to_cmd()).unwrap();
+        let cmd_binary = BinarySerde.serialize_command(&cmd).unwrap();
+        let same_binary = BinarySerde.serialize_command(&cmd_same).unwrap();
+        let val_binary = BinarySerde.serialize_command(&cmd_diff_val).unwrap();
+        let str_binary = BinarySerde.serialize_command(&cmd_diff_str).unwrap();
+        let a_binary = BinarySerde.serialize_command(&TestEventA.to_cmd()).unwrap();
+        let b_binary = BinarySerde.serialize_command(&TestEventB.to_cmd()).unwrap();
 
-        println!("cmd_binary: {:?}", cmd_binary);
-        println!("same_binary: {:?}", same_binary);
-        println!("val_binary: {:?}", val_binary);
-        println!("str_binary: {:?}", str_binary);
-        println!("a_binary: {:?}", a_binary);
-        println!("b_binary: {:?}", b_binary);
-
-        assert_eq!(cmd_binary, bitcode::serialize(&cmd).unwrap());
+        assert_eq!(cmd_binary, BinarySerde.serialize_command(&cmd).unwrap());
         assert_eq!(cmd_binary, same_binary);
         assert_ne!(cmd_binary, val_binary);
         assert_ne!(cmd_binary, str_binary);
         assert_ne!(cmd_binary, a_binary);
         assert_ne!(a_binary, b_binary);
 
-        let event_registry = EventRegistry::new();
-        let binary_format = "binary";
+        register_event!(EVENT_REGISTRY, TestEventPayload);
+        register_event!(EVENT_REGISTRY, TestEventA);
+        register_event!(EVENT_REGISTRY, TestEventB);
 
-        register_event_type!(event_registry, TestEventPayload, binary_format);
-        register_event_type!(event_registry, TestEventA, binary_format);
-        register_event_type!(event_registry, TestEventB, binary_format);
+        println!("cmd_binary: {:?}", cmd_binary);
 
-        let new_cmd = event_registry.deserialize(
-            binary_format,
-            &mut bitcode::Deserializer//bincode::Deserializer::from_slice(&cmd_binary, options),
-        );
-        //.unwrap();
-        println!("new_cmd: {:?}", new_cmd);
-        let new_cmd_second = event_registry
-            .deserialize(
-                binary_format,
-                &mut bincode::Deserializer::from_slice(&cmd_binary, options),
-            )
-            .unwrap();
-        let new_cmd_same = event_registry
-            .deserialize(
-                binary_format,
-                &mut bincode::Deserializer::from_slice(&same_binary, options),
-            )
-            .unwrap();
-        let new_cmd_val = event_registry
-            .deserialize(
-                binary_format,
-                &mut bincode::Deserializer::from_slice(&val_binary, options),
-            )
-            .unwrap();
-        let new_cmd_str = event_registry
-            .deserialize(
-                binary_format,
-                &mut bincode::Deserializer::from_slice(&str_binary, options),
-            )
-            .unwrap();
-        let new_cmd_a = event_registry
-            .deserialize(
-                binary_format,
-                &mut bincode::Deserializer::from_slice(&a_binary, options),
-            )
-            .unwrap();
-        let new_cmd_b = event_registry
-            .deserialize(
-                binary_format,
-                &mut bincode::Deserializer::from_slice(&b_binary, options),
-            )
-            .unwrap();
-
-        let new_cmd = downcast_event_box::<TestEventPayload>(new_cmd.unwrap())
-            .unwrap()
-            .to_cmd();
-        let new_cmd_second = downcast_event_box::<TestEventPayload>(new_cmd_second)
-            .unwrap()
-            .to_cmd();
-        let new_cmd_same = downcast_event_box::<TestEventPayload>(new_cmd_same)
-            .unwrap()
-            .to_cmd();
-        let new_cmd_val = downcast_event_box::<TestEventPayload>(new_cmd_val)
-            .unwrap()
-            .to_cmd();
-        let new_cmd_str = downcast_event_box::<TestEventPayload>(new_cmd_str)
-            .unwrap()
-            .to_cmd();
+        let new_cmd: Command = BinarySerde.deserialize_command(&cmd_binary).unwrap();
+        let new_cmd_second: Command = BinarySerde.deserialize_command(&cmd_binary).unwrap();
+        let new_cmd_same: Command = BinarySerde.deserialize_command(&same_binary).unwrap();
+        let new_cmd_val: Command = BinarySerde.deserialize_command(&val_binary).unwrap();
+        let new_cmd_str: Command = BinarySerde.deserialize_command(&str_binary).unwrap();
+        let new_cmd_a: Command = BinarySerde.deserialize_command(&a_binary).unwrap();
+        let new_cmd_b: Command = BinarySerde.deserialize_command(&b_binary).unwrap();
 
         assert_eq!(new_cmd, new_cmd_second);
         assert_eq!(new_cmd, new_cmd_same);
         assert_ne!(new_cmd, new_cmd_val);
         assert_ne!(new_cmd, new_cmd_str);
-        assert_eq!(
-            new_cmd_a
-                .as_any()
-                .downcast_ref::<TestEventA>()
-                .unwrap()
-                .clone()
-                .to_cmd(),
-            TestEventA.to_cmd()
-        );
-        assert_eq!(
-            new_cmd_b
-                .as_any()
-                .downcast_ref::<TestEventB>()
-                .unwrap()
-                .clone()
-                .to_cmd(),
-            TestEventB.to_cmd()
-        );
-    }*/
+        assert_eq!(new_cmd_a, TestEventA.to_cmd());
+        assert_eq!(new_cmd_b, TestEventB.to_cmd());
+
+        let cmd_event = new_cmd.downcast_event::<TestEventPayload>().unwrap();
+        let cmd_event_second = new_cmd_second.downcast_event::<TestEventPayload>().unwrap();
+        let cmd_event_same = new_cmd_same.downcast_event::<TestEventPayload>().unwrap();
+        let cmd_event_val = new_cmd_val.downcast_event::<TestEventPayload>().unwrap();
+        let cmd_event_str = new_cmd_str.downcast_event::<TestEventPayload>().unwrap();
+        let cmd_event_a = new_cmd_a.downcast_event::<TestEventA>().unwrap();
+        let cmd_event_b = new_cmd_b.downcast_event::<TestEventB>().unwrap();
+
+        assert_eq!(cmd_event, cmd_event_second);
+        assert_eq!(cmd_event, cmd_event_same);
+        assert_ne!(cmd_event, cmd_event_val);
+        assert_ne!(cmd_event, cmd_event_str);
+        assert_eq!(cmd_event_a, &TestEventA);
+        assert_eq!(cmd_event_b, &TestEventB);
+    }
 }

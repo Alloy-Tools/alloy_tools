@@ -19,3 +19,22 @@ fn derive_event_marker(input: DeriveInput) -> TokenStream {
     }}
     .into()
 }
+
+
+#[proc_macro_derive(FormatMarker)]
+pub fn format_marker_derive(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    derive_format_marker(input)
+}
+
+fn derive_format_marker(input: DeriveInput) -> TokenStream {
+    let name = &input.ident;
+    /* TODO: add generics support
+    let generics = &input.generics;*/
+    quote! {impl FormatMarker for #name {
+        fn _type_name() -> &'static str {
+            concat!(module_path!(), "::", stringify!(#name))
+        }
+    }}
+    .into()
+}
