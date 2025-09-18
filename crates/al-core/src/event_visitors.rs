@@ -1,5 +1,6 @@
 use serde::de::{DeserializeSeed, Visitor};
 
+/// Visitor for deserializing `Box<dyn Event>` from a tuple sequence where the first element is the event type name and the second element is the event data.
 pub(crate) struct EventVisitor<'a> {
     pub(crate) registry: &'a crate::registry::EventRegistry,
 }
@@ -14,13 +15,16 @@ impl<'de, 'a> Visitor<'de> for EventVisitor<'a> {
         )
     }
 
+    /// Visit a sequence and deserialize it into a `Box<dyn Event>` using the event type name and the event registry
     fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
     where
         A: serde::de::SeqAccess<'de>,
     {
+        // Get the type name from the first element of the sequence
         let type_name = seq
-            .next_element_seed(StringSeed)?
+            .next_element::<String>()?
             .ok_or_else(|| serde::de::Error::custom("Expected event type name as first element"))?;
+        // Pass the type name and the registry to the EventSeed to deserialize the event data
         Ok(seq
             .next_element_seed(EventSeed {
                 type_name: &type_name,
@@ -30,6 +34,7 @@ impl<'de, 'a> Visitor<'de> for EventVisitor<'a> {
     }
 }
 
+/// Seed for deserializing a specific event type using its type name and the event registry
 struct EventSeed<'a> {
     type_name: &'a str,
     registry: &'a crate::registry::EventRegistry,
@@ -42,6 +47,7 @@ impl<'de, 'a> DeserializeSeed<'de> for EventSeed<'a> {
     where
         D: serde::Deserializer<'de>,
     {
+        // Get the deserializer for the given type name from the registry
         let deser = self
             .registry
             .get_deserializer(self.type_name)
@@ -52,43 +58,7 @@ impl<'de, 'a> DeserializeSeed<'de> for EventSeed<'a> {
                     self.type_name
                 ))
             })?;
-        let mut erased = <dyn erased_serde::Deserializer>::erase(deserializer);
-        deser(&mut erased).map_err(|e| serde::de::Error::custom(e.to_string()))
-    }
-}
-
-//TODO: remove if bitcode doesn't require it. can use .next_element::<String>() directly
-struct StringSeed;
-
-impl<'de> DeserializeSeed<'de> for StringSeed {
-    type Value = String;
-
-    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_string(self)
-    }
-}
-
-impl<'de> Visitor<'de> for StringSeed {
-    type Value = String;
-
-    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-        formatter.write_str("a string")
-    }
-
-    fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
-    where
-        E: serde::de::Error,
-    {
-        Ok(v)
-    }
-
-    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-    where
-        E: serde::de::Error,
-    {
-        Ok(v.to_string())
+        // Erase the deserializer and pass it to the registry deserializser function
+        deser(&mut <dyn erased_serde::Deserializer>::erase(deserializer)).map_err(|e| serde::de::Error::custom(e.to_string()))
     }
 }

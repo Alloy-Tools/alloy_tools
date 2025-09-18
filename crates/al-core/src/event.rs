@@ -5,28 +5,29 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-/// Used to mark other code with required traits as valid for serde support
-mod sealed {
-    use crate::EventMarker;
+/// Lazy static initialization of the global event registry allowing `Box<dyn Event>` and therefore `Command::Event` variants to be deserialized
+#[cfg(feature = "serde")]
+pub static EVENT_REGISTRY: once_cell::sync::Lazy<crate::registry::EventRegistry> =
+    once_cell::sync::Lazy::new(|| crate::registry::EventRegistry::new());
 
+/// Used to mark other code that have required traits as valid for serde features
+mod sealed {
+    /// If no serde feature, this is a dummy trait
     #[cfg(not(feature = "serde"))]
     pub trait SerdeFeature {}
+    /// If no serde feature, all EventMarker types implement this dummy trait
+    #[cfg(not(feature = "serde"))]
+    impl<T: crate::EventMarker> SerdeFeature for T {}
 
+    /// If serde feature is enabled, this requires erased_serde Serialize
     #[cfg(feature = "serde")]
     pub trait SerdeFeature: erased_serde::Serialize {}
-
+    /// If serde feature is enabled, all EventMarker types that also implement serde::Serialize implement this trait
     #[cfg(feature = "serde")]
-    impl<T: EventMarker + serde::Serialize> SerdeFeature for T {}
-    #[cfg(not(feature = "serde"))]
-    impl<T: EventMarker> SerdeFeature for T {}
+    impl<T: crate::EventMarker + serde::Serialize> SerdeFeature for T {}
 }
 
-/// Attempt to downcast a boxed event as dyn Any to a concrete type, returning the boxed concrete type on success and the boxed any on failure
-pub fn downcast_event_box<T: Any>(b: Box<dyn Event>) -> Result<Box<T>, Box<dyn Any>> {
-    let b = b as Box<dyn Any>;
-    b.downcast::<T>()
-}
-
+/// The `Event` trait defines the required methods for event types to exist in the system
 pub trait Event: Send + Sync + Debug + Any + sealed::SerdeFeature + 'static {
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
@@ -43,7 +44,8 @@ pub trait Event: Send + Sync + Debug + Any + sealed::SerdeFeature + 'static {
     }
 }
 
-// Blanket implementation for all compatible types
+/// Blanket implementation of the `Event` trait for all types that implement `EventMarker` and the required standard traits
+/// This allows any type that implements `EventMarker` to automatically be treated as an `Event`
 impl<
         T: EventMarker
             + 'static
@@ -94,33 +96,28 @@ impl<
     }
 }
 
-/// Implement Clone for Box<dyn Event> using the method defined in the Event trait
+/// Implement Clone for Box<dyn Event> allowing `Command::Event` variants to clone their internal event
 impl Clone for Box<dyn Event> {
     fn clone(&self) -> Self {
         self._clone_event()
     }
 }
 
-/// Implement PartialEq for Box<dyn Event> using the method defined in the Event trait
+/// Implement PartialEq for Box<dyn Event> allowing `Command::Event` variants to compare their internal events
 impl PartialEq for Box<dyn Event> {
     fn eq(&self, other: &Self) -> bool {
         self._partial_equals_event(other.as_any())
     }
 }
 
-/// Implement Hash for Box<dyn Event> using the method defined in the Event trait
+/// Implement Hash for Box<dyn Event> allowing `Command::Event` variants to hash their internal events
 impl Hash for Box<dyn Event> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self._hash_event(state);
     }
 }
 
-/// Lazy static initialization of the global event registry
-#[cfg(feature = "serde")]
-pub static EVENT_REGISTRY: once_cell::sync::Lazy<crate::registry::EventRegistry> =
-    once_cell::sync::Lazy::new(|| crate::registry::EventRegistry::new());
-
-/// Implement serialization for `Box<dyn Event>` using the `SerWrap` struct and `erased_serde`
+/// Implement serialization for `Box<dyn Event>` using `erased_serde` by serializing into the tuple format `(type name, type data)`
 #[cfg(feature = "serde")]
 impl serde::Serialize for Box<dyn Event> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -144,8 +141,11 @@ impl<'de> serde::Deserialize<'de> for Box<dyn Event> {
     where
         D: serde::Deserializer<'de>,
     {
-        deserializer.deserialize_seq(crate::event_visitors::EventVisitor {
-            registry: &EVENT_REGISTRY,
-        })
+        deserializer.deserialize_tuple(
+            2,
+            crate::event_visitors::EventVisitor {
+                registry: &EVENT_REGISTRY,
+            },
+        )
     }
 }

@@ -1,10 +1,10 @@
 use crate::event::Event;
 use std::hash::Hash;
 
+/// A command that can be sent through the system to signal actions, including custom events.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Default, PartialEq, Hash, std::fmt::Debug)]
 pub enum Command {
-    //#[serde(skip_deserializing)] // Skip deserialization as the `EventRegistry` handles it
     Event(Box<dyn Event>),
     Restart,
     Stop,
@@ -26,7 +26,7 @@ impl Command {
         }
     }
 
-    /// Returns the type name of the contained event if the command is an event variant, otherwise returns `None`
+    /// Returns the type name of the contained event, returning `None` if the command is not an event variant
     pub fn event_type_name(&self) -> Option<&'static str> {
         match self {
             Command::Event(event) => Some(event.as_ref().type_name()),

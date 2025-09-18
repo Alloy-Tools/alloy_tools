@@ -1,20 +1,6 @@
+/// Sealed marker traits ensure all required traits are impl'd while users can only impl their desired mark
 mod sealed {
-    /// Private marker traits ensure all required traits are impl'd while users only need to impl their desired mark
     pub trait EventMarker:
-        'static
-        + Send
-        + Sync
-        + Clone
-        + Default
-        + PartialEq
-        + std::any::Any
-        + std::fmt::Debug
-        + std::hash::Hash
-    {
-    }
-
-    #[allow(unused)]
-    pub trait FormatMarker:
         'static
         + Send
         + Sync
@@ -35,8 +21,3 @@ pub trait EventMarker: sealed::EventMarker {
     fn _type_name() -> &'static str;
 }
 impl<T: EventMarker> sealed::EventMarker for T {}
-
-pub trait FormatMarker: sealed::FormatMarker {
-    fn _type_name() -> &'static str;
-}
-impl<T: FormatMarker> sealed::FormatMarker for T {}

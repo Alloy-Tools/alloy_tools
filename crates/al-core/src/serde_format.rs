@@ -1,6 +1,4 @@
-use al_derive::FormatMarker;
-use crate::markers::FormatMarker;
-
+/// A trait for serializing and deserializing events and commands using specified formats.
 pub trait SerdeFormat:
     Send + Sync + Clone + Default + PartialEq + std::any::Any + std::fmt::Debug + std::hash::Hash
 {
@@ -27,8 +25,9 @@ pub trait SerdeFormat:
     ) -> Result<crate::Command, Box<dyn std::error::Error>>;
 }
 
+/// A JSON-based implementation of the SerdeFormat trait using serde_json.
 #[cfg(feature = "json")]
-#[derive(Clone, Default, PartialEq, Debug, Hash, FormatMarker)]
+#[derive(Clone, Default, PartialEq, Debug, Hash)]
 pub struct JsonSerde;
 
 #[cfg(feature = "json")]
@@ -44,16 +43,16 @@ impl SerdeFormat for JsonSerde {
     where
         T: crate::Event + serde::Deserialize<'a>,
     {
-        serde_json::from_slice(data).map_err(|e| e.into())
+        serde_json::from_slice(&data).map_err(|e| e.into())
     }
-    
+
     fn serialize_command(
         &self,
         command: &crate::Command,
     ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         serde_json::to_vec(command).map_err(|e| e.into())
     }
-    
+
     fn deserialize_command<'a>(
         &self,
         data: &'a [u8],
@@ -62,8 +61,9 @@ impl SerdeFormat for JsonSerde {
     }
 }
 
+/// A binary-based implementation of the SerdeFormat trait using bitcode.
 #[cfg(feature = "binary")]
-#[derive(Clone, Default, PartialEq, Debug, Hash, FormatMarker)]
+#[derive(Clone, Default, PartialEq, Debug, Hash)]
 pub struct BinarySerde;
 
 #[cfg(feature = "binary")]
@@ -81,14 +81,14 @@ impl SerdeFormat for BinarySerde {
     {
         bitcode::deserialize(data).map_err(|e| e.into())
     }
-    
+
     fn serialize_command(
         &self,
         command: &crate::Command,
     ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
         bitcode::serialize(command).map_err(|e| e.into())
     }
-    
+
     fn deserialize_command<'a>(
         &self,
         data: &'a [u8],

@@ -9,9 +9,9 @@ mod registry;
 mod serde_format;
 
 pub use command::Command;
+pub use event::Event;
 #[cfg(feature = "serde")]
 pub use event::EVENT_REGISTRY;
-pub use event::{downcast_event_box, Event};
 pub use markers::EventMarker;
 #[cfg(feature = "serde")]
 pub use registry::Registry;
@@ -32,14 +32,17 @@ mod tests {
     use al_derive::EventMarker;
     use std::hash::{DefaultHasher, Hash, Hasher};
 
+    /// Simple event for testing
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     #[derive(Clone, Default, PartialEq, Hash, Debug, EventMarker)]
     struct TestEventA;
 
+    /// Second simple event for testing
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     #[derive(Clone, Default, PartialEq, Hash, Debug, EventMarker)]
     struct TestEventB;
 
+    /// Event with payload for testing
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     #[derive(Clone, Default, PartialEq, Hash, Debug, EventMarker)]
     struct TestEventPayload {
@@ -49,21 +52,29 @@ mod tests {
     const TEST_VAL: u128 = 7878;
     const TEST_MSG: &str = "Test";
 
+    /// Test converting event to command
     #[test]
     fn event_to_command() {
         let cmd = TestEventA.to_cmd();
-        assert!(cmd.is_event());
+        let payload_cmd = TestEventPayload { value: TEST_VAL, message: TEST_MSG.to_string() }.to_cmd();
+        assert!(matches!(cmd, Command::Event(_)));
+        assert!(matches!(payload_cmd, Command::Event(_)));
     }
 
+    /// Test downcasting commands back to their original event types
     #[test]
     fn verify_downcast() {
         let cmd = TestEventA.to_cmd();
+        let payload_cmd = TestEventPayload { value: TEST_VAL, message: TEST_MSG.to_string() }.to_cmd();
 
         assert!(cmd.downcast_event::<TestEventA>().is_some());
         assert!(cmd.downcast_event::<TestEventB>().is_none());
         assert!(Command::Stop.downcast_event::<TestEventB>().is_none());
+        assert!(payload_cmd.downcast_event::<TestEventPayload>().is_some());
+        assert!(payload_cmd.downcast_event::<TestEventA>().is_none());
     }
 
+    /// Test function for identification of commands as events
     #[test]
     fn command_is_event() {
         let event_cmd = TestEventA.to_cmd();
@@ -75,6 +86,7 @@ mod tests {
         assert!(!stop_cmd.is_event());
     }
 
+    /// Test function for retrieving event type names from commands
     #[test]
     fn event_type_identification() {
         let cmd_a = TestEventA.to_cmd();
@@ -82,11 +94,12 @@ mod tests {
 
         assert_eq!(cmd_a.event_type_name(), Some(TestEventA.type_name()));
         assert_eq!(cmd_b.event_type_name(), Some(TestEventB.type_name()));
-        assert_eq!(Command::Stop.event_type_name(), None);
+        assert!(Command::Stop.event_type_name().is_none());
     }
 
+    /// Test to ensure event type names are unique across different crates to prevent registry collisions
     #[test]
-    fn test_collision_protection() {
+    fn event_name_collisions() {
         mod crate_a {
             use super::*;
 
@@ -109,6 +122,7 @@ mod tests {
         );
     }
 
+    /// Test hashing of events to ensure uniqueness based on type and content
     #[test]
     fn event_hash() {
         let event = TestEventPayload {
@@ -154,6 +168,7 @@ mod tests {
         assert_ne!(event_hash, diff_event_hash)
     }
 
+    /// Test hashing of commands to ensure uniqueness based on contained event type and content
     #[test]
     fn command_hash() {
         let cmd = TestEventPayload {
@@ -203,6 +218,7 @@ mod tests {
         assert_ne!(cmd_hash, cmd_stop_hash)
     }
 
+    /// Test cloning of events
     #[test]
     fn event_clone() {
         let original = TestEventPayload {
@@ -214,24 +230,28 @@ mod tests {
         assert_eq!(original, cloned);
     }
 
+    /// Test cloning of commands
     #[test]
     fn command_clone() {
-        let original = TestEventPayload {
+        let original = TestEventA.to_cmd();
+        let cloned = original.clone();
+        let original_payload = TestEventPayload {
             value: TEST_VAL,
             message: TEST_MSG.to_string(),
         }
         .to_cmd();
-        let cloned = original.clone();
+        let cloned_payload = original_payload.clone();
 
         assert_eq!(original, cloned);
+        assert_eq!(original_payload, cloned_payload);
 
-        if let Some(original_event) = original.downcast_event::<TestEventPayload>() {
+        if let Some(original_event) = original_payload.downcast_event::<TestEventPayload>() {
             assert_eq!(original_event.value, TEST_VAL);
             assert_eq!(&original_event.message, TEST_MSG);
         } else {
             panic!("Downcast failed.");
         }
-        if let Some(cloned_event) = cloned.downcast_event::<TestEventPayload>() {
+        if let Some(cloned_event) = cloned_payload.downcast_event::<TestEventPayload>() {
             assert_eq!(cloned_event.value, TEST_VAL);
             assert_eq!(&cloned_event.message, TEST_MSG);
         } else {
@@ -239,6 +259,7 @@ mod tests {
         }
     }
 
+    /// Test partial equality of commands
     #[test]
     fn command_partial_equals() {
         let cmd = TestEventPayload {
@@ -272,6 +293,7 @@ mod tests {
         assert_eq!(Command::Stop, Command::Stop);
     }
 
+    /// Test to ensure events meet thread safety and trait requirements
     #[test]
     fn event_marker_thread_safety() {
         fn has_marker_requirements<
@@ -293,6 +315,7 @@ mod tests {
         }
     }
 
+    /// Test serialization and deserialization of events using JSON format
     #[cfg(all(feature = "serde", feature = "json"))]
     #[test]
     fn event_json() {
@@ -326,8 +349,6 @@ mod tests {
         assert_ne!(event_json, val_json);
         assert_ne!(event_json, str_json);
         assert_ne!(event_json, a_json);
-        //TODO: look into hooking any impl'd `EventMarker` serilize to serialize a wrapper with type_name, that way event type names can be inserted on event serialization layer rather than only command
-        //assert_ne!(serde_json::to_string(&TestEventA{}).unwrap(), serde_json::to_string(&TestEventB{}).unwrap());
 
         let new_event: TestEventPayload = JsonSerde.deserialize_event(&event_json).unwrap();
         let new_same: TestEventPayload = JsonSerde.deserialize_event(&same_json).unwrap();
@@ -342,10 +363,11 @@ mod tests {
         assert_eq!(TestEventA, new_a);
     }
 
+    /// Test serialization and deserialization of commands using JSON format
     #[cfg(all(feature = "serde", feature = "json"))]
     #[test]
     fn command_json() {
-        use crate::{register_event, JsonSerde, SerdeFormat, EVENT_REGISTRY};
+        use crate::{register_event, JsonSerde, SerdeFormat};
 
         let cmd = TestEventPayload {
             value: TEST_VAL,
@@ -382,9 +404,9 @@ mod tests {
         assert_ne!(cmd_json, a_json);
         assert_ne!(a_json, b_json);
 
-        register_event!(EVENT_REGISTRY, TestEventPayload);
-        register_event!(EVENT_REGISTRY, TestEventA);
-        register_event!(EVENT_REGISTRY, TestEventB);
+        register_event!(TestEventPayload);
+        register_event!(TestEventA);
+        register_event!(TestEventB);
 
         let new_cmd: Command = JsonSerde.deserialize_command(&cmd_json).unwrap();
         let new_cmd_second: Command = JsonSerde.deserialize_command(&cmd_json).unwrap();
@@ -417,6 +439,7 @@ mod tests {
         assert_eq!(cmd_event_b, &TestEventB);
     }
 
+    /// Test serialization and deserialization of events using binary format
     #[cfg(all(feature = "serde", feature = "binary"))]
     #[test]
     fn event_binary() {
@@ -450,8 +473,6 @@ mod tests {
         assert_ne!(event_binary, val_binary);
         assert_ne!(event_binary, str_binary);
         assert_ne!(event_binary, a_binary);
-        //TODO: same as event_serde_json
-        //assert_ne!(BinarySerde.serialize_event(&TestEventA {}).unwrap(), BinarySerde.serialize_event(&TestEventB {}).unwrap());
 
         let new_event: TestEventPayload = BinarySerde.deserialize_event(&event_binary).unwrap();
         let new_same: TestEventPayload = BinarySerde.deserialize_event(&same_binary).unwrap();
@@ -466,10 +487,11 @@ mod tests {
         assert_eq!(TestEventA, new_a);
     }
 
+    /// Test serialization and deserialization of commands using binary format
     #[cfg(all(feature = "serde", feature = "binary"))]
     #[test]
     fn command_binary() {
-        use crate::{register_event, BinarySerde, SerdeFormat, EVENT_REGISTRY};
+        use crate::{register_event, BinarySerde, SerdeFormat};
 
         let cmd = TestEventPayload {
             value: TEST_VAL,
@@ -506,11 +528,9 @@ mod tests {
         assert_ne!(cmd_binary, a_binary);
         assert_ne!(a_binary, b_binary);
 
-        register_event!(EVENT_REGISTRY, TestEventPayload);
-        register_event!(EVENT_REGISTRY, TestEventA);
-        register_event!(EVENT_REGISTRY, TestEventB);
-
-        println!("cmd_binary: {:?}", cmd_binary);
+        register_event!(TestEventPayload);
+        register_event!(TestEventA);
+        register_event!(TestEventB);
 
         let new_cmd: Command = BinarySerde.deserialize_command(&cmd_binary).unwrap();
         let new_cmd_second: Command = BinarySerde.deserialize_command(&cmd_binary).unwrap();
