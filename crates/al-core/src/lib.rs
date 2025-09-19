@@ -13,6 +13,7 @@ pub use event::Event;
 #[cfg(feature = "serde")]
 pub use event::EVENT_REGISTRY;
 pub use markers::EventMarker;
+pub use markers::EventRequirements;
 #[cfg(feature = "serde")]
 pub use registry::Registry;
 #[cfg(feature = "serde")]
@@ -52,11 +53,26 @@ mod tests {
     const TEST_VAL: u128 = 7878;
     const TEST_MSG: &str = "Test";
 
+    #[test]
+    fn generics() {
+        use crate::EventRequirements;
+
+        #[allow(unused)]
+        #[derive(Clone, Default, PartialEq, Hash, Debug, EventMarker)]
+        struct GenericEvent<T>(T);
+        //TODO: add to generics test
+        panic!("Test should do more than just compile");
+    }
+
     /// Test converting event to command
     #[test]
     fn event_to_command() {
         let cmd = TestEventA.to_cmd();
-        let payload_cmd = TestEventPayload { value: TEST_VAL, message: TEST_MSG.to_string() }.to_cmd();
+        let payload_cmd = TestEventPayload {
+            value: TEST_VAL,
+            message: TEST_MSG.to_string(),
+        }
+        .to_cmd();
         assert!(matches!(cmd, Command::Event(_)));
         assert!(matches!(payload_cmd, Command::Event(_)));
     }
@@ -65,7 +81,11 @@ mod tests {
     #[test]
     fn verify_downcast() {
         let cmd = TestEventA.to_cmd();
-        let payload_cmd = TestEventPayload { value: TEST_VAL, message: TEST_MSG.to_string() }.to_cmd();
+        let payload_cmd = TestEventPayload {
+            value: TEST_VAL,
+            message: TEST_MSG.to_string(),
+        }
+        .to_cmd();
 
         assert!(cmd.downcast_event::<TestEventA>().is_some());
         assert!(cmd.downcast_event::<TestEventB>().is_none());

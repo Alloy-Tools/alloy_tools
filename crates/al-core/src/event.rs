@@ -1,4 +1,4 @@
-use crate::{command::Command, markers::EventMarker};
+use crate::{command::Command, EventMarker, EventRequirements};
 use std::{
     any::Any,
     fmt::Debug,
@@ -27,7 +27,7 @@ mod sealed {
     impl<T: crate::EventMarker + serde::Serialize> SerdeFeature for T {}
 }
 
-/// The `Event` trait defines the required methods for event types to exist in the system
+/// The `Event` trait defines the required methods for event types to exist in the system along with trait bounds that dont interfere with dyn usage
 pub trait Event: Send + Sync + Debug + Any + sealed::SerdeFeature + 'static {
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
@@ -44,19 +44,11 @@ pub trait Event: Send + Sync + Debug + Any + sealed::SerdeFeature + 'static {
     }
 }
 
-/// Blanket implementation of the `Event` trait for all types that implement `EventMarker` and the required standard traits
-/// This allows any type that implements `EventMarker` to automatically be treated as an `Event`
+/// Blanket implementation of the `Event` trait for all types that implement `EventMarker` and the required event traits
+/// This allows any type that implements `EventMarker` and the traits required by `EventRequirements` to automatically be treated as an `Event`
 impl<
         T: EventMarker
-            + 'static
-            + Send
-            + Sync
-            + Debug
-            + Any
-            + Hash
-            + Clone
-            + Default
-            + PartialEq
+            + EventRequirements
             + sealed::SerdeFeature,
     > Event for T
 {
