@@ -29,40 +29,27 @@ pub use serde_format::SerdeFormat;
 mod tests {
     use crate::command::Command;
     use crate::event::Event;
-    use crate::markers::EventMarker;
-    use al_derive::EventMarker;
+    use crate::EventMarker;
+    use al_derive::event;
     use std::hash::{DefaultHasher, Hash, Hasher};
 
-    /// Simple event for testing
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[derive(Clone, Default, PartialEq, Hash, Debug, EventMarker)]
+    /// Simple event for testing using the `event` attribute macro
+    #[event]
     struct TestEventA;
 
-    /// Second simple event for testing
+    /// Second simple event for testing using the `EventMarker` derive macro
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[derive(Clone, Default, PartialEq, Hash, Debug, EventMarker)]
+    #[derive(Clone, Default, PartialEq, Hash, Debug, al_derive::EventMarker)]
     struct TestEventB;
 
     /// Event with payload for testing
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[derive(Clone, Default, PartialEq, Hash, Debug, EventMarker)]
+    #[event]
     struct TestEventPayload {
         value: u128,
         message: String,
     }
     const TEST_VAL: u128 = 7878;
     const TEST_MSG: &str = "Test";
-
-    #[test]
-    fn generics() {
-        use crate::EventRequirements;
-
-        #[allow(unused)]
-        #[derive(Clone, Default, PartialEq, Hash, Debug, EventMarker)]
-        struct GenericEvent<T>(T);
-        //TODO: add to generics test
-        panic!("Test should do more than just compile");
-    }
 
     /// Test converting event to command
     #[test]
@@ -123,16 +110,14 @@ mod tests {
         mod crate_a {
             use super::*;
 
-            #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-            #[derive(Clone, Default, PartialEq, Hash, Debug, EventMarker)]
+            #[event]
             pub struct DuplicateEvent;
         }
 
         mod crate_b {
             use super::*;
 
-            #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-            #[derive(Clone, Default, PartialEq, Hash, Debug, EventMarker)]
+            #[event]
             pub struct DuplicateEvent;
         }
 

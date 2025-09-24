@@ -28,6 +28,7 @@ version = "0.1.0"
 dependencies = [
  "al-core",
  "al-derive",
+ "serde",
 ]
 
 [[package]]

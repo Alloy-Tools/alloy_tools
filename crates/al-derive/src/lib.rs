@@ -1,8 +1,24 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, DeriveInput};
+use syn::{parse_macro_input, punctuated::Punctuated, token::Comma, DeriveInput, Meta};
+
+/// Debugging attribute macro to print the input tokens
+#[proc_macro_attribute]
+pub fn show_attribute(attr: TokenStream, item: TokenStream) -> TokenStream {
+    println!("attr: \"{attr}\"");
+    println!("item: \"{item}\"");
+    item
+}
+
+/// Debugging attribute macro to print only the item tokens
+#[proc_macro_attribute]
+pub fn show_item(_: TokenStream, item: TokenStream) -> TokenStream {
+    println!("item: \"{item}\"");
+    item
+}
 
 /// Derive the required elements for an `Event`
+/// Adds EventRequirements bound to all generic parameters
 #[proc_macro_derive(EventMarker)]
 pub fn event_marker_derive(input: TokenStream) -> TokenStream {
     let mut input = parse_macro_input!(input as DeriveInput);
@@ -28,55 +44,65 @@ fn derive_event_marker(input: DeriveInput) -> TokenStream {
     .into()
 }
 
+/// Attribute macro to mark a struct as an event, automatically implementing `EventMarker` and required traits.
+///
+/// Will cause conflicting implementations if placed after any `#derive(...)]` attributes that implement any super traits of `EventRequirements`.
 #[proc_macro_attribute]
-pub fn show_streams(attr: TokenStream, item: TokenStream) -> TokenStream {
-    println!("attr: \"{attr}\"");
-    println!("item: \"{item}\"");
-    item
-}
+pub fn event(_: TokenStream, item: TokenStream) -> TokenStream {
+    let mut item = parse_macro_input!(item as DeriveInput);
 
-#[proc_macro_attribute]
-pub fn event(attr: TokenStream, item: TokenStream) -> TokenStream {
-    println!("attr: \"{attr}\"");
-    println!("item: \"{item}\"");
-    item
-}
-
-/*
-/// Derive the required elements for an `Event`
-#[proc_macro_derive(Event)]
-pub fn event_derive(input: TokenStream) -> TokenStream {
-    let mut input = parse_macro_input!(input as DeriveInput);
-
-    eprintln!("Attributes: {:?}", input.attrs);
-
-    // Add EventRequirements bound to all generic parameters
-    for param in &mut input.generics.params {
-        if let syn::GenericParam::Type(type_param) = param {
-            type_param.bounds.push(syn::parse_quote!(EventRequirements));
-        }
-    }
-    derive_event(input)
-}
-
-fn derive_event(mut input: DeriveInput) -> TokenStream {
-    let name = &input.ident;
-    let (impl_generics, type_generics, where_clause) = &input.generics.split_for_impl();
-
-    // Add all the required traits as a second #[derive(...)] attribute
-    let required_traits: Vec<syn::Path> = vec![
+    let mut required_traits: Vec<syn::Path> = vec![
         syn::parse_quote!(Clone),
         syn::parse_quote!(Default),
         syn::parse_quote!(PartialEq),
         syn::parse_quote!(Hash),
         syn::parse_quote!(Debug),
+        syn::parse_quote!(al_derive::EventMarker),
     ];
-    //input.attrs.push(syn::parse_quote!(#[derive(#(#required_traits),*)]));
 
-    quote! {impl #impl_generics EventMarker for #name #type_generics #where_clause {
-        fn _type_name() -> &'static str {
-            concat!(module_path!(), "::", stringify!(#name))
-        }
-    }}
+    #[cfg(feature = "serde")]
+    let mut serde_traits: Vec<syn::Path> = vec![
+        syn::parse_quote!(serde::Serialize),
+        syn::parse_quote!(serde::Deserialize),
+    ];
+
+    // find any existing #[derive(...)] attributes and remove any duplicates from required_traits
+    let _ = &item
+        .attrs
+        .iter()
+        .filter(|attr| attr.path().is_ident("derive"))
+        .filter_map(|attr| {
+            attr.parse_args_with(Punctuated::<Meta, Comma>::parse_terminated)
+                .ok()
+        })
+        .flatten()
+        .for_each(|meta| {
+            if let Meta::Path(path) = meta {
+                if let Some(pos) = required_traits.iter().position(|t| t == &path) {
+                    required_traits.remove(pos);
+                }
+                #[cfg(feature = "serde")]
+                if let Some(pos) = serde_traits.iter().position(|t| t == &path) {
+                    serde_traits.remove(pos);
+                }
+            }
+        });
+
+    // Add all the missing required traits as a second #[derive(...)] attribute
+    if !required_traits.is_empty() {
+        item.attrs
+            .push(syn::parse_quote!(#[derive(#(#required_traits),*)]));
+    }
+
+    #[cfg(feature = "serde")]
+    // Add serde traits
+    if !serde_traits.is_empty() {
+        item.attrs
+            .push(syn::parse_quote!(#[derive(#(#serde_traits),*)]));
+    }
+
+    quote! {
+        #item
+    }
     .into()
-}*/
+}

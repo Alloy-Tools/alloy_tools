@@ -11,3 +11,4 @@ doctest = false
 [dependencies]
 al-core = { path = "../al-core" }
 al-derive = { path = "../al-derive" }
+serde = { version = "1.0.219", features = ["derive"] }
