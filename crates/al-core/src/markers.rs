@@ -36,5 +36,6 @@ impl<
 /// _type_name is derived from the module_path and type name, eg. `my_crate::MyEvent`
 pub trait EventMarker: sealed::EventMarker {
     fn _type_name() -> &'static str;
+    fn _module_path() -> &'static str;
 }
 impl<T: EventMarker> sealed::EventMarker for T {}

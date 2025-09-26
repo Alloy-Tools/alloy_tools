@@ -46,8 +46,8 @@ mod tests {
 
         // Using `EventMarker` derive macro
         #[derive(Clone, Default, PartialEq, Hash, Debug, al_derive::EventMarker)]
-        struct GenericEvent2<T>(T);
-        has_impl_marker::<GenericEvent2<u128>>();
-        has_impl_marker::<GenericEvent2<String>>();
+        struct GenericEvent2<T, U>(T, U);
+        has_impl_marker::<GenericEvent2<u128, String>>();
+        has_impl_marker::<GenericEvent2<String, u128>>();
     }
 }

@@ -27,11 +27,17 @@ mod sealed {
     impl<T: crate::EventMarker + serde::Serialize> SerdeFeature for T {}
 }
 
+/// Helper function to return the simple names of generic events
+pub fn type_with_generics<T>(_: &T) -> String {
+    tynm::type_name::<T>()
+}
+
 /// The `Event` trait defines the required methods for event types to exist in the system along with trait bounds that dont interfere with dyn usage
 pub trait Event: Send + Sync + Debug + Any + sealed::SerdeFeature + 'static {
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
     fn type_name(&self) -> &'static str;
+    fn type_with_generics(&self) -> String;
     fn _clone_event(&self) -> Box<dyn Event>;
     fn _partial_equals_event(&self, other: &dyn Any) -> bool;
     fn _hash_event(&self, state: &mut dyn Hasher);
@@ -46,12 +52,7 @@ pub trait Event: Send + Sync + Debug + Any + sealed::SerdeFeature + 'static {
 
 /// Blanket implementation of the `Event` trait for all types that implement `EventMarker` and the required event traits
 /// This allows any type that implements `EventMarker` and the traits required by `EventRequirements` to automatically be treated as an `Event`
-impl<
-        T: EventMarker
-            + EventRequirements
-            + sealed::SerdeFeature,
-    > Event for T
-{
+impl<T: EventMarker + EventRequirements + sealed::SerdeFeature> Event for T {
     /// Returns a reference to self as a dyn Any
     fn as_any(&self) -> &dyn Any {
         self
@@ -65,6 +66,11 @@ impl<
     /// Returns the type name of the event using the function from the `EventMarker` trait
     fn type_name(&self) -> &'static str {
         T::_type_name()
+    }
+
+    /// Returns the type name of the event with any generics simple names filled out using the `tynm` crate
+    fn type_with_generics(&self) -> String {
+        format!("{}::{}", T::_module_path(), type_with_generics(self))
     }
 
     /// Clones the event and returns it as a boxed event
@@ -118,7 +124,7 @@ impl serde::Serialize for Box<dyn Event> {
     {
         erased_serde::serialize(
             &(
-                self.type_name().to_string(),
+                self.type_with_generics(),
                 self.as_ref() as &dyn erased_serde::Serialize,
             ),
             serializer,

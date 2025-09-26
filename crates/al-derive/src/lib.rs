@@ -36,9 +36,13 @@ pub fn event_marker_derive(input: TokenStream) -> TokenStream {
 fn derive_event_marker(input: DeriveInput) -> TokenStream {
     let name = &input.ident;
     let (impl_generics, type_generics, where_clause) = &input.generics.split_for_impl();
+    let generics_str = quote! {#type_generics}.to_string().replace(" ", "");
     quote! {impl #impl_generics EventMarker for #name #type_generics #where_clause {
         fn _type_name() -> &'static str {
-            concat!(module_path!(), "::", stringify!(#name))
+            concat!(module_path!(), "::", stringify!(#name), #generics_str)
+        }
+        fn _module_path() -> &'static str {
+            module_path!()
         }
     }}
     .into()

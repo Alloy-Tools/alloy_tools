@@ -15,6 +15,7 @@ erased-serde = { version = "0.4.6", optional = true }
 serde_json = { version = "1.0.14", optional = true }
 bitcode = { version = "0.6.6", features = ["serde"], optional = true }
 once_cell = { version = "1.21.3", optional = true }
+tynm = "0.2.0"
 
 [features]
 default = ["serde", "test-utils"]

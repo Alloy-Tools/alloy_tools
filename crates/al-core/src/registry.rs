@@ -22,7 +22,7 @@ type EventDeserializer = Arc<
 /// It allows registering event types and retrieving their deserializers.
 /// The key for each deserializer is the events type_name()
 pub struct EventRegistry {
-    deserializers: SharedRegistry<&'static str, EventDeserializer>,
+    deserializers: SharedRegistry<String, EventDeserializer>,
 }
 
 impl EventRegistry {
@@ -37,6 +37,7 @@ impl EventRegistry {
         E: crate::Event + crate::EventMarker + for<'de> serde::de::Deserialize<'de> + 'static,
     >(
         &self,
+        event: E,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let deserializer: EventDeserializer =
             Arc::new(move |de: &mut dyn erased_serde::Deserializer<'_>| {
@@ -47,7 +48,7 @@ impl EventRegistry {
         self.deserializers
             .write()
             .map_err(|e| format!("Event registry write lock poisoned: {e}"))?
-            .insert(E::_type_name(), deserializer);
+            .insert(event.type_with_generics(), deserializer);
         Ok(())
     }
 
@@ -68,11 +69,11 @@ impl EventRegistry {
 /// Macro to register an event type with the global event registry.
 #[macro_export]
 macro_rules! register_event {
-    ($event_type:ty) => {{
-        if let Err(e) = $crate::EVENT_REGISTRY.register_event::<$event_type>() {
+    ($event:expr) => {{
+        if let Err(e) = $crate::EVENT_REGISTRY.register_event($event) {
             panic!(
                 "Failed to register deserializer for event type {}: {}",
-                stringify!($event_type),
+                stringify!($event),
                 e
             );
         }
@@ -82,11 +83,11 @@ macro_rules! register_event {
 /// Macro to register an event type with any registry.
 #[macro_export]
 macro_rules! register_event_with {
-    ($registry:expr, $event_type:ty) => {{
-        if let Err(e) = $registry.register_event::<$event_type>() {
+    ($registry:expr, $event:expr) => {{
+        if let Err(e) = $registry.register_event($event) {
             panic!(
                 "Failed to register deserializer for event type {} in registry {}: {}",
-                stringify!($event_type),
+                stringify!($event),
                 stringify!($registry),
                 e
             );
