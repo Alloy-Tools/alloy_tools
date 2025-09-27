@@ -3,18 +3,22 @@ mod event;
 #[cfg(feature = "serde")]
 mod event_visitors;
 mod markers;
+mod queue;
 #[cfg(feature = "serde")]
 mod registry;
 #[cfg(feature = "serde")]
 mod serde_format;
+mod transport;
 
 pub use command::Command;
-pub use event::Event;
 pub use event::type_with_generics;
+pub use event::Event;
 #[cfg(feature = "serde")]
 pub use event::EVENT_REGISTRY;
 pub use markers::EventMarker;
 pub use markers::EventRequirements;
+pub use markers::TransportRequirements;
+pub use queue::Queue;
 #[cfg(feature = "serde")]
 pub use registry::Registry;
 #[cfg(feature = "serde")]
@@ -25,6 +29,8 @@ pub use serde_format::BinarySerde;
 pub use serde_format::JsonSerde;
 #[cfg(feature = "serde")]
 pub use serde_format::SerdeFormat;
+pub use transport::Pipeline;
+pub use transport::TransportError;
 
 #[cfg(test)]
 mod tests {
@@ -56,9 +62,18 @@ mod tests {
 
     #[test]
     fn type_with_generics() {
-        assert_eq!(TestEventGeneric(String::from("")).type_with_generics(), "al_core::tests::TestEventGeneric<String>");
-        assert_eq!(TestEventGeneric(0u8).type_with_generics(), "al_core::tests::TestEventGeneric<u8>");
-        assert_eq!(TestEventGeneric(TestEventGeneric(String::from(""))).type_with_generics(), "al_core::tests::TestEventGeneric<TestEventGeneric<String>>");
+        assert_eq!(
+            TestEventGeneric(String::from("")).type_with_generics(),
+            "al_core::tests::TestEventGeneric<String>"
+        );
+        assert_eq!(
+            TestEventGeneric(0u8).type_with_generics(),
+            "al_core::tests::TestEventGeneric<u8>"
+        );
+        assert_eq!(
+            TestEventGeneric(TestEventGeneric(String::from(""))).type_with_generics(),
+            "al_core::tests::TestEventGeneric<TestEventGeneric<String>>"
+        );
     }
 
     /// Test converting event to command
@@ -125,12 +140,18 @@ mod tests {
 
     /// Test function for retrieving event type names from commands
     #[test]
-    fn event_type_identification() {
+    fn command_event_type_identification() {
         let cmd_a = TestEventA.to_cmd();
         let cmd_b = TestEventB.to_cmd();
 
-        assert_eq!(cmd_a.event_type_name(), Some(TestEventA.type_name()));
-        assert_eq!(cmd_b.event_type_name(), Some(TestEventB.type_name()));
+        assert_eq!(
+            cmd_a.event_type_name(),
+            Some(TestEventA.type_with_generics())
+        );
+        assert_eq!(
+            cmd_b.event_type_name(),
+            Some(TestEventB.type_with_generics())
+        );
         assert!(Command::Stop.event_type_name().is_none());
     }
 
@@ -152,8 +173,8 @@ mod tests {
         }
 
         assert_ne!(
-            crate_a::DuplicateEvent.type_name(),
-            crate_b::DuplicateEvent.type_name()
+            crate_a::DuplicateEvent.type_with_generics(),
+            crate_b::DuplicateEvent.type_with_generics()
         );
     }
 
@@ -653,7 +674,10 @@ mod tests {
         assert_ne!(generic_str_json, generic_str_diff_json);
         assert_ne!(generic_str_json, a_json);
 
-        register_event!(TestEventPayload {value: 0, message: "".to_string()});
+        register_event!(TestEventPayload {
+            value: 0,
+            message: "".to_string()
+        });
         register_event!(TestEventGeneric(0u128));
         register_event!(TestEventGeneric(String::new()));
         register_event!(TestEventA);
@@ -941,7 +965,10 @@ mod tests {
         assert_ne!(generic_str_binary, generic_str_diff_binary);
         assert_ne!(generic_str_binary, a_binary);
 
-        register_event!(TestEventPayload {value: 0, message: "".to_string()});
+        register_event!(TestEventPayload {
+            value: 0,
+            message: "".to_string()
+        });
         register_event!(TestEventGeneric(0u128));
         register_event!(TestEventGeneric(String::new()));
         register_event!(TestEventA);

@@ -36,7 +36,6 @@ pub fn type_with_generics<T>(_: &T) -> String {
 pub trait Event: Send + Sync + Debug + Any + sealed::SerdeFeature + 'static {
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
-    fn type_name(&self) -> &'static str;
     fn type_with_generics(&self) -> String;
     fn _clone_event(&self) -> Box<dyn Event>;
     fn _partial_equals_event(&self, other: &dyn Any) -> bool;
@@ -63,11 +62,6 @@ impl<T: EventMarker + EventRequirements + sealed::SerdeFeature> Event for T {
         self
     }
 
-    /// Returns the type name of the event using the function from the `EventMarker` trait
-    fn type_name(&self) -> &'static str {
-        T::_type_name()
-    }
-
     /// Returns the type name of the event with any generics simple names filled out using the `tynm` crate
     fn type_with_generics(&self) -> String {
         format!("{}::{}", T::_module_path(), type_with_generics(self))
@@ -89,7 +83,7 @@ impl<T: EventMarker + EventRequirements + sealed::SerdeFeature> Event for T {
 
     /// Hashes the type name and then the event itself into the given hasher
     fn _hash_event(&self, mut state: &mut dyn Hasher) {
-        self.type_name().hash(&mut state);
+        self.type_with_generics().hash(&mut state);
         self.hash(&mut state);
     }
 }

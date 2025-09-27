@@ -27,9 +27,9 @@ impl Command {
     }
 
     /// Returns the type name of the contained event, returning `None` if the command is not an event variant
-    pub fn event_type_name(&self) -> Option<&'static str> {
+    pub fn event_type_name(&self) -> Option<String> {
         match self {
-            Command::Event(event) => Some(event.as_ref().type_name()),
+            Command::Event(event) => Some(event.as_ref().type_with_generics()),
             _ => None,
         }
     }

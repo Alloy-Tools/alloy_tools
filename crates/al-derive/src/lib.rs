@@ -36,16 +36,16 @@ pub fn event_marker_derive(input: TokenStream) -> TokenStream {
 fn derive_event_marker(input: DeriveInput) -> TokenStream {
     let name = &input.ident;
     let (impl_generics, type_generics, where_clause) = &input.generics.split_for_impl();
-    let generics_str = quote! {#type_generics}.to_string().replace(" ", "");
     quote! {impl #impl_generics EventMarker for #name #type_generics #where_clause {
-        fn _type_name() -> &'static str {
-            concat!(module_path!(), "::", stringify!(#name), #generics_str)
-        }
         fn _module_path() -> &'static str {
             module_path!()
         }
     }}
     .into()
+}
+
+fn paths_equal(p0: &syn::Path, p1: &syn::Path) -> bool {
+    quote! {#p0}.to_string() == quote! {#p1}.to_string()
 }
 
 /// Attribute macro to mark a struct as an event, automatically implementing `EventMarker` and required traits.
@@ -82,11 +82,11 @@ pub fn event(_: TokenStream, item: TokenStream) -> TokenStream {
         .flatten()
         .for_each(|meta| {
             if let Meta::Path(path) = meta {
-                if let Some(pos) = required_traits.iter().position(|t| t == &path) {
+                if let Some(pos) = required_traits.iter().position(|t| paths_equal(t, &path)) {
                     required_traits.remove(pos);
                 }
                 #[cfg(feature = "serde")]
-                if let Some(pos) = serde_traits.iter().position(|t| t == &path) {
+                if let Some(pos) = serde_traits.iter().position(|t| paths_equal(t, &path)) {
                     serde_traits.remove(pos);
                 }
             }

@@ -16,7 +16,7 @@ mod tests {
         // Using `event` attribute macro with existing derive
         // The `#[event]` macro will duplicate derives if after any `#derive(...)]`
         #[event]
-        #[derive(Clone)]
+        #[derive(Clone, Default)]
         struct TestEventB(String, Vec<u128>);
 
         // Using `EventMarker` derive macro

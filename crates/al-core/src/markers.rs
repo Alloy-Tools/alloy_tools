@@ -35,7 +35,9 @@ impl<
 /// It requires impl of `sealed::Marker` to ensure all required traits are impl'd
 /// _type_name is derived from the module_path and type name, eg. `my_crate::MyEvent`
 pub trait EventMarker: sealed::EventMarker {
-    fn _type_name() -> &'static str;
     fn _module_path() -> &'static str;
 }
 impl<T: EventMarker> sealed::EventMarker for T {}
+
+pub trait TransportRequirements: Send + Sync + std::fmt::Debug + std::any::Any {}
+impl<T: Send + Sync + std::fmt::Debug + std::any::Any> TransportRequirements for T {}
