@@ -36,7 +36,7 @@ impl<T: TransportRequirements> Transport<T> for Queue<T> {
         match self.queue.lock() {
             Ok(mut guard) => guard
                 .pop_front()
-                .ok_or_else(|| TransportError::Custom("No data in Queue".to_string())),
+                .ok_or_else(|| TransportError::Transport("No data in Queue".to_string())),
             Err(e) => Err(e.into()),
         }
     }

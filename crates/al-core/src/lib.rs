@@ -1,14 +1,10 @@
 mod command;
 mod event;
-#[cfg(feature = "serde")]
-mod event_visitors;
 mod markers;
-mod queue;
-#[cfg(feature = "serde")]
-mod registry;
-#[cfg(feature = "serde")]
-mod serde_format;
 mod transport;
+mod transports;
+#[cfg(feature = "serde")]
+mod serde;
 
 pub use command::Command;
 pub use event::type_with_generics;
@@ -18,19 +14,20 @@ pub use event::EVENT_REGISTRY;
 pub use markers::EventMarker;
 pub use markers::EventRequirements;
 pub use markers::TransportRequirements;
-pub use queue::Queue;
 #[cfg(feature = "serde")]
-pub use registry::Registry;
+pub use serde::registry::Registry;
 #[cfg(feature = "serde")]
-pub use registry::SharedRegistry;
+pub use serde::registry::SharedRegistry;
 #[cfg(all(feature = "serde", feature = "binary"))]
-pub use serde_format::BinarySerde;
+pub use serde::serde_format::BinarySerde;
 #[cfg(all(feature = "serde", feature = "json"))]
-pub use serde_format::JsonSerde;
+pub use serde::serde_format::JsonSerde;
 #[cfg(feature = "serde")]
-pub use serde_format::SerdeFormat;
-pub use transport::Pipeline;
+pub use serde::serde_format::SerdeFormat;
+pub use transport::Transport;
 pub use transport::TransportError;
+pub use transports::pipeline::Pipeline;
+pub use transports::queue::Queue;
 
 #[cfg(test)]
 mod tests {
