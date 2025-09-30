@@ -10,30 +10,17 @@ use std::{
 pub static EVENT_REGISTRY: once_cell::sync::Lazy<crate::serde::registry::EventRegistry> =
     once_cell::sync::Lazy::new(|| crate::serde::registry::EventRegistry::new());
 
-/// Used to mark other code that have required traits as valid for serde features
-mod sealed {
-    /// If no serde feature, this is a dummy trait
-    #[cfg(not(feature = "serde"))]
-    pub trait SerdeFeature {}
-    /// If no serde feature, all EventMarker types implement this dummy trait
-    #[cfg(not(feature = "serde"))]
-    impl<T: crate::EventMarker> SerdeFeature for T {}
-
-    /// If serde feature is enabled, this requires erased_serde Serialize
-    #[cfg(feature = "serde")]
-    pub trait SerdeFeature: erased_serde::Serialize {}
-    /// If serde feature is enabled, all EventMarker types that also implement serde::Serialize implement this trait
-    #[cfg(feature = "serde")]
-    impl<T: crate::EventMarker + serde::Serialize> SerdeFeature for T {}
-}
-
 /// Helper function to return the simple names of generic events
 pub fn type_with_generics<T>(_: &T) -> String {
     tynm::type_name::<T>()
 }
 
 /// The `Event` trait defines the required methods for event types to exist in the system along with trait bounds that dont interfere with dyn usage
-pub trait Event: Send + Sync + Debug + Any + sealed::SerdeFeature + 'static {
+pub trait Event: Send + Sync + Debug + Any + crate::SerdeFeature + 'static {
+    #[cfg(feature = "serde")]
+    fn register(self) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+    where
+        Self: for<'de> serde::Deserialize<'de>;
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
     fn type_with_generics(&self) -> String;
@@ -51,7 +38,15 @@ pub trait Event: Send + Sync + Debug + Any + sealed::SerdeFeature + 'static {
 
 /// Blanket implementation of the `Event` trait for all types that implement `EventMarker` and the required event traits
 /// This allows any type that implements `EventMarker` and the traits required by `EventRequirements` to automatically be treated as an `Event`
-impl<T: EventMarker + EventRequirements + sealed::SerdeFeature> Event for T {
+impl<T: EventMarker + EventRequirements + crate::SerdeFeature> Event for T {
+    #[cfg(feature = "serde")]
+    fn register(self) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+    where
+        Self: for<'de> serde::Deserialize<'de>,
+    {
+        crate::EVENT_REGISTRY.register_event(self)
+    }
+
     /// Returns a reference to self as a dyn Any
     fn as_any(&self) -> &dyn Any {
         self

@@ -69,8 +69,8 @@ impl EventRegistry {
 /// Macro to register an event type with the global event registry.
 #[macro_export]
 macro_rules! register_event {
-    ($event:expr) => {{
-        if let Err(e) = $crate::EVENT_REGISTRY.register_event($event) {
+    ($event:ty) => {{
+        if let Err(e) = $crate::EVENT_REGISTRY.register_event(<$event>::default()) {
             panic!(
                 "Failed to register deserializer for event type {}: {}",
                 stringify!($event),
@@ -83,8 +83,8 @@ macro_rules! register_event {
 /// Macro to register an event type with any registry.
 #[macro_export]
 macro_rules! register_event_with {
-    ($registry:expr, $event:expr) => {{
-        if let Err(e) = $registry.register_event($event) {
+    ($registry:expr, $event:ty) => {{
+        if let Err(e) = $registry.register_event(<$event>::default()) {
             panic!(
                 "Failed to register deserializer for event type {} in registry {}: {}",
                 stringify!($event),

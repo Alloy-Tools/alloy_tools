@@ -1,10 +1,9 @@
 #[cfg(test)]
 mod tests {
-    use al_core::{EventMarker, EventRequirements};
     use al_derive::event;
 
     /// Helper function to ensure a type implements EventMarker
-    fn has_impl_marker<T: EventMarker>() {}
+    fn has_impl_marker<T: al_core::EventMarker>() {}
 
     /// Test `event` attribute and `EventMarker` derive macros for simple structs
     #[test]

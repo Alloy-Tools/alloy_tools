@@ -1,3 +1,5 @@
+// map `self` to `al_core` allowing the use of derive macros that use `al_core::..`
+extern crate self as al_core;
 mod command;
 mod event;
 mod markers;
@@ -13,6 +15,8 @@ pub use event::Event;
 pub use event::EVENT_REGISTRY;
 pub use markers::EventMarker;
 pub use markers::EventRequirements;
+#[cfg(feature = "serde")]
+pub use markers::SerdeFeature;
 pub use markers::TransportRequirements;
 #[cfg(feature = "serde")]
 pub use serde::registry::Registry;
@@ -32,7 +36,7 @@ pub use transports::splice::Splice;
 
 #[cfg(test)]
 mod tests {
-    use crate::{Command, Event, EventMarker, EventRequirements};
+    use crate::{Command, Event};
     use al_derive::event;
     use std::hash::{DefaultHasher, Hash, Hasher};
 
@@ -454,8 +458,8 @@ mod tests {
         let generic_val = TestEventGeneric(TEST_VAL).to_cmd();
         let generic_val_same = TestEventGeneric(TEST_VAL).to_cmd();
         let generic_val_diff = TestEventGeneric(TEST_VAL + 1).to_cmd();
-        let generic_str = TestEventGeneric(TEST_MSG).to_cmd();
-        let generic_str_same = TestEventGeneric(TEST_MSG).to_cmd();
+        let generic_str = TestEventGeneric(TEST_MSG.to_string()).to_cmd();
+        let generic_str_same = TestEventGeneric(TEST_MSG.to_string()).to_cmd();
         let generic_str_diff = TestEventGeneric(TEST_MSG[1..].to_string()).to_cmd();
 
         assert_eq!(cmd, cmd.clone());
@@ -672,12 +676,9 @@ mod tests {
         assert_ne!(generic_str_json, generic_str_diff_json);
         assert_ne!(generic_str_json, a_json);
 
-        register_event!(TestEventPayload {
-            value: 0,
-            message: "".to_string()
-        });
-        register_event!(TestEventGeneric(0u128));
-        register_event!(TestEventGeneric(String::new()));
+        register_event!(TestEventPayload);
+        register_event!(TestEventGeneric<u128>);
+        register_event!(TestEventGeneric<String>);
         register_event!(TestEventA);
         register_event!(TestEventB);
 
@@ -963,12 +964,9 @@ mod tests {
         assert_ne!(generic_str_binary, generic_str_diff_binary);
         assert_ne!(generic_str_binary, a_binary);
 
-        register_event!(TestEventPayload {
-            value: 0,
-            message: "".to_string()
-        });
-        register_event!(TestEventGeneric(0u128));
-        register_event!(TestEventGeneric(String::new()));
+        register_event!(TestEventPayload);
+        register_event!(TestEventGeneric<u128>);
+        register_event!(TestEventGeneric<String>);
         register_event!(TestEventA);
         register_event!(TestEventB);
 

@@ -1,7 +1,32 @@
 /// Sealed marker traits ensure all required traits are impl'd while users can only impl their desired mark
 mod sealed {
     pub trait EventMarker: super::EventRequirements {}
+
+    /// Used to mark other code that have required traits as valid for serde features
+    /// If no serde feature, this is a dummy trait
+    #[cfg(not(feature = "serde"))]
+    pub trait SerdeFeature {}
+    /// If no serde feature, all EventMarker types implement this dummy trait
+    #[cfg(not(feature = "serde"))]
+    impl<T: EventMarker> SerdeFeature for T {}
+
+    /// If serde feature is enabled, this requires erased_serde Serialize
+    #[cfg(feature = "serde")]
+    pub trait SerdeFeature: erased_serde::Serialize {}
+    /// If serde feature is enabled, all EventMarker types that also implement serde::Serialize implement this trait
+    #[cfg(feature = "serde")]
+    impl<
+            T: EventMarker
+                + serde::Serialize
+                + for<'de> serde::Deserialize<'de>
+                + for<'de> serde::de::Deserialize<'de>,
+        > SerdeFeature for T
+    {
+    }
 }
+
+pub trait SerdeFeature: sealed::SerdeFeature {}
+impl<T: sealed::SerdeFeature> SerdeFeature for T {}
 
 /// Required traits for an event type to be used in the event system
 pub trait EventRequirements:

@@ -25,7 +25,9 @@ pub fn event_marker_derive(input: TokenStream) -> TokenStream {
 
     for param in &mut input.generics.params {
         if let syn::GenericParam::Type(type_param) = param {
-            type_param.bounds.push(syn::parse_quote!(EventRequirements));
+            type_param
+                .bounds
+                .push(syn::parse_quote!(al_core::EventRequirements));
         }
     }
     derive_event_marker(input)
@@ -36,7 +38,7 @@ pub fn event_marker_derive(input: TokenStream) -> TokenStream {
 fn derive_event_marker(input: DeriveInput) -> TokenStream {
     let name = &input.ident;
     let (impl_generics, type_generics, where_clause) = &input.generics.split_for_impl();
-    quote! {impl #impl_generics EventMarker for #name #type_generics #where_clause {
+    quote! {impl #impl_generics al_core::EventMarker for #name #type_generics #where_clause {
         fn _module_path() -> &'static str {
             module_path!()
         }
