@@ -7,6 +7,9 @@ impl<T: TransportRequirements, F: Fn(T) -> T + Send + Sync> TransformFn<T> for F
 pub trait LinkFn: Fn() -> Result<(), TransportError> + Send + Sync {}
 impl<F: Fn() -> Result<(), TransportError> + Send + Sync> LinkFn for F {}
 
+//TODO: Internals are `Arc(Pipeline<T>)` rather than `Arc(dyn Transport<T>)` to enable pattern matching. Remove once `Link`s are setup with `Watcher`s rather than manually polling. Can `Pipeline::Transport` be removed then?
+//TODO: can internals be `&'a dyn Transport<T>` rather than `Arc`?
+/// Recursive `Pipeline<T>` enum allowing multiple `dyn Transport<T>` to be combined together into a single `Pipeline<T>`.
 #[derive(Clone)]
 pub enum Pipeline<T: TransportRequirements> {
     Transport(Arc<dyn Transport<T>>),
@@ -17,8 +20,6 @@ pub enum Pipeline<T: TransportRequirements> {
     ),
     Link(Arc<Pipeline<T>>, Arc<Pipeline<T>>, Arc<dyn LinkFn>),
 }
-//TODO: can/should the `Pipeline`s in the `Transform` and `Link` be `dyn Transport<T>` instead, removing the need for `Transport` as a simple wrapper for `dyn Transport`
-//      or maybe they should be `&'a dyn Transport<T>` rather than `Arc`?
 
 /// Impl Debug for pipeline manually as `Fn()` doesn't support `Debug`
 impl<T: TransportRequirements> std::fmt::Debug for Pipeline<T> {

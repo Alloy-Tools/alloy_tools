@@ -2,10 +2,12 @@ pub mod pipeline;
 pub mod queue;
 pub mod splice;
 
-
 #[cfg(test)]
 mod test {
-    use crate::{transport::Transport, transports::splice::Splice, Command, Pipeline, Queue, TransportRequirements};
+    use crate::{
+        transport::Transport, transports::splice::Splice, Command, Pipeline, Queue,
+        TransportRequirements,
+    };
     use std::sync::Arc;
 
     fn make_queue_link<T: TransportRequirements>(
@@ -77,20 +79,23 @@ mod test {
 
     #[test]
     fn splice_pipeline_send() {
-        let p0 = Arc::new(make_queue_link::<Command>(None, None));
-        let p1 = Arc::new(make_queue_link::<String>(None, None));
-
-        // Splice::new inserts a splice between the pipelines, returning the first pipeline as the entry to the splice
-        let (p0, p1) = Splice::new(p0, p1, Arc::new(move |data| {
-            let ret = format!("Command: {:?}", data);
-            println!("{}", ret);
-            ret
-        }));
+        // `Splice::new` inserts a `SpliceTransport` between the pipelines, returning the `Splice` as the transport
+        let splice = Splice::new(
+            Arc::new(make_queue_link::<Command>(None, None)),
+            Arc::new(make_queue_link::<String>(None, None)),
+            Arc::new(move |data| {
+                let ret = format!("Command: {:?}", data);
+                println!("{}", ret);
+                Ok(ret)
+            }),
+        );
 
         // Send `Command`
-        p0.send(Command::Stop).unwrap();
+        splice.send(Command::Stop).unwrap();
+
+        //TODO: setup `Watcher`s with links, removing the need to manually poll them
         // Handle first link
-        if let Pipeline::Link(_, _, ref link_fn) = *p0 {
+        /*if let Pipeline::Link(_, _, ref link_fn) = *p0 {
             link_fn().unwrap();
         } else {
             panic!("The pipeline should be a link!");
@@ -100,8 +105,9 @@ mod test {
             link_fn().unwrap();
         } else {
             panic!("The pipeline should be a link!");
-        }
+        }*/
+
         // Recv `String`
-        assert_eq!(p1.recv().unwrap(), "Command: Command::Stop");
+        assert_eq!(splice.consumer().recv().unwrap(), "Command: Command::Stop");
     }
 }

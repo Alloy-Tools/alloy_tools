@@ -1,10 +1,10 @@
 mod command;
 mod event;
 mod markers;
-mod transport;
-mod transports;
 #[cfg(feature = "serde")]
 mod serde;
+mod transport;
+mod transports;
 
 pub use command::Command;
 pub use event::type_with_generics;
@@ -28,6 +28,7 @@ pub use transport::Transport;
 pub use transport::TransportError;
 pub use transports::pipeline::Pipeline;
 pub use transports::queue::Queue;
+pub use transports::splice::Splice;
 
 #[cfg(test)]
 mod tests {

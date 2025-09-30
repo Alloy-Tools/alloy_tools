@@ -1,66 +1,101 @@
 use std::sync::Arc;
 
-use crate::{Pipeline, Transport, TransportRequirements};
+use crate::{Pipeline, Transport, TransportError, TransportRequirements};
 
-pub trait SpliceFn<T, U>: Fn(T) -> U + Send + Sync {}
-impl<T: TransportRequirements, U: TransportRequirements, F: Fn(T) -> U + Send + Sync> SpliceFn<T, U>
-    for F
-{
-}
+type SpliceFn<F, T> = Arc<dyn Fn(F) -> Result<T, TransportError> + Send + Sync>;
 
-pub struct Splice<F: TransportRequirements, T: TransportRequirements> {
-    producer: Arc<Pipeline<F>>,
-    consumer: Arc<Pipeline<T>>,
-    splice_fn: Arc<dyn SpliceFn<F, T>>,
-}
+pub struct Splice<F: TransportRequirements, T: TransportRequirements>(
+    Arc<dyn Transport<F>>,
+    Arc<dyn Transport<T>>,
+);
 
 impl<F: TransportRequirements, T: TransportRequirements> std::fmt::Debug for Splice<F, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Splice")
-            .field("from", &crate::event::type_with_generics(&self.producer))
-            .field("to", &crate::event::type_with_generics(&self.consumer))
+        f.debug_tuple("Splice")
+            .field(&self.0)
+            .field(&self.1)
+            .field(&"<SpliceFn>")
             .finish()
     }
 }
 
 impl<F: TransportRequirements, T: TransportRequirements> Splice<F, T> {
     pub fn new(
-        producer: Arc<Pipeline<F>>,
-        consumer: Arc<Pipeline<T>>,
-        splice_fn: Arc<dyn SpliceFn<F, T>>,
-    ) -> (Arc<Pipeline<F>>, Arc<Pipeline<T>>) {
-        let ret = (producer.clone(), consumer.clone());
-        let splice = Arc::new(Self {
-            producer,
-            consumer,
-            splice_fn,
-        });
+        producer: Arc<dyn Transport<F>>,
+        consumer: Arc<dyn Transport<T>>,
+        splice_fn: SpliceFn<F, T>,
+    ) -> Arc<Self> {
+        // Create the new `SpliceTransport<F>` that transforms the data and sends it to the consumer
+        let consumer_clone = consumer.clone();
+        let splice_transport = Arc::new(SpliceTransport::<F>(Arc::new(move |data| {
+            consumer_clone.send(splice_fn(data)?)
+        })));
 
-        //TODO: insert the new `SpliceTransport` into the end of the producer (the consumer shouldn't need it?? its not recv-able anyways)
-        // Then return the new `Splice` that acts as the pipeline wrapper
+        // Set up a `Link` from the producer to the `SpliceTransport<F>`
+        let splice_transport_clone = splice_transport.clone();
+        let producer_clone = producer.clone();
+        let link = Arc::new(Pipeline::Link(
+            Arc::new(Pipeline::Transport(producer)),
+            Arc::new(Pipeline::Transport(splice_transport)),
+            Arc::new(move || splice_transport_clone.send(producer_clone.recv()?)),
+        ));
+        //TODO: remove the two extra `Arc::new(Pipeline::Transport())`s after making `Pipeline<T>` take `dyn Transport<T>` rather than `Pipeline<T>`
 
-        ret
+        // setting the new `Link` as the producer in the `Splice`
+        Arc::new(Self(link, consumer))
+    }
+
+    #[allow(unused)]
+    /// Returns the `Splice` internal producer, a `dyn Transport<F>`
+    pub fn producer(&self) -> &Arc<dyn Transport<F>> {
+        &self.0
+    }
+
+    #[allow(unused)]
+    /// Returns the `Splice` internal consumer, a `dyn Transport<T>`
+    pub fn consumer(&self) -> &Arc<dyn Transport<T>> {
+        &self.1
     }
 }
 
-/// On `send`, converts data from type `F` to type `T` using the provided `SpliceFn<F,T>` and calls `send` on the consumer.
-/// Not receivable.
+/// On `send`, calls `send` on the internal `splice.producer<F>()`.
+/// Not receivable. Rather than `recv<F>`, must access the internal `splice.consumer<T>()` to call `recv<T>`.
 impl<F: TransportRequirements, T: TransportRequirements> Transport<F> for Splice<F, T> {
     fn send(&self, data: F) -> Result<(), crate::TransportError> {
-        self.consumer.send((self.splice_fn)(data))
+        self.0.send(data)
     }
 
     fn recv(&self) -> Result<F, crate::TransportError> {
-        Err(crate::TransportError::NoRecv)
+        Err(crate::TransportError::NoRecv("Not receivable. Rather than `recv<F>`, must access the internal `splice.consumer<T>()` to call `recv<T>`.".to_string()))
     }
 }
 
-/* TODO:
-`Splice` should wrap the pipelines, making `Splice.send` send to the producer while `Splice.recv` recvs from the consumer
-`SpliceTransport` should do what `Splice` did. Not recv-able and send should send to the consumer after using the `splice_fn`
-*/
-pub struct SpliceTransport<T: TransportRequirements> {
-    producer: Arc<Pipeline<F>>,
-    consumer: Arc<Pipeline<T>>,
-    splice_fn: Arc<dyn SpliceFn<F, T>>,
+/* ********************
+  SpliceTransport
+******************** */
+type SpliceFnWrapper<F> = Arc<dyn Fn(F) -> Result<(), TransportError> + Send + Sync>;
+
+/// `SpliceTransport` acts as a hook to call the `SpliceFn` of the `Splice` that created it
+pub struct SpliceTransport<F: TransportRequirements>(SpliceFnWrapper<F>);
+
+impl<F: TransportRequirements> std::fmt::Debug for SpliceTransport<F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("SpliceTransport")
+            .field(&"<SpliceFnWrapper>")
+            .finish()
+    }
+}
+
+/// On `send`, calls the `SpliceFn` of the `Splice` that created the `SpliceTransport`.
+/// Not receivable. Must `recv` from the `Splice` internal consumer.
+impl<F: TransportRequirements> Transport<F> for SpliceTransport<F> {
+    fn send(&self, data: F) -> Result<(), crate::TransportError> {
+        self.0(data)
+    }
+
+    fn recv(&self) -> Result<F, crate::TransportError> {
+        Err(crate::TransportError::NoRecv(
+            "Not receivable. Must `recv` from the `Splice` internal consumer.".to_string(),
+        ))
+    }
 }

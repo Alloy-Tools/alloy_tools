@@ -11,8 +11,8 @@ pub enum TransportError {
     Custom(String),
     LockPoisoned(String),
     Transport(String),
-    NoSend,
-    NoRecv,
+    NoSend(String),
+    NoRecv(String),
 }
 
 impl<T> From<PoisonError<T>> for TransportError {
