@@ -5,6 +5,7 @@ mod event;
 mod markers;
 #[cfg(feature = "serde")]
 mod serde;
+mod task;
 mod transport;
 mod transports;
 
@@ -28,6 +29,7 @@ pub use serde::serde_format::BinarySerde;
 pub use serde::serde_format::JsonSerde;
 #[cfg(feature = "serde")]
 pub use serde::serde_format::SerdeFormat;
+pub use task::Task;
 pub use transport::Transport;
 pub use transport::TransportError;
 pub use transports::pipeline::Pipeline;
