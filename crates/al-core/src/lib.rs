@@ -4,7 +4,7 @@ mod command;
 mod event;
 mod markers;
 #[cfg(feature = "serde")]
-mod serde;
+mod serde_utils;
 mod task;
 mod transport;
 mod transports;
@@ -18,22 +18,23 @@ pub use markers::EventMarker;
 pub use markers::EventRequirements;
 #[cfg(feature = "serde")]
 pub use markers::SerdeFeature;
-pub use markers::TransportRequirements;
-pub use markers::TransportItemRequirements;
-pub use markers::TaskTypes;
 pub use markers::TaskStateRequirements;
+pub use markers::TaskTypes;
+pub use markers::TransportItemRequirements;
+pub use markers::TransportRequirements;
 #[cfg(feature = "serde")]
-pub use serde::registry::Registry;
+pub use serde_utils::registry::Registry;
 #[cfg(feature = "serde")]
-pub use serde::registry::SharedRegistry;
+pub use serde_utils::registry::SharedRegistry;
 #[cfg(all(feature = "serde", feature = "binary"))]
-pub use serde::serde_format::BinarySerde;
+pub use serde_utils::serde_format::BinarySerde;
 #[cfg(all(feature = "serde", feature = "json"))]
-pub use serde::serde_format::JsonSerde;
+pub use serde_utils::serde_format::JsonSerde;
 #[cfg(feature = "serde")]
-pub use serde::serde_format::SerdeFormat;
-pub use task::Task;
+pub use serde_utils::serde_format::SerdeFormat;
 pub use task::ExtendedTaskState;
+pub use task::Task;
+pub use task::TaskMode;
 pub use transport::Transport;
 pub use transport::TransportError;
 pub use transports::pipeline::Pipeline;

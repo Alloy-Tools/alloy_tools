@@ -5,7 +5,13 @@ use crate::{ExtendedTaskState, Task, Transport, TransportError, TransportItemReq
 pub trait TransformFn<T>: Fn(T) -> T + Send + Sync {}
 impl<T: TransportItemRequirements, F: Fn(T) -> T + Send + Sync> TransformFn<T> for F {}
 
-type LinkTask<T> = Arc<Task<(), TransportError, ExtendedTaskState<(), TransportError, (Arc<dyn Transport<T>>, Arc<dyn Transport<T>>)>>>;
+type LinkTask<T> = Arc<
+    Task<
+        (),
+        TransportError,
+        ExtendedTaskState<(), TransportError, (Arc<dyn Transport<T>>, Arc<dyn Transport<T>>)>,
+    >,
+>;
 
 //TODO: Can `Pipeline::Transport` be removed? can internals be `&'a dyn Transport<T>` rather than `Arc`?
 /// Recursive `Pipeline<T>` enum allowing multiple `dyn Transport<T>` to be combined together into a single `Pipeline<T>`.

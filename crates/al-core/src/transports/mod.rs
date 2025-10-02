@@ -6,7 +6,10 @@ pub mod splice;
 mod tests {
     use tokio::time::sleep;
 
-    use crate::{ task::WithTaskState, Command, Pipeline, Queue, Splice, Task, Transport, TransportItemRequirements };
+    use crate::{
+        task::WithTaskState, Command, Pipeline, Queue, Splice, Task, Transport,
+        TransportItemRequirements,
+    };
     use std::{sync::Arc, time::Duration};
 
     fn make_queue_link<T: TransportItemRequirements>(
@@ -15,20 +18,32 @@ mod tests {
     ) -> Pipeline<T> {
         let t0 = t0.unwrap_or_else(|| Arc::new(Queue::<T>::new()));
         let t1 = t1.unwrap_or_else(|| Arc::new(Queue::<T>::new()));
-        Pipeline::Link(t0.clone(), t1.clone(), Arc::new(Task::new({
-            println!("Setting up passed fn");
-            move |_, state: &mut crate::ExtendedTaskState<(), crate::TransportError, (Arc<dyn Transport<T>>, Arc<dyn Transport<T>>)>| {
-                println!("Running outer passed fn");
-                let (t0, t1) = state.clone().into_inner();
-                async move {
-                    println!("Running inner passed fn");
-                    let data = t0.recv()?;
-                    println!("Got data: {:?}", data);
-                    t1.send(data)?;
-                    Ok(())
-                }
-            }
-        }, (t0, t1).as_task_state())))
+        Pipeline::Link(
+            t0.clone(),
+            t1.clone(),
+            Arc::new(Task::new(
+                {
+                    println!("Setting up passed fn");
+                    move |_,
+                          state: &mut crate::ExtendedTaskState<
+                        (),
+                        crate::TransportError,
+                        (Arc<dyn Transport<T>>, Arc<dyn Transport<T>>),
+                    >| {
+                        println!("Running outer passed fn");
+                        let (t0, t1) = state.clone().into_inner();
+                        async move {
+                            println!("Running inner passed fn");
+                            let data = t0.recv()?;
+                            println!("Got data: {:?}", data);
+                            t1.send(data)?;
+                            Ok(())
+                        }
+                    }
+                },
+                (t0, t1).as_task_state(),
+            )),
+        )
     }
 
     #[tokio::test]

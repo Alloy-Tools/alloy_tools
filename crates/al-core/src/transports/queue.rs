@@ -10,7 +10,10 @@ impl<T: std::fmt::Debug> std::fmt::Debug for Queue<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.queue.lock() {
             Ok(queue) => f.debug_struct("Queue").field("queue", &*queue).finish(),
-            Err(e) => f.debug_struct("Queue").field("queue", &format!("<lock poisoned>: {}", e.to_string())).finish(),
+            Err(e) => f
+                .debug_struct("Queue")
+                .field("queue", &format!("<lock poisoned>: {}", e.to_string()))
+                .finish(),
         }
     }
 }

@@ -7,8 +7,8 @@ use std::{
 
 /// Lazy static initialization of the global event registry allowing `Box<dyn Event>` and therefore `Command::Event` variants to be deserialized
 #[cfg(feature = "serde")]
-pub static EVENT_REGISTRY: once_cell::sync::Lazy<crate::serde::registry::EventRegistry> =
-    once_cell::sync::Lazy::new(|| crate::serde::registry::EventRegistry::new());
+pub static EVENT_REGISTRY: once_cell::sync::Lazy<crate::serde_utils::registry::EventRegistry> =
+    once_cell::sync::Lazy::new(|| crate::serde_utils::registry::EventRegistry::new());
 
 /// Helper function to return the simple names of generic events
 pub fn type_with_generics<T>(_: &T) -> String {
@@ -130,7 +130,7 @@ impl<'de> serde::Deserialize<'de> for Box<dyn Event> {
     {
         deserializer.deserialize_tuple(
             2,
-            crate::serde::event_visitors::EventVisitor {
+            crate::serde_utils::event_visitors::EventVisitor {
                 registry: &EVENT_REGISTRY,
             },
         )

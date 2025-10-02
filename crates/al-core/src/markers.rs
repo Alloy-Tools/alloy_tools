@@ -32,29 +32,12 @@ impl<T: sealed::SerdeFeature> SerdeFeature for T {}
 
 /// Required traits for an event type to be used in the event system
 pub trait EventRequirements:
-    'static
-    + Send
-    + Sync
-    + Clone
-    + Default
-    + PartialEq
-    + Any
-    + Debug
-    + Hash
+    'static + Send + Sync + Clone + Default + PartialEq + Any + Debug + Hash
 {
 }
 
-impl<
-        T: 'static
-            + Send
-            + Sync
-            + Clone
-            + Default
-            + PartialEq
-            + Any
-            + Debug
-            + Hash,
-    > EventRequirements for T
+impl<T: 'static + Send + Sync + Clone + Default + PartialEq + Any + Debug + Hash> EventRequirements
+    for T
 {
 }
 
@@ -78,19 +61,6 @@ impl<T: TransportRequirements + Clone> TransportItemRequirements for T {}
 pub trait TaskTypes: Send + Sync + Clone + 'static {}
 impl<T: Send + Sync + Clone + 'static> TaskTypes for T {}
 
-pub trait TaskStateRequirements:
-    'static
-    + Send
-    + Sync
-    + Clone
-{
-}
+pub trait TaskStateRequirements: 'static + Send + Sync + Clone {}
 
-impl<
-        T: 'static
-            + Send
-            + Sync
-            + Clone
-    > TaskStateRequirements for T
-{
-}
+impl<T: 'static + Send + Sync + Clone> TaskStateRequirements for T {}

@@ -1,10 +1,10 @@
-use std::{future::Future, marker::PhantomData};
+use crate::{TaskStateRequirements, TaskTypes};
 use std::sync::Arc;
 use std::time::Duration;
+use std::{future::Future, marker::PhantomData};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
-use crate::{TaskStateRequirements, TaskTypes};
 
 /// Error type for `Task` types
 #[derive(Debug, Clone)]
@@ -152,7 +152,9 @@ pub struct ExtendedTaskState<T: TaskTypes, E: TaskTypes, S: TaskStateRequirement
     extended: S,
 }
 
-impl<T: TaskTypes, E: TaskTypes, S: TaskStateRequirements + Default> Default for ExtendedTaskState<T, E, S> {
+impl<T: TaskTypes, E: TaskTypes, S: TaskStateRequirements + Default> Default
+    for ExtendedTaskState<T, E, S>
+{
     fn default() -> Self {
         Self {
             base: BaseTaskState::default(),
@@ -175,7 +177,9 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskStateRequirements> ExtendedTaskState<T, 
 }
 
 /// Auto impl `TaskState`
-impl<T: TaskTypes, E: TaskTypes, S: TaskStateRequirements> TaskState<T,E> for ExtendedTaskState<T, E, S> {
+impl<T: TaskTypes, E: TaskTypes, S: TaskStateRequirements> TaskState<T, E>
+    for ExtendedTaskState<T, E, S>
+{
     fn get_mode(&self) -> &TaskMode {
         self.base.get_mode()
     }
@@ -209,6 +213,7 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskStateRequirements> TaskState<T,E> for Ex
 #[derive(Debug)]
 pub struct Task<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> {
     handle: Option<JoinHandle<()>>,
+    panicked: Arc<RwLock<bool>>,
     cancelled: Arc<RwLock<bool>>,
     state: Arc<RwLock<S>>,
     _phantom: std::marker::PhantomData<(T, E)>,
@@ -247,7 +252,12 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
         F: FnMut(usize, &mut S) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<T, E>> + Send + Sync + 'static,
     {
-        Self::_duration(f, TaskConfig::new(TaskMode::Duration(duration)), state, Instant::now())
+        Self::_duration(
+            f,
+            TaskConfig::new(TaskMode::Duration(duration)),
+            state,
+            Instant::now(),
+        )
     }
 
     /// Creates a `Task` that runs until a condition is met, with the default `TaskConfig`
@@ -263,7 +273,12 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
     }
 
     /// Creates a `Task` with a specific `TaskConfig`
-    pub fn with_config<F, Fut, C, FutC>(f: F, config: TaskConfig, state: S, condition: Option<C>) -> Result<Self, TaskError>
+    pub fn with_config<F, Fut, C, FutC>(
+        f: F,
+        config: TaskConfig,
+        state: S,
+        condition: Option<C>,
+    ) -> Result<Self, TaskError>
     where
         F: FnMut(usize, &mut S) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<T, E>> + Send + Sync + 'static,
@@ -277,9 +292,11 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
                 f,
                 config,
                 state,
-                condition.ok_or_else(
-                    || TaskError::NoCondition("Missing condition function for `TaskMode::Conditional`".to_string())
-                )?
+                condition.ok_or_else(|| {
+                    TaskError::NoCondition(
+                        "Missing condition function for `TaskMode::Conditional`".to_string(),
+                    )
+                })?,
             )),
             TaskMode::Duration(_) => Ok(Task::_duration(f, config, state, Instant::now())),
         }
@@ -291,7 +308,6 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
         F: FnMut(usize, &mut S) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<T, E>> + Send + Sync + 'static,
     {
-        println!("Making tokio thread");
         let cancelled = Arc::new(RwLock::new(false));
         let cancelled_clone = cancelled.clone();
 
@@ -317,12 +333,18 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
                     // Check if last result causes a stop
                     if config.stop_on_error {
                         if let Err(_) = result {
-                            Task::set_state(&mut *state_clone.write().await, iteration, result).await;
+                            Task::set_state(&mut *state_clone.write().await, iteration, result)
+                                .await;
                             break;
                         }
                     }
 
                     Task::set_state(&mut *state_clone.write().await, iteration, result).await;
+                }
+
+                // Check interval bounds
+                if iteration >= usize::max_value() {
+                    iteration = 0;
                 }
 
                 iteration += 1;
@@ -337,7 +359,8 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
 
         Self {
             handle: Some(handle),
-            cancelled,  
+            panicked: Arc::new(RwLock::new(false)),
+            cancelled,
             state,
             _phantom: PhantomData::<(T, E)>,
         }
@@ -376,15 +399,20 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
 
                 // Update the state
                 {
-
                     // Check if last result causes a stop
                     if config.stop_on_error {
                         if let Err(_) = result {
-                            Task::set_state(&mut *state_clone.write().await, iteration, result).await;
+                            Task::set_state(&mut *state_clone.write().await, iteration, result)
+                                .await;
                             break;
                         }
                     }
                     Task::set_state(&mut *state_clone.write().await, iteration, result).await;
+                }
+
+                // Check interval bounds
+                if iteration >= usize::max_value() {
+                    iteration = 0;
                 }
 
                 iteration += 1;
@@ -399,14 +427,20 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
 
         Self {
             handle: Some(handle),
-            cancelled,  
+            panicked: Arc::new(RwLock::new(false)),
+            cancelled,
             state,
             _phantom: PhantomData::<(T, E)>,
         }
     }
 
     /// Starts a `Task` with a conditional structure, checking cancelation along with conditions
-    fn _conditional<F, Fut, C, FutC>(mut f: F, config: TaskConfig, state: S, mut condition: C) -> Self
+    fn _conditional<F, Fut, C, FutC>(
+        mut f: F,
+        config: TaskConfig,
+        state: S,
+        mut condition: C,
+    ) -> Self
     where
         F: FnMut(usize, &mut S) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<T, E>> + Send + Sync + 'static,
@@ -443,11 +477,17 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
                     // Check if last result causes a stop
                     if config.stop_on_error {
                         if let Err(_) = result {
-                            Task::set_state(&mut *state_clone.write().await, iteration, result).await;
+                            Task::set_state(&mut *state_clone.write().await, iteration, result)
+                                .await;
                             break;
                         }
                     }
                     Task::set_state(&mut *state_clone.write().await, iteration, result).await;
+                }
+
+                // Check interval bounds
+                if iteration >= usize::max_value() {
+                    iteration = 0;
                 }
 
                 iteration += 1;
@@ -462,7 +502,8 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
 
         Self {
             handle: Some(handle),
-            cancelled,  
+            panicked: Arc::new(RwLock::new(false)),
+            cancelled,
             state,
             _phantom: PhantomData::<(T, E)>,
         }
@@ -504,11 +545,17 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
                     // Check if last result causes a stop
                     if config.stop_on_error {
                         if let Err(_) = result {
-                            Task::set_state(&mut *state_clone.write().await, iteration, result).await;
+                            Task::set_state(&mut *state_clone.write().await, iteration, result)
+                                .await;
                             break;
                         }
                     }
                     Task::set_state(&mut *state_clone.write().await, iteration, result).await;
+                }
+
+                // Check interval bounds
+                if iteration >= usize::max_value() {
+                    iteration = 0;
                 }
 
                 iteration += 1;
@@ -523,7 +570,8 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
 
         Self {
             handle: Some(handle),
-            cancelled,  
+            panicked: Arc::new(RwLock::new(false)),
+            cancelled,
             state,
             _phantom: PhantomData::<(T, E)>,
         }
@@ -557,20 +605,59 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
         state.clone()
     }
 
+    pub async fn last_result(&self) -> Option<Result<T, E>> {
+        self.state.read().await.get_last_result().clone()
+    }
+
+    pub async fn is_panic(&mut self) -> bool {
+        let handle_done = match &self.handle {
+            Some(handle) => handle.is_finished(),
+            None => true,
+        };
+        match handle_done {
+            false => false, // Has handle that isnt finished
+            true => match self.handle.take() {
+                None => *self.panicked.read().await, // No handle, check panicked state
+                Some(handle) => match handle.await {
+                    Ok(_) => false,
+                    Err(e) => {
+                        let is_panic = e.is_panic();
+                        if is_panic {
+                            *self.panicked.write().await = true;
+                        }
+                        is_panic
+                    }
+                },
+            },
+        }
+    }
+
     /// Checks if the `Task` is currently running
     pub async fn is_running(&self) -> bool {
-        let state = self.state.read().await;
-        state.get_is_running()
+        match &self.handle {
+            Some(handle) => !handle.is_finished(),
+            None => false,
+        }
     }
 
     ///Wait for the `Task` to finish naturally
     pub async fn wait_for_complete(&mut self) -> Option<Result<T, E>> {
-        if let Some(handle) = self.handle.take() {
-            let _ = handle.await;
+        let panicked = match self.handle.take() {
+            Some(handle) => match handle.await {
+                Err(e) => e.is_panic(),
+                Ok(_) => false,
+            },
+            None => false,
+        };
+        // Set panicked state and return `None`
+        if panicked || *self.panicked.read().await {
+            // Only set panic if task finished this call
+            if panicked {
+                *self.panicked.write().await = true;
+            }
+            return None;
         }
-
-        let state = self.state.read().await;
-        state.get_last_result().clone()
+        self.last_result().await
     }
 
     /// Cancel the `Task` and let it finish gracefully
@@ -591,7 +678,7 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
     }
 
     /// Stop the `Task` immediately
-    pub fn abort(& mut self) {
+    pub fn abort(&mut self) {
         if let Some(handle) = self.handle.take() {
             handle.abort();
         }
@@ -621,33 +708,34 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
     }
 }
 
+#[cfg(test)]
 mod tests {
-    use crate::{task::WithTaskState, Task};
+    use crate::{task::WithTaskState, Task, TaskMode};
 
     #[tokio::test]
     async fn infinite_task() {
-        assert!(Task::new(|i, state| {
+        assert!(Task::new(
+            |i, state| {
                 let data = state.clone().into_inner();
                 println!("outer {}: {}", i, data[i]);
                 async move {
                     println!("inner {}: {}", i, data[i]);
                     Ok::<(), ()>(())
                 }
-            }, vec![1,2,3,4,5].as_task_state()).wait_for_complete().await.is_some_and(|res| res.is_ok()));
+            },
+            vec![1, 2, 3, 4, 5].with_task_state(TaskMode::Fixed(5))
+        )
+        .wait_for_complete()
+        .await
+        .is_some_and(|res| res.is_ok()));
     }
 
     #[tokio::test]
-    async fn fixed_task() {
-        
-    }
+    async fn fixed_task() {}
 
     #[tokio::test]
-    async fn conditional_task() {
-        
-    }
+    async fn conditional_task() {}
 
     #[tokio::test]
-    async fn duration_task() {
-        
-    }
+    async fn duration_task() {}
 }

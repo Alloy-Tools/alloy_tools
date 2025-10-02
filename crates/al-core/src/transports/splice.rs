@@ -1,6 +1,8 @@
-use std::{sync::Arc};
+use std::sync::Arc;
 
-use crate::{task::WithTaskState, Pipeline, Task, Transport, TransportError, TransportItemRequirements};
+use crate::{
+    task::WithTaskState, Pipeline, Task, Transport, TransportError, TransportItemRequirements,
+};
 
 type SpliceFn<F, T> = Arc<dyn Fn(F) -> Result<T, TransportError> + Send + Sync>;
 
@@ -35,15 +37,13 @@ impl<F: TransportItemRequirements, T: TransportItemRequirements> Splice<F, T> {
         let link = Arc::new(Pipeline::Link(
             producer.clone(),
             splice_transport.clone(),
-            Arc::new(Task::new(|_, state| {
-                    println!("Setting up splice");
+            Arc::new(Task::new(
+                |_, state| {
                     let (producer, consumer) = state.clone().into_inner();
-                    async move {
-                        println!("running splice");
-                        consumer.send(producer.recv()?)?;
-                        Ok(())
-                    }
-                }, (producer, splice_transport as Arc<dyn Transport<F>>).as_task_state())),
+                    async move { Ok(consumer.send(producer.recv()?)?) }
+                },
+                (producer, splice_transport as Arc<dyn Transport<F>>).as_task_state(),
+            )),
         ));
 
         // setting the new `Link` as the producer in the `Splice`
