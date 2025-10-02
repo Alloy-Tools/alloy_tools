@@ -1,3 +1,5 @@
+use std::{any::Any, fmt::Debug, hash::Hash};
+
 /// Sealed marker traits ensure all required traits are impl'd while users can only impl their desired mark
 mod sealed {
     pub trait EventMarker: super::EventRequirements {}
@@ -36,9 +38,9 @@ pub trait EventRequirements:
     + Clone
     + Default
     + PartialEq
-    + std::any::Any
-    + std::fmt::Debug
-    + std::hash::Hash
+    + Any
+    + Debug
+    + Hash
 {
 }
 
@@ -49,9 +51,9 @@ impl<
             + Clone
             + Default
             + PartialEq
-            + std::any::Any
-            + std::fmt::Debug
-            + std::hash::Hash,
+            + Any
+            + Debug
+            + Hash,
     > EventRequirements for T
 {
 }
@@ -64,5 +66,31 @@ pub trait EventMarker: sealed::EventMarker {
 }
 impl<T: EventMarker> sealed::EventMarker for T {}
 
-pub trait TransportRequirements: Send + Sync + std::fmt::Debug + std::any::Any {}
-impl<T: Send + Sync + std::fmt::Debug + std::any::Any> TransportRequirements for T {}
+/// Trait marking an item as valid to be a `Transport`
+pub trait TransportRequirements: Send + Sync + Debug + Any {}
+impl<T: Send + Sync + Debug + Any> TransportRequirements for T {}
+
+/// Trait marking an item as valid for passing through a `Transport`
+pub trait TransportItemRequirements: TransportRequirements + Clone {}
+impl<T: TransportRequirements + Clone> TransportItemRequirements for T {}
+
+/// `TaskTypes` trait represents the required traits for `Task`s generic types
+pub trait TaskTypes: Send + Sync + Clone + 'static {}
+impl<T: Send + Sync + Clone + 'static> TaskTypes for T {}
+
+pub trait TaskStateRequirements:
+    'static
+    + Send
+    + Sync
+    + Clone
+{
+}
+
+impl<
+        T: 'static
+            + Send
+            + Sync
+            + Clone
+    > TaskStateRequirements for T
+{
+}

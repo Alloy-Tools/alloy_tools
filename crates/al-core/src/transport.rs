@@ -1,12 +1,12 @@
-use crate::TransportRequirements;
+use crate::{TransportItemRequirements, TransportRequirements};
 use std::{fmt::Debug, sync::PoisonError};
 
-pub trait Transport<T: TransportRequirements>: TransportRequirements {
+pub trait Transport<T: TransportItemRequirements>: TransportRequirements {
     fn send(&self, data: T) -> Result<(), TransportError>;
     fn recv(&self) -> Result<T, TransportError>;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum TransportError {
     Custom(String),
     LockPoisoned(String),

@@ -17,7 +17,7 @@ bitcode = { version = "0.6.6", features = ["serde"], optional = true }
 once_cell = { version = "1.21.3", optional = true }
 tynm = "0.2.0"
 #TODO: rt-multi-thread?
-tokio = { version = "1", features = ["rt", "time", "sync"] }
+tokio = { version = "1", features = ["rt", "time", "sync", "macros"] }
 
 [features]
 default = ["serde", "test-utils"]

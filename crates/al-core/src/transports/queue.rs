@@ -1,4 +1,4 @@
-use crate::{transport::Transport, TransportError, TransportRequirements};
+use crate::{transport::Transport, TransportError, TransportItemRequirements};
 use std::{collections::VecDeque, sync::Mutex};
 
 /// Queue transport to implement FIFO transport
@@ -15,7 +15,7 @@ impl<T: std::fmt::Debug> std::fmt::Debug for Queue<T> {
     }
 }
 
-impl<T: TransportRequirements> Queue<T> {
+impl<T: TransportItemRequirements> Queue<T> {
     pub fn new() -> Self {
         Queue::<T> {
             queue: Mutex::new(VecDeque::<T>::new()),
@@ -24,7 +24,7 @@ impl<T: TransportRequirements> Queue<T> {
 }
 
 /// Impl transport for queue in FIFO order, handling the inner mutex for synchronization
-impl<T: TransportRequirements> Transport<T> for Queue<T> {
+impl<T: TransportItemRequirements> Transport<T> for Queue<T> {
     fn send(&self, data: T) -> Result<(), TransportError> {
         match self.queue.lock() {
             Ok(mut guard) => Ok(guard.push_back(data)),

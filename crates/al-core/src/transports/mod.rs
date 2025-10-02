@@ -3,26 +3,36 @@ pub mod queue;
 pub mod splice;
 
 #[cfg(test)]
-mod test {
-    use crate::{
-        transport::Transport, transports::splice::Splice, Command, Pipeline, Queue,
-        TransportRequirements,
-    };
-    use std::sync::Arc;
+mod tests {
+    use tokio::time::sleep;
 
-    fn make_queue_link<T: TransportRequirements>(
-        t0: Option<Arc<Pipeline<T>>>,
-        t1: Option<Arc<Pipeline<T>>>,
+    use crate::{ task::WithTaskState, Command, Pipeline, Queue, Splice, Task, Transport, TransportItemRequirements };
+    use std::{sync::Arc, time::Duration};
+
+    fn make_queue_link<T: TransportItemRequirements>(
+        t0: Option<Arc<dyn Transport<T>>>,
+        t1: Option<Arc<dyn Transport<T>>>,
     ) -> Pipeline<T> {
-        let t0 = t0.unwrap_or_else(|| Arc::new(Pipeline::Transport(Arc::new(Queue::<T>::new()))));
-        let t1 = t1.unwrap_or_else(|| Arc::new(Pipeline::Transport(Arc::new(Queue::<T>::new()))));
-        let t0_clone = Arc::clone(&t0);
-        let t1_clone = Arc::clone(&t1);
-        Pipeline::Link(t0, t1, Arc::new(move || t1_clone.send(t0_clone.recv()?)))
+        let t0 = t0.unwrap_or_else(|| Arc::new(Queue::<T>::new()));
+        let t1 = t1.unwrap_or_else(|| Arc::new(Queue::<T>::new()));
+        Pipeline::Link(t0.clone(), t1.clone(), Arc::new(Task::new({
+            println!("Setting up passed fn");
+            move |_, state: &mut crate::ExtendedTaskState<(), crate::TransportError, (Arc<dyn Transport<T>>, Arc<dyn Transport<T>>)>| {
+                println!("Running outer passed fn");
+                let (t0, t1) = state.clone().into_inner();
+                async move {
+                    println!("Running inner passed fn");
+                    let data = t0.recv()?;
+                    println!("Got data: {:?}", data);
+                    t1.send(data)?;
+                    Ok(())
+                }
+            }
+        }, (t0, t1).as_task_state())))
     }
 
-    #[test]
-    fn pipeline_debug() {
+    #[tokio::test]
+    async fn pipeline_debug() {
         assert_eq!(
             format!(
                 "{:?}",
@@ -42,15 +52,11 @@ mod test {
         assert_eq!(format!("{:?}", l1), "Link(Link(Transport(Queue { queue: [] }), Transport(Queue { queue: [] }), \"<LinkFn>\"), Link(Transport(Queue { queue: [] }), Transport(Queue { queue: [] }), \"<LinkFn>\"), \"<LinkFn>\")");
     }
 
-    #[test]
-    fn pipeline_send() {
+    #[tokio::test]
+    async fn pipeline_send() {
         let l0 = make_queue_link(None, None);
         l0.send(Command::Stop).unwrap();
-        if let Pipeline::Link(_, _, ref link_fn) = l0 {
-            link_fn().unwrap();
-        } else {
-            panic!("The pipeline should be a link!");
-        }
+        sleep(Duration::from_secs(2)).await;
         assert_eq!(l0.recv().unwrap(), Command::Stop);
 
         let l1 = make_queue_link(
@@ -58,27 +64,14 @@ mod test {
             Some(Arc::new(make_queue_link(None, None))),
         );
 
+        sleep(Duration::from_secs(4)).await;
+
         l1.send(Command::Stop).unwrap();
-        if let Pipeline::Link(ref pipeline0, ref pipeline1, ref link_fn) = l1 {
-            if let Pipeline::Link(_, _, ref link_fn) = **pipeline0 {
-                link_fn().unwrap();
-            } else {
-                panic!("The pipeline should be a link!");
-            }
-            link_fn().unwrap();
-            if let Pipeline::Link(_, _, ref link_fn) = **pipeline1 {
-                link_fn().unwrap();
-            } else {
-                panic!("The pipeline should be a link!");
-            }
-        } else {
-            panic!("The pipeline should be a link!");
-        }
         assert_eq!(l1.recv().unwrap(), Command::Stop);
     }
 
-    #[test]
-    fn splice_pipeline_send() {
+    #[tokio::test]
+    async fn splice_pipeline_send() {
         // `Splice::new` inserts a `SpliceTransport` between the pipelines, returning the `Splice` as the transport
         let splice = Splice::new(
             Arc::new(make_queue_link::<Command>(None, None)),
@@ -92,20 +85,6 @@ mod test {
 
         // Send `Command`
         splice.send(Command::Stop).unwrap();
-
-        //TODO: setup `Watcher`s with links, removing the need to manually poll them
-        // Handle first link
-        /*if let Pipeline::Link(_, _, ref link_fn) = *p0 {
-            link_fn().unwrap();
-        } else {
-            panic!("The pipeline should be a link!");
-        }
-        // Handle second link
-        if let Pipeline::Link(_, _, ref link_fn) = *p1 {
-            link_fn().unwrap();
-        } else {
-            panic!("The pipeline should be a link!");
-        }*/
 
         // Recv `String`
         assert_eq!(splice.consumer().recv().unwrap(), "Command: Command::Stop");

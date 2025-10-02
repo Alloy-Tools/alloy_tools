@@ -19,6 +19,9 @@ pub use markers::EventRequirements;
 #[cfg(feature = "serde")]
 pub use markers::SerdeFeature;
 pub use markers::TransportRequirements;
+pub use markers::TransportItemRequirements;
+pub use markers::TaskTypes;
+pub use markers::TaskStateRequirements;
 #[cfg(feature = "serde")]
 pub use serde::registry::Registry;
 #[cfg(feature = "serde")]
@@ -30,6 +33,7 @@ pub use serde::serde_format::JsonSerde;
 #[cfg(feature = "serde")]
 pub use serde::serde_format::SerdeFormat;
 pub use task::Task;
+pub use task::ExtendedTaskState;
 pub use transport::Transport;
 pub use transport::TransportError;
 pub use transports::pipeline::Pipeline;
