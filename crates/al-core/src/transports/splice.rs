@@ -37,7 +37,7 @@ impl<F: TransportItemRequirements, T: TransportItemRequirements> Splice<F, T> {
         let link = Arc::new(Pipeline::Link(
             producer.clone(),
             splice_transport.clone(),
-            Arc::new(Task::new(
+            Arc::new(Task::infinite(
                 |_, state| {
                     let (producer, consumer) = state.blocking_read().inner_clone();
                     async move { Ok(consumer.send(producer.recv()?)?) }

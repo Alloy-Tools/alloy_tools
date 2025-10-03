@@ -1,6 +1,9 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, punctuated::Punctuated, token::Comma, DeriveInput, Meta};
+use syn::{
+    parse_macro_input, parse_quote, punctuated::Punctuated, token::Comma, DeriveInput,
+    GenericParam, Ident, ItemFn, Meta, Path,
+};
 
 /// Debugging attribute macro to print the input tokens
 #[proc_macro_attribute]
@@ -24,10 +27,10 @@ pub fn event_marker_derive(input: TokenStream) -> TokenStream {
     let mut input = parse_macro_input!(input as DeriveInput);
 
     for param in &mut input.generics.params {
-        if let syn::GenericParam::Type(type_param) = param {
+        if let GenericParam::Type(type_param) = param {
             type_param
                 .bounds
-                .push(syn::parse_quote!(al_core::EventRequirements));
+                .push(parse_quote!(al_core::EventRequirements));
         }
     }
     derive_event_marker(input)
@@ -46,10 +49,6 @@ fn derive_event_marker(input: DeriveInput) -> TokenStream {
     .into()
 }
 
-fn paths_equal(p0: &syn::Path, p1: &syn::Path) -> bool {
-    quote! {#p0}.to_string() == quote! {#p1}.to_string()
-}
-
 /// Attribute macro to mark a struct as an event, automatically implementing `EventMarker` and required traits.
 ///
 /// Will cause conflicting implementations if placed after any `#derive(...)]` attributes that implement any super traits of `EventRequirements`.
@@ -57,19 +56,19 @@ fn paths_equal(p0: &syn::Path, p1: &syn::Path) -> bool {
 pub fn event(_: TokenStream, item: TokenStream) -> TokenStream {
     let mut item = parse_macro_input!(item as DeriveInput);
 
-    let mut required_traits: Vec<syn::Path> = vec![
-        syn::parse_quote!(Clone),
-        syn::parse_quote!(Default),
-        syn::parse_quote!(PartialEq),
-        syn::parse_quote!(Hash),
-        syn::parse_quote!(Debug),
-        syn::parse_quote!(al_derive::EventMarker),
+    let mut required_traits: Vec<Path> = vec![
+        parse_quote!(Clone),
+        parse_quote!(Default),
+        parse_quote!(PartialEq),
+        parse_quote!(Hash),
+        parse_quote!(Debug),
+        parse_quote!(al_derive::EventMarker),
     ];
 
     #[cfg(feature = "serde")]
-    let mut serde_traits: Vec<syn::Path> = vec![
-        syn::parse_quote!(serde::Serialize),
-        syn::parse_quote!(serde::Deserialize),
+    let mut serde_traits: Vec<Path> = vec![
+        parse_quote!(serde::Serialize),
+        parse_quote!(serde::Deserialize),
     ];
 
     // find any existing #[derive(...)] attributes and remove any duplicates from required_traits
@@ -84,11 +83,11 @@ pub fn event(_: TokenStream, item: TokenStream) -> TokenStream {
         .flatten()
         .for_each(|meta| {
             if let Meta::Path(path) = meta {
-                if let Some(pos) = required_traits.iter().position(|t| paths_equal(t, &path)) {
+                if let Some(pos) = required_traits.iter().position(|t| t == &path) {
                     required_traits.remove(pos);
                 }
                 #[cfg(feature = "serde")]
-                if let Some(pos) = serde_traits.iter().position(|t| paths_equal(t, &path)) {
+                if let Some(pos) = serde_traits.iter().position(|t| t == &path) {
                     serde_traits.remove(pos);
                 }
             }
@@ -97,18 +96,88 @@ pub fn event(_: TokenStream, item: TokenStream) -> TokenStream {
     // Add all the missing required traits as a second #[derive(...)] attribute
     if !required_traits.is_empty() {
         item.attrs
-            .push(syn::parse_quote!(#[derive(#(#required_traits),*)]));
+            .push(parse_quote!(#[derive(#(#required_traits),*)]));
     }
 
     #[cfg(feature = "serde")]
     // Add serde traits
     if !serde_traits.is_empty() {
-        item.attrs
-            .push(syn::parse_quote!(#[derive(#(#serde_traits),*)]));
+        item.attrs.push(parse_quote!(#[derive(#(#serde_traits),*)]));
     }
 
     quote! {
         #item
     }
     .into()
+}
+
+/// Helper attribute macro to add specific common bounds to functions to have a single place to edit the trait bounds
+#[proc_macro_attribute]
+pub fn with_bounds(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let args = parse_macro_input!(attr with Punctuated<Ident, Comma>::parse_terminated);
+    let mut input_fn = parse_macro_input!(item as ItemFn);
+
+    // Check args to see which bounds to add
+    let add_f = args.iter().any(|ident| ident == "F");
+    let add_c = args.iter().any(|ident| ident == "C");
+
+    if add_f || add_c {
+        // get generics for processing and init where clause if missing
+        let mut generics = &mut input_fn.sig.generics;
+        {
+            let _ = generics
+                .where_clause
+                .get_or_insert_with(|| syn::WhereClause {
+                    where_token: Default::default(),
+                    predicates: Punctuated::new(),
+                });
+        }
+
+        // Add to generics and where clause
+        if add_f {
+            add_generic(&mut generics, "F");
+            add_generic(&mut generics, "Fut");
+            if let Some(where_clause) = &mut generics.where_clause {
+                add_f_bound(where_clause);
+            }
+        }
+        if add_c {
+            add_generic(&mut generics, "C");
+            add_generic(&mut generics, "FutC");
+            if let Some(where_clause) = &mut generics.where_clause {
+                add_c_bound(where_clause);
+            }
+        }
+    }
+
+    quote! { #input_fn }.into()
+}
+
+fn add_generic(generics: &mut syn::Generics, ident: &str) {
+    generics.params.push(GenericParam::Type(syn::TypeParam {
+        attrs: Vec::new(),
+        ident: Ident::new(ident, proc_macro2::Span::call_site()),
+        colon_token: None,
+        bounds: Punctuated::new(),
+        eq_token: None,
+        default: None,
+    }));
+}
+
+fn add_f_bound(where_clause: &mut syn::WhereClause) {
+    where_clause.predicates.push(parse_quote! {
+        F: FnMut(usize, &Arc<RwLock<S>>) -> Fut + Send + Sync + 'static
+    });
+    where_clause.predicates.push(parse_quote! {
+        Fut: Future<Output = Result<T, E>> + Send + Sync + 'static
+    });
+}
+
+fn add_c_bound(where_clause: &mut syn::WhereClause) {
+    where_clause.predicates.push(parse_quote! {
+        C: FnMut(&S) -> FutC + Send + Sync + 'static
+    });
+    where_clause.predicates.push(parse_quote! {
+        FutC: Future<Output = bool> + Send + Sync + 'static
+    });
 }

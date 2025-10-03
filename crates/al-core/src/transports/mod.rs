@@ -21,9 +21,8 @@ mod tests {
         Pipeline::Link(
             t0.clone(),
             t1.clone(),
-            Arc::new(Task::new(
+            Arc::new(Task::infinite(
                 {
-                    println!("Setting up passed fn");
                     move |_,
                           state: &Arc<
                         tokio::sync::RwLock<
@@ -34,11 +33,11 @@ mod tests {
                             >,
                         >,
                     >| {
-                        println!("Running outer passed fn");
-                        let (t0, t1) = state.blocking_read().inner_clone();
+                        let state = state.clone();
                         async move {
-                            println!("Running inner passed fn");
+                            let (t0, t1) = state.read().await.inner_clone();
                             let data = t0.recv()?;
+                            //TODO: remove println
                             println!("Got data: {:?}", data);
                             t1.send(data)?;
                             Ok(())
@@ -95,11 +94,7 @@ mod tests {
         let splice = Splice::new(
             Arc::new(make_queue_link::<Command>(None, None)),
             Arc::new(make_queue_link::<String>(None, None)),
-            Arc::new(move |data| {
-                let ret = format!("Command: {:?}", data);
-                println!("{}", ret);
-                Ok(ret)
-            }),
+            Arc::new(move |data| Ok(format!("Command: {:?}", data))),
         );
 
         // Send `Command`
