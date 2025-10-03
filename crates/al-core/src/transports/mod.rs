@@ -25,13 +25,17 @@ mod tests {
                 {
                     println!("Setting up passed fn");
                     move |_,
-                          state: &mut crate::ExtendedTaskState<
-                        (),
-                        crate::TransportError,
-                        (Arc<dyn Transport<T>>, Arc<dyn Transport<T>>),
+                          state: &Arc<
+                        tokio::sync::RwLock<
+                            crate::ExtendedTaskState<
+                                (),
+                                crate::TransportError,
+                                (Arc<dyn Transport<T>>, Arc<dyn Transport<T>>),
+                            >,
+                        >,
                     >| {
                         println!("Running outer passed fn");
-                        let (t0, t1) = state.clone().into_inner();
+                        let (t0, t1) = state.blocking_read().inner_clone();
                         async move {
                             println!("Running inner passed fn");
                             let data = t0.recv()?;

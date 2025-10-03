@@ -39,7 +39,7 @@ impl<F: TransportItemRequirements, T: TransportItemRequirements> Splice<F, T> {
             splice_transport.clone(),
             Arc::new(Task::new(
                 |_, state| {
-                    let (producer, consumer) = state.clone().into_inner();
+                    let (producer, consumer) = state.blocking_read().inner_clone();
                     async move { Ok(consumer.send(producer.recv()?)?) }
                 },
                 (producer, splice_transport as Arc<dyn Transport<F>>).as_task_state(),

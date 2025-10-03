@@ -174,6 +174,10 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskStateRequirements> ExtendedTaskState<T, 
     pub fn into_inner(self) -> S {
         self.extended
     }
+
+    pub fn inner_clone(&self) -> S {
+        self.extended.clone()
+    }
 }
 
 /// Auto impl `TaskState`
@@ -226,44 +230,355 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Drop for Task<T, E, S> {
     }
 }
 
-/// Implement `Task`
+/// Helper macro to edit the common where clause in one place for `Task` functions
+macro_rules! with_common_bounds {
+    (
+        $(
+            $(#[$meta:meta])*
+            $vis:vis fn $name:ident$(<$($generics:ident),*>)?($($params:tt)*) $(-> $ret:ty)?
+            $(where $($rest:tt)*)?
+            $body:block
+        )*
+    ) => {
+        $(
+            $(#[$meta])*
+            $vis fn $name<$($($generics),*)? F, Fut>($($params)*) $(-> $ret)?
+            where
+                F: FnMut(usize, &Arc<RwLock<S>>) -> Fut + Send + Sync + 'static,
+                Fut: Future<Output = Result<T, E>> + Send + Sync + 'static,
+                $($($rest)*)?
+            $body
+        )*
+    };
+}
+
+/// Implement `Task`, generating the actual functions with the `with_common_bounds` macro
 impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
-    /// Creates a `Task` with the default `TaskConfig`
-    pub fn new<F, Fut>(f: F, state: S) -> Self
-    where
-        F: FnMut(usize, &mut S) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Result<T, E>> + Send + Sync + 'static,
-    {
-        Task::_infinite(f, TaskConfig::default(), state)
-    }
+    with_common_bounds! {
+        /// Creates a `Task` with the default `TaskConfig`
+        pub fn new(f: F, state: S) -> Self {
+            Self::_infinite(f, TaskConfig::default(), state)
+        }
 
-    /// Creates a `Task` that runs a fixed number of times, with the default `TaskConfig`
-    pub fn fixed<F, Fut>(iterations: usize, f: F, state: S) -> Self
-    where
-        F: FnMut(usize, &mut S) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Result<T, E>> + Send + Sync + 'static,
-    {
-        Self::_fixed(f, TaskConfig::new(TaskMode::Fixed(iterations)), state)
-    }
+        /// Creates a `Task` that runs a fixed number of times, with the default `TaskConfig`
+        pub fn fixed(iterations: usize, f: F, state: S) -> Self {
+            Self::_fixed(f, TaskConfig::new(TaskMode::Fixed(iterations)), state)
+        }
 
-    /// Creates a `Task` that runs for a specific duration, with the default `TaskConfig`
-    pub fn for_duration<F, Fut>(duration: Duration, f: F, state: S) -> Self
-    where
-        F: FnMut(usize, &mut S) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Result<T, E>> + Send + Sync + 'static,
-    {
-        Self::_duration(
-            f,
-            TaskConfig::new(TaskMode::Duration(duration)),
-            state,
-            Instant::now(),
-        )
+        /// Creates a `Task` that runs for a specific duration, with the default `TaskConfig`
+        pub fn for_duration(duration: Duration, f: F, state: S) -> Self {
+            Self::_duration(
+                f,
+                TaskConfig::new(TaskMode::Duration(duration)),
+                state,
+                Instant::now(),
+            )
+        }
+
+        /*/// Creates a `Task` that runs until a condition is met, with the default `TaskConfig`
+        pub fn until_condition<C, FutC>(f: F, state: S, condition: C) -> Result<Self, TaskError>
+        where
+            C: FnMut(&S) -> FutC + Send + Sync + 'static,
+            FutC: Future<Output = bool> + Send + Sync + 'static,
+        {
+            let config = TaskConfig::new(TaskMode::Conditional);
+            Self::with_config(f, config, state, Some(condition))
+        }*/
+
+        /*/// Creates a `Task` with a specific `TaskConfig`
+        pub fn with_config<C, FutC>(
+            f: F,
+            config: TaskConfig,
+            state: S,
+            condition: Option<C>,
+        ) -> Result<Self, TaskError>
+        where
+            C: FnMut(&S) -> FutC + Send + Sync + 'static,
+            FutC: Future<Output = bool> + Send + Sync + 'static,
+        {
+            match config.mode {
+                TaskMode::Infinite => Ok(Task::_infinite(f, config, state)),
+                TaskMode::Fixed(_) => Ok(Task::_fixed(f, config, state)),
+                TaskMode::Conditional => Ok(Task::_conditional(
+                    f,
+                    config,
+                    state,
+                    condition.ok_or_else(|| {
+                        TaskError::NoCondition(
+                            "Missing condition function for `TaskMode::Conditional`".to_string(),
+                        )
+                    })?,
+                )),
+                TaskMode::Duration(_) => Ok(Task::_duration(f, config, state, Instant::now())),
+            }
+        }*/
+
+        /// Starts a `Task` with a infinite structure, only checking cancelation
+        fn _infinite(mut f: F, config: TaskConfig, state: S) -> Self {
+            let cancelled = Arc::new(RwLock::new(false));
+            let cancelled_clone = cancelled.clone();
+
+            let state = Arc::new(RwLock::new(state));
+            let state_clone = state.clone();
+
+            let handle = tokio::spawn(async move {
+                state_clone.write().await.on_task_start();
+                let mut iteration = 0usize;
+                let mut interval = tokio::time::interval(config.interval);
+
+                loop {
+                    // Check if cancelled
+                    if let true = *cancelled_clone.read().await {
+                        break;
+                    }
+
+                    // Execute the closure
+                    let result = f(iteration, &state_clone).await;
+
+                    // Update the state
+                    {
+                        // Check if last result causes a stop
+                        if config.stop_on_error {
+                            if let Err(_) = result {
+                                Task::set_state(&mut *state_clone.write().await, iteration, result)
+                                    .await;
+                                break;
+                            }
+                        }
+
+                        Task::set_state(&mut *state_clone.write().await, iteration, result).await;
+                    }
+
+                    // Check interval bounds
+                    if iteration >= usize::max_value() {
+                        iteration = 0;
+                    }
+
+                    iteration += 1;
+                    interval.tick().await;
+                }
+
+                // Call `Task` complete function and mark state as not running
+                let mut state = state_clone.write().await;
+                state.on_task_complete();
+                state.set_is_running(false);
+            });
+
+            Self {
+                handle: Some(handle),
+                panicked: Arc::new(RwLock::new(false)),
+                cancelled,
+                state,
+                _phantom: PhantomData::<(T, E)>,
+            }
+        }
+
+        /// Starts a `Task` with a fixed structure, checking cancelation along with iterations
+        fn _fixed(mut f: F, config: TaskConfig, state: S) -> Self {
+            let cancelled = Arc::new(RwLock::new(false));
+            let cancelled_clone = cancelled.clone();
+
+            let state = Arc::new(RwLock::new(state));
+            let state_clone = state.clone();
+
+            let handle = tokio::spawn(async move {
+                state_clone.write().await.on_task_start();
+                let mut iteration = 0usize;
+                let mut interval = tokio::time::interval(config.interval);
+
+                loop {
+                    // Check if cancelled
+                    if let true = *cancelled_clone.read().await {
+                        break;
+                    }
+
+                    // Check iterations completion
+                    if Task::check_iterations(iteration, &*state_clone.read().await).await {
+                        break;
+                    }
+
+                    // Execute the closure
+                    let result = f(iteration, &state_clone).await;
+
+                    // Update the state
+                    {
+                        // Check if last result causes a stop
+                        if config.stop_on_error {
+                            if let Err(_) = result {
+                                Task::set_state(&mut *state_clone.write().await, iteration, result)
+                                    .await;
+                                break;
+                            }
+                        }
+                        Task::set_state(&mut *state_clone.write().await, iteration, result).await;
+                    }
+
+                    // Check interval bounds
+                    if iteration >= usize::max_value() {
+                        iteration = 0;
+                    }
+
+                    iteration += 1;
+                    interval.tick().await;
+                }
+
+                // Call `Task` complete function and mark state as not running
+                let mut state = state_clone.write().await;
+                state.on_task_complete();
+                state.set_is_running(false);
+            });
+
+            Self {
+                handle: Some(handle),
+                panicked: Arc::new(RwLock::new(false)),
+                cancelled,
+                state,
+                _phantom: PhantomData::<(T, E)>,
+            }
+        }
+
+        /*/// Starts a `Task` with a conditional structure, checking cancelation along with conditions
+        fn _conditional<C, FutC>(
+            mut f: F,
+            config: TaskConfig,
+            state: S,
+            mut condition: C,
+        ) -> Self
+        where
+            C: FnMut(&S) -> FutC + Send + Sync + 'static,
+            FutC: Future<Output = bool> + Send + Sync + 'static,
+        {
+            let cancelled = Arc::new(RwLock::new(false));
+            let cancelled_clone = cancelled.clone();
+
+            let state = Arc::new(RwLock::new(state));
+            let state_clone = state.clone();
+
+            let handle = tokio::spawn(async move {
+                state_clone.write().await.on_task_start();
+                let mut iteration = 0usize;
+                let mut interval = tokio::time::interval(config.interval);
+
+                loop {
+                    // Check if cancelled
+                    if let true = *cancelled_clone.read().await {
+                        break;
+                    }
+
+                    // Check completion conditions
+                    if condition(&*state_clone.read().await).await {
+                        break;
+                    }
+
+                    // Execute the closure
+                    let result = f(iteration, &state_clone).await;
+
+                    // Update the state
+                    {
+                        // Check if last result causes a stop
+                        if config.stop_on_error {
+                            if let Err(_) = result {
+                                Task::set_state(&mut *state_clone.write().await, iteration, result)
+                                    .await;
+                                break;
+                            }
+                        }
+                        Task::set_state(&mut *state_clone.write().await, iteration, result).await;
+                    }
+
+                    // Check interval bounds
+                    if iteration >= usize::max_value() {
+                        iteration = 0;
+                    }
+
+                    iteration += 1;
+                    interval.tick().await;
+                }
+
+                // Call `Task` complete function and mark state as not running
+                let mut state = state_clone.write().await;
+                state.on_task_complete();
+                state.set_is_running(false);
+            });
+
+            Self {
+                handle: Some(handle),
+                panicked: Arc::new(RwLock::new(false)),
+                cancelled,
+                state,
+                _phantom: PhantomData::<(T, E)>,
+            }
+        }*/
+
+        /// Starts a `Task` with a duration structure, checking cancelation along with elapsed time
+        fn _duration(mut f: F, config: TaskConfig, state: S, start_time: Instant) -> Self {
+            let cancelled = Arc::new(RwLock::new(false));
+            let cancelled_clone = cancelled.clone();
+
+            let state = Arc::new(RwLock::new(state));
+            let state_clone = state.clone();
+
+            let handle = tokio::spawn(async move {
+                state_clone.write().await.on_task_start();
+                let mut iteration = 0usize;
+                let mut interval = tokio::time::interval(config.interval);
+
+                loop {
+                    // Check if cancelled
+                    if let true = *cancelled_clone.read().await {
+                        break;
+                    }
+
+                    // Check duration completion
+                    if Task::check_duration(start_time, &*state_clone.read().await).await {
+                        break;
+                    }
+
+                    // Execute the closure
+                    let result = f(iteration, &state_clone).await;
+
+                    // Update the state
+                    {
+                        // Check if last result causes a stop
+                        if config.stop_on_error {
+                            if let Err(_) = result {
+                                Task::set_state(&mut *state_clone.write().await, iteration, result)
+                                    .await;
+                                break;
+                            }
+                        }
+                        Task::set_state(&mut *state_clone.write().await, iteration, result).await;
+                    }
+
+                    // Check interval bounds
+                    if iteration >= usize::max_value() {
+                        iteration = 0;
+                    }
+
+                    iteration += 1;
+                    interval.tick().await;
+                }
+
+                // Call `Task` complete function and mark state as not running
+                let mut state = state_clone.write().await;
+                state.on_task_complete();
+                state.set_is_running(false);
+            });
+
+            Self {
+                handle: Some(handle),
+                panicked: Arc::new(RwLock::new(false)),
+                cancelled,
+                state,
+                _phantom: PhantomData::<(T, E)>,
+            }
+        }
     }
 
     /// Creates a `Task` that runs until a condition is met, with the default `TaskConfig`
     pub fn until_condition<F, Fut, C, FutC>(f: F, state: S, condition: C) -> Result<Self, TaskError>
     where
-        F: FnMut(usize, &mut S) -> Fut + Send + Sync + 'static,
+        F: FnMut(usize, &Arc<RwLock<S>>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<T, E>> + Send + Sync + 'static,
         C: FnMut(&S) -> FutC + Send + Sync + 'static,
         FutC: Future<Output = bool> + Send + Sync + 'static,
@@ -280,7 +595,7 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
         condition: Option<C>,
     ) -> Result<Self, TaskError>
     where
-        F: FnMut(usize, &mut S) -> Fut + Send + Sync + 'static,
+        F: FnMut(usize, &Arc<RwLock<S>>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<T, E>> + Send + Sync + 'static,
         C: FnMut(&S) -> FutC + Send + Sync + 'static,
         FutC: Future<Output = bool> + Send + Sync + 'static,
@@ -302,138 +617,6 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
         }
     }
 
-    /// Starts a `Task` with a infinite structure, only checking cancelation
-    fn _infinite<F, Fut>(mut f: F, config: TaskConfig, state: S) -> Self
-    where
-        F: FnMut(usize, &mut S) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Result<T, E>> + Send + Sync + 'static,
-    {
-        let cancelled = Arc::new(RwLock::new(false));
-        let cancelled_clone = cancelled.clone();
-
-        let state = Arc::new(RwLock::new(state));
-        let state_clone = state.clone();
-
-        let handle = tokio::spawn(async move {
-            state_clone.write().await.on_task_start();
-            let mut iteration = 0usize;
-            let mut interval = tokio::time::interval(config.interval);
-
-            loop {
-                // Check if cancelled
-                if let true = *cancelled_clone.read().await {
-                    break;
-                }
-
-                // Execute the closure
-                let result = f(iteration, &mut *state_clone.write().await).await;
-
-                // Update the state
-                {
-                    // Check if last result causes a stop
-                    if config.stop_on_error {
-                        if let Err(_) = result {
-                            Task::set_state(&mut *state_clone.write().await, iteration, result)
-                                .await;
-                            break;
-                        }
-                    }
-
-                    Task::set_state(&mut *state_clone.write().await, iteration, result).await;
-                }
-
-                // Check interval bounds
-                if iteration >= usize::max_value() {
-                    iteration = 0;
-                }
-
-                iteration += 1;
-                interval.tick().await;
-            }
-
-            // Call `Task` complete function and mark state as not running
-            let mut state = state_clone.write().await;
-            state.on_task_complete();
-            state.set_is_running(false);
-        });
-
-        Self {
-            handle: Some(handle),
-            panicked: Arc::new(RwLock::new(false)),
-            cancelled,
-            state,
-            _phantom: PhantomData::<(T, E)>,
-        }
-    }
-
-    /// Starts a `Task` with a fixed structure, checking cancelation along with iterations
-    fn _fixed<F, Fut>(mut f: F, config: TaskConfig, state: S) -> Self
-    where
-        F: FnMut(usize, &mut S) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Result<T, E>> + Send + Sync + 'static,
-    {
-        let cancelled = Arc::new(RwLock::new(false));
-        let cancelled_clone = cancelled.clone();
-
-        let state = Arc::new(RwLock::new(state));
-        let state_clone = state.clone();
-
-        let handle = tokio::spawn(async move {
-            state_clone.write().await.on_task_start();
-            let mut iteration = 0usize;
-            let mut interval = tokio::time::interval(config.interval);
-
-            loop {
-                // Check if cancelled
-                if let true = *cancelled_clone.read().await {
-                    break;
-                }
-
-                // Check iterations completion
-                if Task::check_iterations(iteration, &*state_clone.read().await).await {
-                    break;
-                }
-
-                // Execute the closure
-                let result = f(iteration, &mut *state_clone.write().await).await;
-
-                // Update the state
-                {
-                    // Check if last result causes a stop
-                    if config.stop_on_error {
-                        if let Err(_) = result {
-                            Task::set_state(&mut *state_clone.write().await, iteration, result)
-                                .await;
-                            break;
-                        }
-                    }
-                    Task::set_state(&mut *state_clone.write().await, iteration, result).await;
-                }
-
-                // Check interval bounds
-                if iteration >= usize::max_value() {
-                    iteration = 0;
-                }
-
-                iteration += 1;
-                interval.tick().await;
-            }
-
-            // Call `Task` complete function and mark state as not running
-            let mut state = state_clone.write().await;
-            state.on_task_complete();
-            state.set_is_running(false);
-        });
-
-        Self {
-            handle: Some(handle),
-            panicked: Arc::new(RwLock::new(false)),
-            cancelled,
-            state,
-            _phantom: PhantomData::<(T, E)>,
-        }
-    }
-
     /// Starts a `Task` with a conditional structure, checking cancelation along with conditions
     fn _conditional<F, Fut, C, FutC>(
         mut f: F,
@@ -442,7 +625,7 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
         mut condition: C,
     ) -> Self
     where
-        F: FnMut(usize, &mut S) -> Fut + Send + Sync + 'static,
+        F: FnMut(usize, &Arc<RwLock<S>>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<T, E>> + Send + Sync + 'static,
         C: FnMut(&S) -> FutC + Send + Sync + 'static,
         FutC: Future<Output = bool> + Send + Sync + 'static,
@@ -470,75 +653,7 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
                 }
 
                 // Execute the closure
-                let result = f(iteration, &mut *state_clone.write().await).await;
-
-                // Update the state
-                {
-                    // Check if last result causes a stop
-                    if config.stop_on_error {
-                        if let Err(_) = result {
-                            Task::set_state(&mut *state_clone.write().await, iteration, result)
-                                .await;
-                            break;
-                        }
-                    }
-                    Task::set_state(&mut *state_clone.write().await, iteration, result).await;
-                }
-
-                // Check interval bounds
-                if iteration >= usize::max_value() {
-                    iteration = 0;
-                }
-
-                iteration += 1;
-                interval.tick().await;
-            }
-
-            // Call `Task` complete function and mark state as not running
-            let mut state = state_clone.write().await;
-            state.on_task_complete();
-            state.set_is_running(false);
-        });
-
-        Self {
-            handle: Some(handle),
-            panicked: Arc::new(RwLock::new(false)),
-            cancelled,
-            state,
-            _phantom: PhantomData::<(T, E)>,
-        }
-    }
-
-    /// Starts a `Task` with a duration structure, checking cancelation along with elapsed time
-    fn _duration<F, Fut>(mut f: F, config: TaskConfig, state: S, start_time: Instant) -> Self
-    where
-        F: FnMut(usize, &mut S) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Result<T, E>> + Send + Sync + 'static,
-    {
-        let cancelled = Arc::new(RwLock::new(false));
-        let cancelled_clone = cancelled.clone();
-
-        let state = Arc::new(RwLock::new(state));
-        let state_clone = state.clone();
-
-        let handle = tokio::spawn(async move {
-            state_clone.write().await.on_task_start();
-            let mut iteration = 0usize;
-            let mut interval = tokio::time::interval(config.interval);
-
-            loop {
-                // Check if cancelled
-                if let true = *cancelled_clone.read().await {
-                    break;
-                }
-
-                // Check duration completion
-                if Task::check_duration(start_time, &*state_clone.read().await).await {
-                    break;
-                }
-
-                // Execute the closure
-                let result = f(iteration, &mut *state_clone.write().await).await;
+                let result = f(iteration, &state_clone).await;
 
                 // Update the state
                 {
@@ -716,7 +831,7 @@ mod tests {
     async fn infinite_task() {
         assert!(Task::new(
             |i, state| {
-                let data = state.clone().into_inner();
+                let data = state.blocking_read().inner_clone();
                 println!("outer {}: {}", i, data[i]);
                 async move {
                     println!("inner {}: {}", i, data[i]);
