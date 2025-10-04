@@ -674,7 +674,11 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{task::WithTaskState, Task, TaskMode};
+    use std::time::Duration;
+
+    use tokio::time::Instant;
+
+    use crate::{task::WithTaskState, BaseTaskState, Task, TaskMode};
 
     #[tokio::test]
     async fn infinite_task() {}
@@ -687,19 +691,44 @@ mod tests {
                 async move {
                     let x = state.read().await.into_inner()[i];
                     assert!((i + 1) == x);
-                    Ok::<usize, ()>(x)
+                    Ok::<_, ()>(x)
                 }
             },
             vec![1usize, 2, 3, 4, 5].with_task_state(TaskMode::Fixed(5))
         )
         .wait_for_complete()
         .await
-        .is_some_and(|res| res.is_ok()));
+        .is_some_and(|res| res.is_ok_and(|i| i == 5)));
     }
 
     #[tokio::test]
     async fn conditional_task() {}
 
     #[tokio::test]
-    async fn duration_task() {}
+    async fn duration_task() {
+        for x in 0..10 {
+            let start_time = Instant::now();
+            let duration = Duration::from_secs(5);
+            let expected_end = start_time + duration;
+            assert!(Task::for_duration(
+                |_, _| { async move { Ok::<_, ()>(Instant::now()) } },
+                BaseTaskState::new(TaskMode::Duration(duration))
+            )
+            .wait_for_complete()
+            .await
+            .is_some_and(|res| res.is_ok_and(|i| {
+                let diff = expected_end - i - 2*duration;
+                println!(
+                    "Difference {:?}: {:?} ({} millis)",
+                    x,
+                    diff,
+                    diff.as_millis()
+                );
+                diff.as_millis() <= 100
+            })));
+        }
+    }
+
+    #[tokio::test]
+    async fn tasks_with_config() {} //TODO: make a task of each type using `with_config`
 }

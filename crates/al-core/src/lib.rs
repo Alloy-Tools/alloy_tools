@@ -32,6 +32,7 @@ pub use serde_utils::serde_format::BinarySerde;
 pub use serde_utils::serde_format::JsonSerde;
 #[cfg(feature = "serde")]
 pub use serde_utils::serde_format::SerdeFormat;
+pub use task::BaseTaskState;
 pub use task::ExtendedTaskState;
 pub use task::Task;
 pub use task::TaskMode;
