@@ -34,7 +34,6 @@ pub use serde_utils::serde_format::JsonSerde;
 #[cfg(feature = "serde")]
 pub use serde_utils::serde_format::SerdeFormat;
 pub use task_utils::task_state::TaskState;
-pub(crate) use task_utils::task_state::TaskModeSetter;
 pub use task_utils::task_state::BaseTaskState;
 pub use task_utils::task_state::WithTaskState;
 pub use task_utils::task_state::ExtendedTaskState;

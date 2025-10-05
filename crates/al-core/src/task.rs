@@ -468,6 +468,14 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
     pub fn get_last_result(&self) -> Option<Result<T, E>> {
         self.state.blocking_read().get_last_result()
     }
+
+    pub fn some_condition<C, FutC>(_: &S, condition: C) -> Option<C>
+    where
+        C: FnMut(&Arc<RwLock<S>>) -> FutC + Send + Sync + 'static,
+        FutC: Future<Output = bool> + Send + Sync + 'static,
+    {
+        Some(condition)
+    }
 }
 
 #[cfg(test)]
@@ -586,12 +594,81 @@ mod tests {
         ).unwrap();
         sleep(Duration::from_secs(duration)).await;
         assert!(task.stop_and_wait().await
-        .is_some_and(|res| res.is_ok_and(|i| { println!("Infinite iterations: {}", i); i > duration as usize})))
+        .is_some_and(|res| res.is_ok_and(|i| i > duration as usize)));
 
         // Fixed
+        let list = vec![1usize, 2, 3, 4, 5];
+        assert!(Task::with_config(
+            |i, state| {
+                let state = state.clone();
+                async move {
+                    let x = state.read().await.into_inner()[i];
+                    assert!((i + 1) == x);
+                    Ok::<_, ()>(x)
+                }
+            },
+            TaskConfig::default(),
+            list.clone().with_task_state(TaskMode::Fixed(list.len())),
+            Task::NO_CONDITION
+        ).unwrap()
+        .wait_for_complete()
+        .await
+        .is_some_and(|res| res.is_ok_and(|i| i == *list.last().unwrap())));
 
         // Conditional
+        let target_iteration = 20;
+        let cond_state = false.with_task_state(TaskMode::Conditional);
+        assert!(Task::with_config(
+            move |i, state| {
+                let state = state.clone();
+                async move {
+                    let mut state = state.write().await;
+                    assert!(*state.into_inner() == false);
+                    if i >= target_iteration {
+                        state.set_inner(true);
+                    }
+                    Ok::<_, ()>(i)
+                }
+            },
+            TaskConfig::default(),
+            cond_state.clone(),
+            Task::some_condition(
+                &cond_state,
+                |state| {
+                    let state = state.clone();
+                    async move { state.read().await.inner_clone() }
+                }
+            )
+        ).unwrap()
+        .wait_for_complete()
+        .await
+        .is_some_and(|res| res.is_ok_and(|i| i == target_iteration)));
 
         // Duration
+        // Spawn a series of tasks with increasing durations
+        let mut tasks = Vec::new();
+        for x in 1..31 {
+            let duration = Duration::from_secs(x);
+            let expected_end = Instant::now() + duration;
+            tasks.push(
+                (
+                    expected_end,
+                    Task::with_config(
+                        |_, _| { async move { Ok::<_, ()>(Instant::now()) } },
+                        TaskConfig::default(),
+                        BaseTaskState::new(TaskMode::Duration(duration)),
+                        Task::NO_CONDITION
+                    ).unwrap()
+                )
+            );
+        }
+
+        // Wait for each task to end, checking the difference between the expected end `Instant` and the last result `Instant` is <= .1 seconds
+        for (expected_end, mut task) in tasks {
+            assert!(task.wait_for_complete().await
+            .is_some_and(|res| res.is_ok_and(|i| {
+                (expected_end - i).as_millis() <= 100
+            })));
+        }
     }
 }
