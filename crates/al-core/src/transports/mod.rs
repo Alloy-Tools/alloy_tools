@@ -7,7 +7,7 @@ mod tests {
     use tokio::time::sleep;
 
     use crate::{
-        task::WithTaskState, Command, Pipeline, Queue, Splice, Task, Transport,
+        WithTaskState, Command, Pipeline, Queue, Splice, Task, Transport,
         TransportItemRequirements,
     };
     use std::{sync::Arc, time::Duration};

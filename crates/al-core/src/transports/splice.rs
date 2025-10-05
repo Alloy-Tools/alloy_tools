@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::{
-    task::WithTaskState, Pipeline, Task, Transport, TransportError, TransportItemRequirements,
+    WithTaskState, Pipeline, Task, Transport, TransportError, TransportItemRequirements,
 };
 
 type SpliceFn<F, T> = Arc<dyn Fn(F) -> Result<T, TransportError> + Send + Sync>;

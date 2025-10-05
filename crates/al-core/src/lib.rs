@@ -6,6 +6,7 @@ mod markers;
 #[cfg(feature = "serde")]
 mod serde_utils;
 mod task;
+mod task_utils;
 mod transport;
 mod transports;
 
@@ -32,10 +33,15 @@ pub use serde_utils::serde_format::BinarySerde;
 pub use serde_utils::serde_format::JsonSerde;
 #[cfg(feature = "serde")]
 pub use serde_utils::serde_format::SerdeFormat;
-pub use task::BaseTaskState;
-pub use task::ExtendedTaskState;
+pub use task_utils::task_state::TaskState;
+pub(crate) use task_utils::task_state::TaskModeSetter;
+pub use task_utils::task_state::BaseTaskState;
+pub use task_utils::task_state::WithTaskState;
+pub use task_utils::task_state::ExtendedTaskState;
 pub use task::Task;
-pub use task::TaskMode;
+pub use task_utils::task_elements::TaskMode;
+pub use task_utils::task_elements::TaskConfig;
+pub use task_utils::task_elements::TaskError;
 pub use transport::Transport;
 pub use transport::TransportError;
 pub use transports::pipeline::Pipeline;

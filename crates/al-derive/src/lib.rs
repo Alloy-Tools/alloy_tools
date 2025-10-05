@@ -175,7 +175,7 @@ fn add_f_bound(where_clause: &mut syn::WhereClause) {
 
 fn add_c_bound(where_clause: &mut syn::WhereClause) {
     where_clause.predicates.push(parse_quote! {
-        C: FnMut(&S) -> FutC + Send + Sync + 'static
+        C: FnMut(&Arc<RwLock<S>>) -> FutC + Send + Sync + 'static
     });
     where_clause.predicates.push(parse_quote! {
         FutC: Future<Output = bool> + Send + Sync + 'static
