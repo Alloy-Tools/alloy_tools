@@ -61,13 +61,13 @@ mod tests {
         let l0 = make_queue_link::<Command>(None, None);
         assert_eq!(
             format!("{:?}", l0),
-            "Link(Transport(Queue { queue: [] }), Transport(Queue { queue: [] }), \"<LinkFn>\")"
+            "Link(Queue { queue: [] }, Queue { queue: [] }, \"<LinkFn>\")"
         );
         let l1 = make_queue_link(
             Some(Arc::new(l0)),
             Some(Arc::new(make_queue_link(None, None))),
         );
-        assert_eq!(format!("{:?}", l1), "Link(Link(Transport(Queue { queue: [] }), Transport(Queue { queue: [] }), \"<LinkFn>\"), Link(Transport(Queue { queue: [] }), Transport(Queue { queue: [] }), \"<LinkFn>\"), \"<LinkFn>\")");
+        assert_eq!(format!("{:?}", l1), "Link(Link(Queue { queue: [] }, Queue { queue: [] }, \"<LinkFn>\"), Link(Queue { queue: [] }, Queue { queue: [] }, \"<LinkFn>\"), \"<LinkFn>\")");
     }
 
     #[tokio::test]
