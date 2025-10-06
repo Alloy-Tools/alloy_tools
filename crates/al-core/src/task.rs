@@ -26,7 +26,14 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Drop for Task<T, E, S> {
 /// Implement `Task`, generating the actual functions with the `with_common_bounds` macro
 impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
     /// Constant to allow `Task::NO_CONDITION` rather than specifying `None::<...>`
-    pub const NO_CONDITION: Option<fn(&Arc<RwLock<S>>) -> std::pin::Pin<Box<dyn Future<Output = bool> + Send + Sync>>> = None;
+    pub const NO_CONDITION: Option<
+        fn(&Arc<RwLock<S>>) -> std::pin::Pin<Box<dyn Future<Output = bool> + Send + Sync>>,
+    > = None;
+
+    #[with_bounds(C)]
+    pub fn some_condition(_: &S, condition: C) -> Option<C> {
+        Some(condition)
+    }
 
     /// Creates a `Task` with the default `TaskConfig`
     #[with_bounds(F)]
@@ -468,31 +475,29 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
     pub fn get_last_result(&self) -> Option<Result<T, E>> {
         self.state.blocking_read().get_last_result()
     }
-
-    pub fn some_condition<C, FutC>(_: &S, condition: C) -> Option<C>
-    where
-        C: FnMut(&Arc<RwLock<S>>) -> FutC + Send + Sync + 'static,
-        FutC: Future<Output = bool> + Send + Sync + 'static,
-    {
-        Some(condition)
-    }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::{BaseTaskState, Task, TaskConfig, TaskMode, WithTaskState};
     use std::time::Duration;
     use tokio::time::{sleep, Instant};
-    use crate::{BaseTaskState, Task, TaskConfig, TaskMode, WithTaskState};
 
     #[tokio::test]
     async fn infinite_task() {
         let duration = 5;
         let mut task = Task::infinite(
             |i, _| async move { Ok::<_, ()>(i) },
-            BaseTaskState::default()
+            BaseTaskState::default(),
         );
         sleep(Duration::from_secs(duration)).await;
-        assert!(task.stop_and_wait().await.is_some_and(|res| res.is_ok_and(|i| { println!("Iterations: {}", i); i > duration as usize})))
+        assert!(task
+            .stop_and_wait()
+            .await
+            .is_some_and(|res| res.is_ok_and(|i| {
+                println!("Iterations: {}", i);
+                i > duration as usize
+            })))
     }
 
     #[tokio::test]
@@ -547,37 +552,37 @@ mod tests {
         for x in 1..31 {
             let duration = Duration::from_secs(x);
             let expected_end = Instant::now() + duration;
-            tasks.push(
-                (
-                    x,
-                    expected_end,
-                    Task::for_duration(
-                        duration,
-                        |_, _| { async move { Ok::<_, ()>(Instant::now()) } },
-                        BaseTaskState::default()
-                    )
-                )
-            );
+            tasks.push((
+                x,
+                expected_end,
+                Task::for_duration(
+                    duration,
+                    |_, _| async move { Ok::<_, ()>(Instant::now()) },
+                    BaseTaskState::default(),
+                ),
+            ));
         }
 
         // Wait for each task to end, checking the difference between the expected end `Instant` and the last result `Instant` is <= .1 seconds
         let mut avg = 0usize;
         let len = tasks.len();
         for (x, expected_end, mut task) in tasks {
-            assert!(task.wait_for_complete().await
-            .is_some_and(|res| res.is_ok_and(|i| {
-                let diff = expected_end - i;
-                println!(
-                    "Difference {:?}: {:?} ({} millis) {:?} {:?}",
-                    x,
-                    diff,
-                    diff.as_millis(),
-                    expected_end,
-                    i
-                );
-                avg += diff.as_millis() as usize;
-                diff.as_millis() <= 100
-            })));
+            assert!(task
+                .wait_for_complete()
+                .await
+                .is_some_and(|res| res.is_ok_and(|i| {
+                    let diff = expected_end - i;
+                    println!(
+                        "Difference {:?}: {:?} ({} millis) {:?} {:?}",
+                        x,
+                        diff,
+                        diff.as_millis(),
+                        expected_end,
+                        i
+                    );
+                    avg += diff.as_millis() as usize;
+                    diff.as_millis() <= 100
+                })));
         }
         println!("Average /{}: {} millis", len, avg / len)
     }
@@ -590,11 +595,14 @@ mod tests {
             |i, _| async move { Ok::<_, ()>(i) },
             TaskConfig::default(),
             BaseTaskState::new(TaskMode::Infinite),
-            Task::NO_CONDITION
-        ).unwrap();
+            Task::NO_CONDITION,
+        )
+        .unwrap();
         sleep(Duration::from_secs(duration)).await;
-        assert!(task.stop_and_wait().await
-        .is_some_and(|res| res.is_ok_and(|i| i > duration as usize)));
+        assert!(task
+            .stop_and_wait()
+            .await
+            .is_some_and(|res| res.is_ok_and(|i| i > duration as usize)));
 
         // Fixed
         let list = vec![1usize, 2, 3, 4, 5];
@@ -610,7 +618,8 @@ mod tests {
             TaskConfig::default(),
             list.clone().with_task_state(TaskMode::Fixed(list.len())),
             Task::NO_CONDITION
-        ).unwrap()
+        )
+        .unwrap()
         .wait_for_complete()
         .await
         .is_some_and(|res| res.is_ok_and(|i| i == *list.last().unwrap())));
@@ -632,14 +641,12 @@ mod tests {
             },
             TaskConfig::default(),
             cond_state.clone(),
-            Task::some_condition(
-                &cond_state,
-                |state| {
-                    let state = state.clone();
-                    async move { state.read().await.inner_clone() }
-                }
-            )
-        ).unwrap()
+            Task::some_condition(&cond_state, |state| {
+                let state = state.clone();
+                async move { state.read().await.inner_clone() }
+            })
+        )
+        .unwrap()
         .wait_for_complete()
         .await
         .is_some_and(|res| res.is_ok_and(|i| i == target_iteration)));
@@ -650,25 +657,24 @@ mod tests {
         for x in 1..31 {
             let duration = Duration::from_secs(x);
             let expected_end = Instant::now() + duration;
-            tasks.push(
-                (
-                    expected_end,
-                    Task::with_config(
-                        |_, _| { async move { Ok::<_, ()>(Instant::now()) } },
-                        TaskConfig::default(),
-                        BaseTaskState::new(TaskMode::Duration(duration)),
-                        Task::NO_CONDITION
-                    ).unwrap()
+            tasks.push((
+                expected_end,
+                Task::with_config(
+                    |_, _| async move { Ok::<_, ()>(Instant::now()) },
+                    TaskConfig::default(),
+                    BaseTaskState::new(TaskMode::Duration(duration)),
+                    Task::NO_CONDITION,
                 )
-            );
+                .unwrap(),
+            ));
         }
 
         // Wait for each task to end, checking the difference between the expected end `Instant` and the last result `Instant` is <= .1 seconds
         for (expected_end, mut task) in tasks {
-            assert!(task.wait_for_complete().await
-            .is_some_and(|res| res.is_ok_and(|i| {
-                (expected_end - i).as_millis() <= 100
-            })));
+            assert!(task
+                .wait_for_complete()
+                .await
+                .is_some_and(|res| res.is_ok_and(|i| { (expected_end - i).as_millis() <= 100 })));
         }
     }
 }

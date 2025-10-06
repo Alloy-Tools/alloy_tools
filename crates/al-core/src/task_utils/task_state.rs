@@ -9,9 +9,11 @@ mod sealed {
 }
 
 /// `TaskState` contains all required functions hooks and should hold all values a `Task` tracks between iterations
-pub trait TaskState<T: TaskTypes = (), E: TaskTypes = ()>: TaskModeSetter + TaskStateRequirements {
+pub trait TaskState<T: TaskTypes = (), E: TaskTypes = ()>:
+    TaskModeSetter + TaskStateRequirements
+{
     fn get_mode(&self) -> &TaskMode;
-    
+
     fn get_iterations(&self) -> usize;
     fn set_iteration(&mut self, iterations: usize);
 
@@ -136,7 +138,7 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskStateRequirements> ExtendedTaskState<T, 
             extended,
         }
     }
-    
+
     /// Sets `extended` to the passed `S`
     pub fn set_inner(&mut self, inner: S) {
         self.extended = inner
@@ -153,7 +155,9 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskStateRequirements> ExtendedTaskState<T, 
     }
 }
 
-impl<T: TaskTypes, E: TaskTypes, S: TaskStateRequirements> TaskModeSetter for ExtendedTaskState<T, E, S> {
+impl<T: TaskTypes, E: TaskTypes, S: TaskStateRequirements> TaskModeSetter
+    for ExtendedTaskState<T, E, S>
+{
     fn set_mode(&mut self, mode: TaskMode) {
         self.base.set_mode(mode)
     }

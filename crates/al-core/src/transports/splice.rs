@@ -1,10 +1,6 @@
-use std::sync::Arc;
+use std::{future::Future, marker::PhantomData, sync::Arc};
 
-use crate::{
-    WithTaskState, Pipeline, Task, Transport, TransportError, TransportItemRequirements,
-};
-
-type SpliceFn<F, T> = Arc<dyn Fn(F) -> Result<T, TransportError> + Send + Sync>;
+use crate::{Pipeline, Transport, TransportError, TransportItemRequirements};
 
 pub struct Splice<F: TransportItemRequirements, T: TransportItemRequirements>(
     Arc<dyn Transport<F>>,
@@ -22,29 +18,30 @@ impl<F: TransportItemRequirements, T: TransportItemRequirements> std::fmt::Debug
 }
 
 impl<F: TransportItemRequirements, T: TransportItemRequirements> Splice<F, T> {
-    pub fn new(
+    /// Returns a new `Splice` joining `producer<F>` into `consumer<T>`
+    pub fn new<SpliceFn, Fut>(
         producer: Arc<dyn Transport<F>>,
         consumer: Arc<dyn Transport<T>>,
-        splice_fn: SpliceFn<F, T>,
-    ) -> Arc<Self> {
-        // Create the new `SpliceTransport<F>` that transforms the data and sends it to the consumer
+        splice_fn: Arc<SpliceFn>,
+    ) -> Arc<Self>
+    where
+        SpliceFn: Fn(F) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<T, TransportError>> + Send + Sync + 'static,
+    {
         let consumer_clone = consumer.clone();
-        let splice_transport = Arc::new(SpliceTransport::<F>(Arc::new(move |data| {
-            consumer_clone.send(splice_fn(data)?)
-        })));
+        // Create the new `SpliceTransport<F>` that transforms the data and sends it to the consumer
+        let splice_transport = Arc::new(SpliceTransport(
+            move |data| {
+                let consumer_clone = consumer_clone.clone();
+                let splice_fn = splice_fn.clone();
+                //TODO: Should this just be started as a task to allow a tight inner loop?
+                async move { consumer_clone.send(splice_fn(data).await?).await }
+            },
+            PhantomData,
+        ));
 
         // Set up a `Link` from the producer to the `SpliceTransport<F>`
-        let link = Arc::new(Pipeline::Link(
-            producer.clone(),
-            splice_transport.clone(),
-            Arc::new(Task::infinite(
-                |_, state| {
-                    let (producer, consumer) = state.blocking_read().inner_clone();
-                    async move { Ok(consumer.send(producer.recv()?)?) }
-                },
-                (producer, splice_transport as Arc<dyn Transport<F>>).as_task_state(),
-            )),
-        ));
+        let link = Arc::new(Pipeline::link(producer, splice_transport));
 
         // setting the new `Link` as the producer in the `Splice`
         Arc::new(Self(link, consumer))
@@ -66,41 +63,111 @@ impl<F: TransportItemRequirements, T: TransportItemRequirements> Splice<F, T> {
 /// On `send`, calls `send` on the internal `splice.producer<F>()`.
 /// Not receivable. Rather than `recv<F>`, must access the internal `splice.consumer<T>()` to call `recv<T>`.
 impl<F: TransportItemRequirements, T: TransportItemRequirements> Transport<F> for Splice<F, T> {
-    fn send(&self, data: F) -> Result<(), crate::TransportError> {
-        self.0.send(data)
+    fn send_blocking(&self, data: F) -> Result<(), crate::TransportError> {
+        self.0.send_blocking(data)
     }
 
-    fn recv(&self) -> Result<F, crate::TransportError> {
+    fn recv_blocking(&self) -> Result<F, crate::TransportError> {
         Err(crate::TransportError::NoRecv("Not receivable. Rather than `recv<F>`, must access the internal `splice.consumer<T>()` to call `recv<T>`.".to_string()))
+    }
+
+    fn send(
+        &self,
+        data: F,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::prelude::rust_2024::Future<Output = Result<(), TransportError>>
+                + Send
+                + Sync
+                + '_,
+        >,
+    > {
+        Box::pin(async { self.0.send(data).await })
+    }
+
+    fn recv(
+        &self,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::prelude::rust_2024::Future<Output = Result<F, TransportError>>
+                + Send
+                + Sync
+                + '_,
+        >,
+    > {
+        Box::pin(async { self.recv_blocking() })
     }
 }
 
 /* ********************
   SpliceTransport
 ******************** */
-type SpliceFnWrapper<F> = Arc<dyn Fn(F) -> Result<(), TransportError> + Send + Sync>;
 
 /// `SpliceTransport` acts as a hook to call the `SpliceFn` of the `Splice` that created it
-pub struct SpliceTransport<F: TransportItemRequirements>(SpliceFnWrapper<F>);
+pub struct SpliceTransport<
+    F: TransportItemRequirements,
+    SpliceFn: Fn(F) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<(), TransportError>> + Send + Sync + 'static,
+>(SpliceFn, PhantomData<(F, Fut)>);
 
-impl<F: TransportItemRequirements> std::fmt::Debug for SpliceTransport<F> {
+impl<
+        F: TransportItemRequirements,
+        SpliceFn: Fn(F) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<(), TransportError>> + Send + Sync + 'static,
+    > std::fmt::Debug for SpliceTransport<F, SpliceFn, Fut>
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("SpliceTransport")
-            .field(&"<SpliceFnWrapper>")
+            .field(&"<SpliceFn>")
             .finish()
     }
 }
 
 /// On `send`, calls the `SpliceFn` of the `Splice` that created the `SpliceTransport`.
 /// Not receivable. Must `recv` from the `Splice` internal consumer.
-impl<F: TransportItemRequirements> Transport<F> for SpliceTransport<F> {
-    fn send(&self, data: F) -> Result<(), crate::TransportError> {
-        self.0(data)
+impl<
+        F: TransportItemRequirements,
+        SpliceFn: Fn(F) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<(), TransportError>> + Send + Sync + 'static,
+    > Transport<F> for SpliceTransport<F, SpliceFn, Fut>
+{
+    fn send_blocking(&self, _: F) -> Result<(), TransportError> {
+        Err(TransportError::NoRecv(
+            "Not blockable. Must `send` from the `Splice` intead.".to_string(),
+        ))
     }
 
-    fn recv(&self) -> Result<F, crate::TransportError> {
-        Err(crate::TransportError::NoRecv(
-            "Not receivable. Must `recv` from the `Splice` internal consumer.".to_string(),
+    fn recv_blocking(&self) -> Result<F, TransportError> {
+        Err(TransportError::NoRecv(
+            "Not receivable. Must `recv` or `recv_blocking` from the `Splice` internal consumer."
+                .to_string(),
         ))
+    }
+
+    fn send(
+        &self,
+        data: F,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::prelude::rust_2024::Future<Output = Result<(), TransportError>>
+                + Send
+                + Sync
+                + '_,
+        >,
+    > {
+        Box::pin(async { self.0(data).await })
+    }
+
+    fn recv(
+        &self,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::prelude::rust_2024::Future<Output = Result<F, TransportError>>
+                + Send
+                + Sync
+                + '_,
+        >,
+    > {
+        Box::pin(async { self.recv_blocking() })
     }
 }
