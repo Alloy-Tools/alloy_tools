@@ -25,6 +25,7 @@ tokio = { version = "1", features = [
 
 [features]
 default = ["serde", "test-utils"]
+none = []
 serde = ["dep:serde", "dep:erased-serde", "dep:once_cell", "al-derive/serde"]
 json = ["serde", "dep:serde_json"]
 binary = ["serde", "dep:bitcode"]

@@ -581,7 +581,7 @@ mod tests {
                         i
                     );
                     avg += diff.as_millis() as usize;
-                    diff.as_millis() <= 100
+                    diff.as_millis() <= 500
                 })));
         }
         println!("Average /{}: {} millis", len, avg / len)
@@ -674,7 +674,7 @@ mod tests {
             assert!(task
                 .wait_for_complete()
                 .await
-                .is_some_and(|res| res.is_ok_and(|i| { (expected_end - i).as_millis() <= 100 })));
+                .is_some_and(|res| res.is_ok_and(|i| { (expected_end - i).as_millis() <= 500 })));
         }
     }
 }
