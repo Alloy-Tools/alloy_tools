@@ -17,11 +17,9 @@ type LinkTask<T> = Arc<
     >,
 >;
 
-//TODO: Can `Pipeline::Transport` be removed? can internals be `&'a dyn Transport<T>` rather than `Arc`?
 /// Recursive `Pipeline<T>` enum allowing multiple `dyn Transport<T>` to be combined together into a single `Pipeline<T>`.
 #[derive(Clone)]
 pub enum Pipeline<T: TransportItemRequirements> {
-    Transport(Arc<dyn Transport<T>>),
     Transform(
         Arc<dyn Transport<T>>,
         Arc<dyn TransformFn<T>>,
@@ -71,7 +69,6 @@ impl<T: TransportItemRequirements> Pipeline<T> {
 impl<T: TransportItemRequirements> std::fmt::Debug for Pipeline<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Transport(transport) => f.debug_tuple("Transport").field(transport).finish(),
             Self::Transform(pipeline, _, _) => f
                 .debug_tuple("Transform")
                 .field(pipeline)
@@ -92,7 +89,6 @@ impl<T: TransportItemRequirements> std::fmt::Debug for Pipeline<T> {
 impl<T: TransportItemRequirements> Transport<T> for Pipeline<T> {
     fn send_blocking(&self, data: T) -> Result<(), TransportError> {
         match self {
-            Pipeline::Transport(transport) => transport.send_blocking(data),
             Pipeline::Transform(transport, transform_fn, _) => {
                 transport.send_blocking(transform_fn(data))
             }
@@ -102,7 +98,6 @@ impl<T: TransportItemRequirements> Transport<T> for Pipeline<T> {
 
     fn recv_blocking(&self) -> Result<T, TransportError> {
         match self {
-            Pipeline::Transport(transport) => transport.recv_blocking(),
             Pipeline::Transform(transport, _, transform_fn) => {
                 Ok(transform_fn(transport.recv_blocking()?))
             }
@@ -122,7 +117,6 @@ impl<T: TransportItemRequirements> Transport<T> for Pipeline<T> {
         >,
     > {
         match self {
-            Pipeline::Transport(transport) => transport.send(data),
             Pipeline::Transform(transport, transform_fn, _) => transport.send(transform_fn(data)),
             Pipeline::Link(transport, _, _) => transport.send(data),
         }
@@ -139,7 +133,6 @@ impl<T: TransportItemRequirements> Transport<T> for Pipeline<T> {
         >,
     > {
         match self {
-            Pipeline::Transport(transport) => transport.recv(),
             Pipeline::Transform(transport, _, transform_fn) => {
                 Box::pin(async { Ok(transform_fn(transport.recv().await?)) })
             }

@@ -4,10 +4,8 @@ pub mod splice;
 
 #[cfg(test)]
 mod tests {
-    use tokio::time::sleep;
-
     use crate::{Command, Pipeline, Queue, Splice, Transport, TransportItemRequirements};
-    use std::{sync::Arc, time::Duration};
+    use std::sync::Arc;
 
     fn make_queue_link<T: TransportItemRequirements>(
         t0: Option<Arc<dyn Transport<T>>>,
@@ -19,14 +17,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn pipeline_debug() {
+    async fn queue_debug() {
         assert_eq!(
             format!(
                 "{:?}",
-                Pipeline::Transport(Arc::new(Queue::<Command>::new()))
+                Queue::<Command>::new()
             ),
-            "Transport(Queue { queue: [] })"
+            "Queue { queue: [] }"
         );
+    }
+
+    #[tokio::test]
+    async fn pipeline_debug() {
         let l0 = make_queue_link::<Command>(None, None);
         assert_eq!(
             format!("{:?}", l0),
@@ -43,15 +45,12 @@ mod tests {
     async fn pipeline_send() {
         let l0 = make_queue_link(None, None);
         l0.send(Command::Stop).await.unwrap();
-        sleep(Duration::from_secs(2)).await;
         assert_eq!(l0.recv().await.unwrap(), Command::Stop);
 
         let l1 = make_queue_link(
             Some(Arc::new(l0)),
             Some(Arc::new(make_queue_link(None, None))),
         );
-
-        sleep(Duration::from_secs(4)).await;
 
         l1.send(Command::Stop).await.unwrap();
         assert_eq!(l1.recv().await.unwrap(), Command::Stop);

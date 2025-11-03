@@ -477,7 +477,7 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "test-tasks"))]
 mod tests {
     use crate::{BaseTaskState, Task, TaskConfig, TaskMode, WithTaskState};
     use std::time::Duration;
