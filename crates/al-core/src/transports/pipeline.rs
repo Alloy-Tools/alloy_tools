@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::{
-    ExtendedTaskState, Task, Transport, TransportError, TransportItemRequirements, WithTaskState,
+    ExtendedTaskState, Task, Transport, TransportError, TransportItemRequirements, AsTaskState,
 };
 
 pub trait TransformFn<T>: Fn(T) -> T + Send + Sync {}

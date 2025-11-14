@@ -40,7 +40,7 @@ pub use task_utils::task_elements::TaskMode;
 pub use task_utils::task_state::BaseTaskState;
 pub use task_utils::task_state::ExtendedTaskState;
 pub use task_utils::task_state::TaskState;
-pub use task_utils::task_state::WithTaskState;
+pub use task_utils::task_state::AsTaskState;
 pub use transport::Transport;
 pub use transport::TransportError;
 pub use transports::pipeline::Pipeline;
@@ -53,6 +53,9 @@ mod tests {
     use al_derive::event;
     use std::hash::{DefaultHasher, Hash, Hasher};
 
+    const TEST_VAL: u128 = 7878;
+    const TEST_MSG: &str = "Test";
+
     /// Simple event for testing using the `event` attribute macro
     #[event]
     struct TestEventA;
@@ -62,15 +65,21 @@ mod tests {
     #[derive(Clone, Default, PartialEq, Hash, Debug, al_derive::EventMarker)]
     struct TestEventB;
 
+    /// Enum for testing
+    #[event]
+    enum TestEventEnum {
+        #[default]
+        A,
+        B(u128),
+        C(String),
+    }
+
     /// Event with payload for testing
     #[event]
     struct TestEventPayload {
         value: u128,
         message: String,
     }
-    const TEST_VAL: u128 = 7878;
-    const TEST_MSG: &str = "Test";
-
     /// Event with generic for testing
     #[event]
     struct TestEventGeneric<T>(T);
@@ -95,6 +104,7 @@ mod tests {
     #[test]
     fn event_to_command() {
         let cmd = TestEventA.to_cmd();
+        let enum_cmd = TestEventEnum::A.to_cmd();
         let payload_cmd = TestEventPayload {
             value: TEST_VAL,
             message: TEST_MSG.to_string(),
@@ -103,6 +113,7 @@ mod tests {
         let generic_val = TestEventGeneric(TEST_VAL).to_cmd();
         let generic_str = TestEventGeneric(TEST_MSG.to_string()).to_cmd();
         assert!(matches!(cmd, Command::Event(_)));
+        assert!(matches!(enum_cmd, Command::Event(_)));
         assert!(matches!(payload_cmd, Command::Event(_)));
         assert!(matches!(generic_val, Command::Event(_)));
         assert!(matches!(generic_str, Command::Event(_)));
@@ -112,6 +123,7 @@ mod tests {
     #[test]
     fn verify_downcast() {
         let cmd = TestEventA.to_cmd();
+        let enum_cmd = TestEventEnum::A.to_cmd();
         let payload_cmd = TestEventPayload {
             value: TEST_VAL,
             message: TEST_MSG.to_string(),
@@ -123,6 +135,8 @@ mod tests {
         assert!(cmd.downcast_event::<TestEventA>().is_some());
         assert!(cmd.downcast_event::<TestEventB>().is_none());
         assert!(Command::Stop.downcast_event::<TestEventB>().is_none());
+        assert!(enum_cmd.downcast_event::<TestEventEnum>().is_some());
+        assert!(enum_cmd.downcast_event::<TestEventA>().is_none());
         assert!(payload_cmd.downcast_event::<TestEventPayload>().is_some());
         assert!(payload_cmd.downcast_event::<TestEventA>().is_none());
         assert!(generic_val
@@ -366,6 +380,8 @@ mod tests {
     fn event_clone() {
         let original = TestEventA;
         let cloned = original.clone();
+        let enum_original = TestEventEnum::A;
+        let enum_cloned = enum_original.clone();
         let payload_original = TestEventPayload {
             value: TEST_VAL,
             message: TEST_MSG.to_string(),
@@ -377,6 +393,7 @@ mod tests {
         let generic_str_cloned = generic_str_original.clone();
 
         assert_eq!(original, cloned);
+        assert_eq!(enum_original, enum_cloned);
         assert_eq!(payload_original, payload_cloned);
         assert_eq!(generic_val_original, generic_val_cloned);
         assert_eq!(generic_str_original, generic_str_cloned);
@@ -387,6 +404,8 @@ mod tests {
     fn command_clone() {
         let original = TestEventA.to_cmd();
         let cloned = original.clone();
+        let enum_original = TestEventEnum::A.to_cmd();
+        let enum_cloned = enum_original.clone();
         let payload_original = TestEventPayload {
             value: TEST_VAL,
             message: TEST_MSG.to_string(),
@@ -399,6 +418,7 @@ mod tests {
         let generic_str_cloned = generic_str_original.clone();
 
         assert_eq!(original, cloned);
+        assert_eq!(enum_original, enum_cloned);
         assert_eq!(payload_original, payload_cloned);
         assert_eq!(generic_val_original, generic_val_cloned);
         assert_eq!(generic_str_original, generic_str_cloned);
@@ -501,6 +521,7 @@ mod tests {
 
         has_marker_requirements::<TestEventA>();
         has_marker_requirements::<TestEventB>();
+        has_marker_requirements::<TestEventEnum>();
         has_marker_requirements::<TestEventPayload>();
         has_marker_requirements::<TestEventGeneric<u128>>();
         has_marker_requirements::<TestEventGeneric<String>>();
@@ -511,6 +532,7 @@ mod tests {
 
             has_serde_requirements::<TestEventA>();
             has_serde_requirements::<TestEventB>();
+            has_serde_requirements::<TestEventEnum>();
             has_serde_requirements::<TestEventPayload>();
             has_serde_requirements::<TestEventGeneric<u128>>();
             has_serde_requirements::<TestEventGeneric<String>>();

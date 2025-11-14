@@ -38,33 +38,25 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
     /// Creates a `Task` with the default `TaskConfig`
     #[with_bounds(F)]
     pub fn infinite(f: F, state: S) -> Self {
-        let mut state = state;
-        state.set_mode(TaskMode::Infinite);
-        Self::_infinite(f, TaskConfig::default(), state)
+        Self::_infinite(f, TaskMode::Infinite.into(), state)
     }
 
     /// Creates a `Task` that runs a fixed number of times, with the default `TaskConfig`
     #[with_bounds(F)]
     pub fn fixed(iterations: usize, f: F, state: S) -> Self {
-        let mut state = state;
-        state.set_mode(TaskMode::Fixed(iterations));
-        Self::_fixed(f, TaskConfig::default(), state)
+        Self::_fixed(f, TaskMode::Fixed(iterations).into(), state)
     }
 
     /// Creates a `Task` that runs for a specific duration, with the default `TaskConfig`
     #[with_bounds(F)]
     pub fn for_duration(duration: std::time::Duration, f: F, state: S) -> Self {
-        let mut state = state;
-        state.set_mode(TaskMode::Duration(duration));
-        Self::_duration(f, TaskConfig::default(), state, Instant::now())
+        Self::_duration(f, TaskMode::Duration(duration).into(), state, Instant::now())
     }
 
     /// Creates a `Task` that runs until a condition is met, with the default `TaskConfig`
     #[with_bounds(F, C)]
     pub fn until_condition(f: F, state: S, condition: C) -> Self {
-        let mut state = state;
-        state.set_mode(TaskMode::Conditional);
-        Self::_conditional(f, TaskConfig::default(), state, condition)
+        Self::_conditional(f, TaskMode::Conditional.into(), state, condition)
     }
 
     /// Creates a `Task` with a specific `TaskConfig`
@@ -75,7 +67,7 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
         state: S,
         condition: Option<C>,
     ) -> Result<Self, TaskError> {
-        match state.get_mode() {
+        match config.mode() {
             TaskMode::Infinite => Ok(Task::_infinite(f, config, state)),
             TaskMode::Fixed(_) => Ok(Task::_fixed(f, config, state)),
             TaskMode::Conditional => Ok(Task::_conditional(
@@ -102,9 +94,9 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
         let state_clone = state.clone();
 
         let handle = tokio::spawn(async move {
-            state_clone.write().await.on_task_start();
+            config.on_task_start();
             let mut iteration = 0usize;
-            let mut interval = tokio::time::interval(config.interval);
+            let mut interval = tokio::time::interval(config.interval());
 
             loop {
                 // Check if cancelled
@@ -118,7 +110,7 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
                 // Update the state
                 {
                     // Check if last result causes a stop
-                    if config.stop_on_error {
+                    if config.stop_on_error() {
                         if let Err(_) = result {
                             Task::set_state(&mut *state_clone.write().await, iteration, result)
                                 .await;
@@ -140,7 +132,7 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
 
             // Call `Task` complete function and mark state as not running
             let mut state = state_clone.write().await;
-            state.on_task_complete();
+            config.on_task_complete();
             state.set_is_running(false);
         });
 
@@ -163,9 +155,9 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
         let state_clone = state.clone();
 
         let handle = tokio::spawn(async move {
-            state_clone.write().await.on_task_start();
+            config.on_task_start();
             let mut iteration = 0usize;
-            let mut interval = tokio::time::interval(config.interval);
+            let mut interval = tokio::time::interval(config.interval());
 
             loop {
                 // Check if cancelled
@@ -174,7 +166,7 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
                 }
 
                 // Check iterations completion
-                if Task::check_iterations(iteration, &*state_clone.read().await).await {
+                if config.check_iterations(iteration).await {
                     break;
                 }
 
@@ -184,7 +176,7 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
                 // Update the state
                 {
                     // Check if last result causes a stop
-                    if config.stop_on_error {
+                    if config.stop_on_error() {
                         if let Err(_) = result {
                             Task::set_state(&mut *state_clone.write().await, iteration, result)
                                 .await;
@@ -205,7 +197,7 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
 
             // Call `Task` complete function and mark state as not running
             let mut state = state_clone.write().await;
-            state.on_task_complete();
+            config.on_task_complete();
             state.set_is_running(false);
         });
 
@@ -228,9 +220,9 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
         let state_clone = state.clone();
 
         let handle = tokio::spawn(async move {
-            state_clone.write().await.on_task_start();
+            config.on_task_start();
             let mut iteration = 0usize;
-            let mut interval = tokio::time::interval(config.interval);
+            let mut interval = tokio::time::interval(config.interval());
 
             loop {
                 // Check if cancelled
@@ -249,7 +241,7 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
                 // Update the state
                 {
                     // Check if last result causes a stop
-                    if config.stop_on_error {
+                    if config.stop_on_error() {
                         if let Err(_) = result {
                             Task::set_state(&mut *state_clone.write().await, iteration, result)
                                 .await;
@@ -270,7 +262,7 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
 
             // Call `Task` complete function and mark state as not running
             let mut state = state_clone.write().await;
-            state.on_task_complete();
+            config.on_task_complete();
             state.set_is_running(false);
         });
 
@@ -293,9 +285,9 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
         let state_clone = state.clone();
 
         let handle = tokio::spawn(async move {
-            state_clone.write().await.on_task_start();
+            config.on_task_start();
             let mut iteration = 0usize;
-            let mut interval = tokio::time::interval(config.interval);
+            let mut interval = tokio::time::interval(config.interval());
 
             loop {
                 // Check if cancelled
@@ -304,7 +296,7 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
                 }
 
                 // Check duration completion
-                if Task::check_duration(start_time, &*state_clone.read().await).await {
+                if config.check_duration(start_time).await {
                     break;
                 }
 
@@ -314,7 +306,7 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
                 // Update the state
                 {
                     // Check if last result causes a stop
-                    if config.stop_on_error {
+                    if config.stop_on_error() {
                         if let Err(_) = result {
                             Task::set_state(&mut *state_clone.write().await, iteration, result)
                                 .await;
@@ -335,7 +327,7 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
 
             // Call `Task` complete function and mark state as not running
             let mut state = state_clone.write().await;
-            state.on_task_complete();
+            config.on_task_complete();
             state.set_is_running(false);
         });
 
@@ -352,22 +344,6 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
     async fn set_state(state: &mut S, iteration: usize, result: Result<T, E>) {
         state.set_iteration(iteration + 1);
         state.set_last_result(result);
-    }
-
-    /// Checks if the `Task` should stop based on the `TaskMode` and number of iterations
-    async fn check_iterations(iteration: usize, state: &S) -> bool {
-        match state.get_mode() {
-            TaskMode::Duration(_) | TaskMode::Infinite | TaskMode::Conditional => false,
-            TaskMode::Fixed(max_iters) => iteration >= *max_iters,
-        }
-    }
-
-    /// Check if the `Task` should stop based on the `TaskMode` and the start_time
-    async fn check_duration(start_time: Instant, state: &S) -> bool {
-        match state.get_mode() {
-            TaskMode::Fixed(_) | TaskMode::Infinite | TaskMode::Conditional => false,
-            TaskMode::Duration(duration) => start_time.elapsed() >= *duration,
-        }
     }
 
     /// Gets the `Task` current state
@@ -461,11 +437,6 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
         });
     }
 
-    /// Returns the `TaskMode` by cloning it from the `TaskState`
-    pub fn get_mode(&self) -> TaskMode {
-        self.state.blocking_read().get_mode().clone()
-    }
-
     /// Returns the number of iteration ran by reading it from the `TaskState``
     pub fn get_iterations(&self) -> usize {
         self.state.blocking_read().get_iterations()
@@ -479,7 +450,7 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
 
 #[cfg(all(test, feature = "test-tasks"))]
 mod tests {
-    use crate::{BaseTaskState, Task, TaskConfig, TaskMode, WithTaskState};
+    use crate::{BaseTaskState, Task, TaskMode, AsTaskState};
     use std::time::Duration;
     use tokio::time::{sleep, Instant};
 
@@ -505,13 +476,17 @@ mod tests {
         assert!(Task::fixed(
             5,
             |i, state| {
+                // Clone the `&Arc` reference for ownership of the resulting `Arc`, allowing the `move` for the async function without lifetime issues
                 let state = state.clone();
                 async move {
+                    // Get the ith element of the Vec stored in the `TaskState`
                     let x = state.read().await.into_inner()[i];
                     assert!((i + 1) == x);
+			        // Set the task last_result as the ith element of the Vec
                     Ok::<_, ()>(x)
                 }
             },
+            // Pass the Vec to be used as the `TaskState`
             vec![1usize, 2, 3, 4, 5].as_task_state()
         )
         .wait_for_complete()
@@ -521,23 +496,32 @@ mod tests {
 
     #[tokio::test]
     async fn conditional_task() {
-        let target_iteration = 20;
+        let target_iteration = 5;
         assert!(Task::until_condition(
-            move |i, state| {
+            |i, state| {
+                // Clone the `&Arc` reference for ownership of the resulting `Arc`, allowing the `move` for the async function without lifetime issues
                 let state = state.clone();
                 async move {
                     let mut state = state.write().await;
-                    assert!(*state.into_inner() == false);
-                    if i >= target_iteration {
-                        state.set_inner(true);
+                    // Get the target iteration from the `TaskState`
+                    let iters = {
+                        let inner = state.into_inner();
+                        assert!(inner.0 == false);
+                        inner.1
+                    };
+                    if i >= iters {
+                        state.set_inner((true, iters));
                     }
+                    println!("{}, {}", state.into_inner().0, i);
                     Ok::<_, ()>(i)
                 }
             },
-            false.as_task_state(),
+            // Pass the values to be used as the `TaskState`
+            (false, target_iteration).as_task_state(),
+            // Condition checking the first element of the tuple in the `TaskState`
             |state| {
                 let state = state.clone();
-                async move { state.read().await.inner_clone() }
+                async move { state.read().await.into_inner().0 }
             }
         )
         .wait_for_complete()
@@ -563,7 +547,7 @@ mod tests {
             ));
         }
 
-        // Wait for each task to end, checking the difference between the expected end `Instant` and the last result `Instant` is <= .1 seconds
+        // Wait for each task to end, checking the difference between the expected end `Instant` and the last result `Instant` is <= .5 seconds
         let mut avg = 0usize;
         let len = tasks.len();
         for (x, expected_end, mut task) in tasks {
@@ -573,7 +557,7 @@ mod tests {
                 .is_some_and(|res| res.is_ok_and(|i| {
                     let diff = expected_end - i;
                     println!(
-                        "Difference {:?}: {:?} ({} millis) {:?} {:?}",
+                        "Difference {:?}: {:?} ({} millis), expected: {:?}, actual: {:?}",
                         x,
                         diff,
                         diff.as_millis(),
@@ -593,8 +577,8 @@ mod tests {
         let duration = 5;
         let mut task = Task::with_config(
             |i, _| async move { Ok::<_, ()>(i) },
-            TaskConfig::default(),
-            BaseTaskState::new(TaskMode::Infinite),
+            TaskMode::Infinite.into(),
+            BaseTaskState::new(),
             Task::NO_CONDITION,
         )
         .unwrap();
@@ -615,8 +599,8 @@ mod tests {
                     Ok::<_, ()>(x)
                 }
             },
-            TaskConfig::default(),
-            list.clone().with_task_state(TaskMode::Fixed(list.len())),
+            TaskMode::Fixed(list.len()).into(),
+            list.clone().as_task_state(),
             Task::NO_CONDITION
         )
         .unwrap()
@@ -626,7 +610,7 @@ mod tests {
 
         // Conditional
         let target_iteration = 20;
-        let cond_state = false.with_task_state(TaskMode::Conditional);
+        let cond_state = false.as_task_state();
         assert!(Task::with_config(
             move |i, state| {
                 let state = state.clone();
@@ -639,7 +623,7 @@ mod tests {
                     Ok::<_, ()>(i)
                 }
             },
-            TaskConfig::default(),
+            TaskMode::Conditional.into(),
             cond_state.clone(),
             Task::some_condition(&cond_state, |state| {
                 let state = state.clone();
@@ -661,15 +645,15 @@ mod tests {
                 expected_end,
                 Task::with_config(
                     |_, _| async move { Ok::<_, ()>(Instant::now()) },
-                    TaskConfig::default(),
-                    BaseTaskState::new(TaskMode::Duration(duration)),
+                    TaskMode::Duration(duration).into(),
+                    BaseTaskState::new(),
                     Task::NO_CONDITION,
                 )
                 .unwrap(),
             ));
         }
 
-        // Wait for each task to end, checking the difference between the expected end `Instant` and the last result `Instant` is <= .1 seconds
+        // Wait for each task to end, checking the difference between the expected end `Instant` and the last result `Instant` is <= .5 seconds
         for (expected_end, mut task) in tasks {
             assert!(task
                 .wait_for_complete()
