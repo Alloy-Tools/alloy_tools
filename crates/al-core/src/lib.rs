@@ -544,6 +544,9 @@ mod tests {
     #[test]
     fn event_json() {
         use crate::{JsonSerde, SerdeFormat};
+        
+        let a = TestEventA;
+        let b = TestEventB;
 
         let event = TestEventPayload {
             value: TEST_VAL,
@@ -573,15 +576,8 @@ mod tests {
         let same_json = JsonSerde.serialize_event(&event_same).unwrap();
         let val_json = JsonSerde.serialize_event(&event_diff_val).unwrap();
         let str_json = JsonSerde.serialize_event(&event_diff_str).unwrap();
-        let a_json = JsonSerde.serialize_event(&TestEventA {}).unwrap();
-        let b_json = JsonSerde.serialize_event(&TestEventB {}).unwrap();
-
-        let generic_val_json = JsonSerde.serialize_event(&generic_val).unwrap();
-        let generic_val_same_json = JsonSerde.serialize_event(&generic_val_same).unwrap();
-        let generic_val_diff_json = JsonSerde.serialize_event(&generic_val_diff).unwrap();
-        let generic_str_json = JsonSerde.serialize_event(&generic_str).unwrap();
-        let generic_str_same_json = JsonSerde.serialize_event(&generic_str_same).unwrap();
-        let generic_str_diff_json = JsonSerde.serialize_event(&generic_str_diff).unwrap();
+        let a_json = JsonSerde.serialize_event(&a).unwrap();
+        let b_json = JsonSerde.serialize_event(&b).unwrap();
 
         assert_eq!(event_json, JsonSerde.serialize_event(&event).unwrap());
         assert_eq!(event_json, same_json);
@@ -590,6 +586,29 @@ mod tests {
         assert_ne!(event_json, a_json);
         // The below fails as empty structs serialize identically as events
         //assert_ne!(a_json, b_json);
+
+        let a_enum = TestEventEnum::A;
+
+        let enum_a_json = JsonSerde.serialize_event(&a_enum).unwrap();
+        let enum_b_json = JsonSerde.serialize_event(&TestEventEnum::B(TEST_VAL)).unwrap();
+        let enum_b_diff_json = JsonSerde.serialize_event(&TestEventEnum::B(TEST_VAL + 1)).unwrap();
+        let enum_c_json = JsonSerde.serialize_event(&TestEventEnum::C(TEST_MSG.to_string())).unwrap();
+        let enum_c_diff_json = JsonSerde.serialize_event(&TestEventEnum::C(TEST_MSG[1..].to_string())).unwrap();
+
+        println!("enum_a_json: {}, a_json: {}, event_json: {}", str::from_utf8(&enum_a_json).unwrap(), str::from_utf8(&a_json).unwrap(), str::from_utf8(&event_json).unwrap());
+        assert_ne!(enum_a_json, a_json);
+        assert_ne!(enum_a_json, enum_b_json);
+        assert_ne!(enum_b_json, enum_b_diff_json);
+        assert_ne!(enum_a_json, enum_c_json);
+        assert_ne!(enum_c_json, enum_c_diff_json);
+        assert_eq!(enum_a_json, JsonSerde.serialize_event(&TestEventEnum::A).unwrap());
+
+        let generic_val_json = JsonSerde.serialize_event(&generic_val).unwrap();
+        let generic_val_same_json = JsonSerde.serialize_event(&generic_val_same).unwrap();
+        let generic_val_diff_json = JsonSerde.serialize_event(&generic_val_diff).unwrap();
+        let generic_str_json = JsonSerde.serialize_event(&generic_str).unwrap();
+        let generic_str_same_json = JsonSerde.serialize_event(&generic_str_same).unwrap();
+        let generic_str_diff_json = JsonSerde.serialize_event(&generic_str_diff).unwrap();
 
         assert_eq!(
             generic_val_json,
@@ -613,6 +632,25 @@ mod tests {
         let new_a: TestEventA = JsonSerde.deserialize_event(&a_json).unwrap();
         let new_b: TestEventB = JsonSerde.deserialize_event(&b_json).unwrap();
 
+        assert_eq!(event, new_event);
+        assert_eq!(event_same, new_same);
+        assert_eq!(event_diff_val, new_val);
+        assert_eq!(event_diff_str, new_str);
+        assert_eq!(new_a, TestEventA);
+        assert_eq!(new_b, TestEventB);
+
+        let enum_new_a: TestEventEnum = JsonSerde.deserialize_event(&enum_a_json).unwrap();
+        let enum_new_b: TestEventEnum = JsonSerde.deserialize_event(&enum_b_json).unwrap();
+        let enum_new_b_diff: TestEventEnum = JsonSerde.deserialize_event(&enum_b_diff_json).unwrap();
+        let enum_new_c: TestEventEnum = JsonSerde.deserialize_event(&enum_c_json).unwrap();
+        let enum_new_c_diff: TestEventEnum = JsonSerde.deserialize_event(&enum_c_diff_json).unwrap();
+
+        assert_eq!(enum_new_a, TestEventEnum::A);
+        assert_eq!(enum_new_b, TestEventEnum::B(TEST_VAL));
+        assert_eq!(enum_new_b_diff, TestEventEnum::B(TEST_VAL + 1));
+        assert_eq!(enum_new_c, TestEventEnum::C(TEST_MSG.to_string()));
+        assert_eq!(enum_new_c_diff, TestEventEnum::C(TEST_MSG[1..].to_string()));
+
         let new_generic_val: TestEventGeneric<u128> =
             JsonSerde.deserialize_event(&generic_val_json).unwrap();
         let new_generic_val_same: TestEventGeneric<u128> =
@@ -625,13 +663,6 @@ mod tests {
             JsonSerde.deserialize_event(&generic_str_same_json).unwrap();
         let new_generic_str_diff: TestEventGeneric<String> =
             JsonSerde.deserialize_event(&generic_str_diff_json).unwrap();
-
-        assert_eq!(event, new_event);
-        assert_eq!(event_same, new_same);
-        assert_eq!(event_diff_val, new_val);
-        assert_eq!(event_diff_str, new_str);
-        assert_eq!(new_a, TestEventA);
-        assert_eq!(new_b, TestEventB);
 
         assert_eq!(generic_val, new_generic_val);
         assert_eq!(generic_val_same, new_generic_val_same);

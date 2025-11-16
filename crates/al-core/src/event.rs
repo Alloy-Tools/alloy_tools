@@ -1,3 +1,5 @@
+use serde::Deserialize;
+
 use crate::{command::Command, EventMarker, EventRequirements};
 use std::{
     any::Any,
@@ -104,9 +106,9 @@ impl Hash for Box<dyn Event> {
     }
 }
 
-/// Implement serialization for `Box<dyn Event>` using `erased_serde` by serializing into the tuple format `(type name, type data)`
+/// Implement serialization for `&dyn Event` using `erased_serde` by serializing into the tuple format `(type name, type data)`
 #[cfg(feature = "serde")]
-impl serde::Serialize for Box<dyn Event> {
+impl serde::Serialize for &dyn Event {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -114,7 +116,7 @@ impl serde::Serialize for Box<dyn Event> {
         erased_serde::serialize(
             &(
                 self.type_with_generics(),
-                self.as_ref() as &dyn erased_serde::Serialize,
+                *self as &dyn erased_serde::Serialize,
             ),
             serializer,
         )
@@ -134,5 +136,16 @@ impl<'de> serde::Deserialize<'de> for Box<dyn Event> {
                 registry: &EVENT_REGISTRY,
             },
         )
+    }
+}
+
+/// Implement serialization for `Box<dyn Event>` using `erased_serde` by serializing into the tuple format `(type name, type data)`
+#[cfg(feature = "serde")]
+impl serde::Serialize for Box<dyn Event> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        (self.as_ref() as &dyn Event).serialize(serializer)
     }
 }

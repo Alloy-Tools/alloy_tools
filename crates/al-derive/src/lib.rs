@@ -99,16 +99,51 @@ pub fn event(_: TokenStream, item: TokenStream) -> TokenStream {
             .push(parse_quote!(#[derive(#(#required_traits),*)]));
     }
 
-    #[cfg(feature = "serde")]
-    // Add serde traits
-    if !serde_traits.is_empty() {
-        item.attrs.push(parse_quote!(#[derive(#(#serde_traits),*)]));
-    }
+    
 
     quote! {
         #item
+        #[cfg(feature = "serde")]
+        // Add serde traits
+        #(generate_serde_traits(&mut item, serde_traits))
     }
     .into()
+}
+
+#[cfg(feature = "serde")]
+fn generate_serde_traits(
+    item: &mut DeriveInput,
+    serde_traits: Vec<Path>,
+) -> proc_macro2::TokenStream {
+    let name = &item.ident;
+    let mut impls = Vec::new();
+
+    if serde_traits.contains(&parse_quote!(serde::Serialize) as &Path) {
+        impls.push(quote! {
+            impl serde::Serialize for #name {
+                fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+                where
+                    S: serde::Serializer,
+                {
+                    (self.type_with_generics(), self).serialize(serializer)
+                }
+            }
+        });
+    }
+    if serde_traits.contains(&parse_quote!(serde::Deserialize) as &Path) {
+        impls.push(quote! {
+            impl<'de> serde::Deserialize<'de> for #name {
+                fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+                where
+                    D: serde::Deserializer<'de>,
+                {
+                    let (type_name, data) = serde::Deserialize::deserialize(deserializer)?;
+                    Ok(data)
+                }
+            }
+        });
+    }
+    quote! {#(#impls)*}
 }
 
 /// Helper attribute macro to add specific common bounds to functions to have a single place to edit the trait bounds
