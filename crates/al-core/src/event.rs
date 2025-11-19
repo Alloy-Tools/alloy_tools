@@ -1,5 +1,3 @@
-use serde::Deserialize;
-
 use crate::{command::Command, EventMarker, EventRequirements};
 use std::{
     any::Any,
@@ -15,6 +13,14 @@ pub static EVENT_REGISTRY: once_cell::sync::Lazy<crate::serde_utils::registry::E
 /// Helper function to return the simple names of generic events
 pub fn type_with_generics<T>(_: &T) -> String {
     tynm::type_name::<T>()
+}
+
+/// Helper function to downcast an event to a specific type, returning None if the downcast fails
+pub fn downcast<T: Event + EventRequirements + 'static>(event: Box<dyn Event>) -> Result<T, Box<dyn Event>> {
+    match event.as_any().downcast_ref::<T>() {
+        Some(t) => Ok(t.clone()),
+        None => Err(event),
+    }
 }
 
 /// The `Event` trait defines the required methods for event types to exist in the system along with trait bounds that dont interfere with dyn usage

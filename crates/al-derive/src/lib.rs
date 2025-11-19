@@ -49,27 +49,27 @@ fn derive_event_marker(input: DeriveInput) -> TokenStream {
     .into()
 }
 
-/// Attribute macro to mark a struct as an event, automatically implementing `EventMarker` and required traits.
-///
-/// Will cause conflicting implementations if placed after any `#derive(...)]` attributes that implement any super traits of `EventRequirements`.
+/// Attributte macro to add the required traits for an `Event`
 #[proc_macro_attribute]
-pub fn event(_: TokenStream, item: TokenStream) -> TokenStream {
-    let mut item = parse_macro_input!(item as DeriveInput);
+pub fn event_requirements(_: TokenStream, item: TokenStream) -> TokenStream {
+    add_event_traits(parse_macro_input!(item as DeriveInput))
+}
 
+/// Helper function to add required `Event` traits to a DeriveInput
+fn add_event_traits(mut item: DeriveInput) -> TokenStream {
     let mut required_traits: Vec<Path> = vec![
         parse_quote!(Clone),
         parse_quote!(Default),
         parse_quote!(PartialEq),
         parse_quote!(Hash),
         parse_quote!(Debug),
-        parse_quote!(al_derive::EventMarker),
     ];
 
     #[cfg(feature = "serde")]
-    let mut serde_traits: Vec<Path> = vec![
+    required_traits.extend(vec![
         parse_quote!(serde::Serialize),
         parse_quote!(serde::Deserialize),
-    ];
+    ]);
 
     // find any existing #[derive(...)] attributes and remove any duplicates from required_traits
     let _ = &item
@@ -86,10 +86,6 @@ pub fn event(_: TokenStream, item: TokenStream) -> TokenStream {
                 if let Some(pos) = required_traits.iter().position(|t| t == &path) {
                     required_traits.remove(pos);
                 }
-                #[cfg(feature = "serde")]
-                if let Some(pos) = serde_traits.iter().position(|t| t == &path) {
-                    serde_traits.remove(pos);
-                }
             }
         });
 
@@ -99,51 +95,37 @@ pub fn event(_: TokenStream, item: TokenStream) -> TokenStream {
             .push(parse_quote!(#[derive(#(#required_traits),*)]));
     }
 
-    
-
     quote! {
         #item
-        #[cfg(feature = "serde")]
-        // Add serde traits
-        #(generate_serde_traits(&mut item, serde_traits))
     }
     .into()
 }
 
-#[cfg(feature = "serde")]
-fn generate_serde_traits(
-    item: &mut DeriveInput,
-    serde_traits: Vec<Path>,
-) -> proc_macro2::TokenStream {
-    let name = &item.ident;
-    let mut impls = Vec::new();
+/// Attribute macro to mark a struct as an event, automatically implementing `EventMarker` and required traits.
+///
+/// Will cause conflicting implementations if placed after any `#derive(...)]` attributes that implement any super traits of `EventRequirements`.
+#[proc_macro_attribute]
+pub fn event(_: TokenStream, item: TokenStream) -> TokenStream {
+    let mut item = parse_macro_input!(item as DeriveInput);
 
-    if serde_traits.contains(&parse_quote!(serde::Serialize) as &Path) {
-        impls.push(quote! {
-            impl serde::Serialize for #name {
-                fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-                where
-                    S: serde::Serializer,
-                {
-                    (self.type_with_generics(), self).serialize(serializer)
-                }
+    // Add the `EventMarker` derive if not already present
+    if !item.attrs.iter().any(|attr| {
+        if attr.path().is_ident("derive") {
+            if let Ok(meta) = attr.parse_args_with(Punctuated::<Meta, Comma>::parse_terminated) {
+                return meta.iter().any(|m| match m {
+                    Meta::Path(path) => path.is_ident("DeriveEventMarker"),
+                    _ => false,
+                });
             }
-        });
+        }
+        false
+    }) {
+        item.attrs
+            .push(parse_quote!(#[derive(al_core::DeriveEventMarker)]));
     }
-    if serde_traits.contains(&parse_quote!(serde::Deserialize) as &Path) {
-        impls.push(quote! {
-            impl<'de> serde::Deserialize<'de> for #name {
-                fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-                where
-                    D: serde::Deserializer<'de>,
-                {
-                    let (type_name, data) = serde::Deserialize::deserialize(deserializer)?;
-                    Ok(data)
-                }
-            }
-        });
-    }
-    quote! {#(#impls)*}
+
+    // Use the `event_requirements` macro
+    add_event_traits(item)
 }
 
 /// Helper attribute macro to add specific common bounds to functions to have a single place to edit the trait bounds

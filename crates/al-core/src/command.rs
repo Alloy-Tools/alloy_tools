@@ -1,9 +1,7 @@
 use crate::event::Event;
-use std::hash::Hash;
 
 /// A command that can be sent through the system to signal actions, including custom events.
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Clone, Default, PartialEq, Hash, std::fmt::Debug)]
+#[crate::event_requirements]
 pub enum Command {
     Event(Box<dyn Event>),
     Restart,
@@ -19,10 +17,29 @@ impl Command {
     }
 
     /// Attempts to downcast the contained event to the specified event type, returning `None` if the command is not an event or if the downcast fails
-    pub fn downcast_event<T: Event + 'static>(&self) -> Option<&T> {
+    pub fn downcast_event<T: Event + crate::EventRequirements + 'static>(
+        self,
+    ) -> Result<T, String> {
+        match self.try_downcast_event() {
+            Ok(t) => Ok(t),
+            Err(Ok(e)) => Err(format!(
+                "Failed to downcast `dyn Event` of type '{}' to type '{}'",
+                e.type_with_generics(),
+                tynm::type_name::<T>()
+            )),
+            Err(Err(e)) => Err(e),
+        }
+    }
+
+    pub fn try_downcast_event<T: Event + crate::EventRequirements + 'static>(
+        self,
+    ) -> Result<T, Result<Box<dyn Event>, String>> {
         match self {
-            Command::Event(event) => event.as_ref().as_any().downcast_ref::<T>(),
-            _ => None,
+            Command::Event(event) => match al_core::downcast_event::<T>(event) {
+                Ok(t) => Ok(t),
+                Err(event) => Err(Ok(event)),
+            },
+            _ => Err(Err("Command is not an Event variant".to_string())),
         }
     }
 

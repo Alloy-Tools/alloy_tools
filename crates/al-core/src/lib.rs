@@ -10,7 +10,11 @@ mod task_utils;
 mod transport;
 mod transports;
 
+pub use al_derive::event;
+pub use al_derive::event_requirements;
+pub use al_derive::EventMarker as DeriveEventMarker;
 pub use command::Command;
+pub use event::downcast as downcast_event;
 pub use event::type_with_generics;
 pub use event::Event;
 #[cfg(feature = "serde")]
@@ -37,10 +41,10 @@ pub use task::Task;
 pub use task_utils::task_elements::TaskConfig;
 pub use task_utils::task_elements::TaskError;
 pub use task_utils::task_elements::TaskMode;
+pub use task_utils::task_state::AsTaskState;
 pub use task_utils::task_state::BaseTaskState;
 pub use task_utils::task_state::ExtendedTaskState;
 pub use task_utils::task_state::TaskState;
-pub use task_utils::task_state::AsTaskState;
 pub use transport::Transport;
 pub use transport::TransportError;
 pub use transports::pipeline::Pipeline;
@@ -49,8 +53,7 @@ pub use transports::splice::Splice;
 
 #[cfg(test)]
 mod tests {
-    use crate::{Command, Event};
-    use al_derive::event;
+    use crate::{event, Command, Event};
     use std::hash::{DefaultHasher, Hash, Hasher};
 
     const TEST_VAL: u128 = 7878;
@@ -132,27 +135,34 @@ mod tests {
         let generic_val = TestEventGeneric(TEST_VAL).to_cmd();
         let generic_str = TestEventGeneric(TEST_MSG.to_string()).to_cmd();
 
-        assert!(cmd.downcast_event::<TestEventA>().is_some());
-        assert!(cmd.downcast_event::<TestEventB>().is_none());
-        assert!(Command::Stop.downcast_event::<TestEventB>().is_none());
-        assert!(enum_cmd.downcast_event::<TestEventEnum>().is_some());
-        assert!(enum_cmd.downcast_event::<TestEventA>().is_none());
-        assert!(payload_cmd.downcast_event::<TestEventPayload>().is_some());
-        assert!(payload_cmd.downcast_event::<TestEventA>().is_none());
+        assert!(cmd.clone().downcast_event::<TestEventA>().is_ok());
+        assert!(cmd.downcast_event::<TestEventB>().is_err());
+        assert!(Command::Stop.downcast_event::<TestEventB>().is_err());
+        assert!(enum_cmd.clone().downcast_event::<TestEventEnum>().is_ok());
+        assert!(enum_cmd.downcast_event::<TestEventA>().is_err());
+        assert!(payload_cmd
+            .clone()
+            .downcast_event::<TestEventPayload>()
+            .is_ok());
+        assert!(payload_cmd.downcast_event::<TestEventA>().is_err());
         assert!(generic_val
+            .clone()
             .downcast_event::<TestEventGeneric<u128>>()
-            .is_some());
+            .is_ok());
         assert!(generic_val
+            .clone()
             .downcast_event::<TestEventGeneric<String>>()
-            .is_none());
-        assert!(generic_val.downcast_event::<TestEventA>().is_none());
+            .is_err());
+        assert!(generic_val.downcast_event::<TestEventA>().is_err());
         assert!(generic_str
+            .clone()
             .downcast_event::<TestEventGeneric<String>>()
-            .is_some());
+            .is_ok());
         assert!(generic_str
+            .clone()
             .downcast_event::<TestEventGeneric<u128>>()
-            .is_none());
-        assert!(generic_str.downcast_event::<TestEventA>().is_none());
+            .is_err());
+        assert!(generic_str.downcast_event::<TestEventA>().is_err());
     }
 
     /// Test function for identification of commands as events
@@ -423,44 +433,37 @@ mod tests {
         assert_eq!(generic_val_original, generic_val_cloned);
         assert_eq!(generic_str_original, generic_str_cloned);
 
-        if let Some(original_event) = payload_original.downcast_event::<TestEventPayload>() {
-            assert_eq!(original_event.value, TEST_VAL);
-            assert_eq!(&original_event.message, TEST_MSG);
-        } else {
-            panic!("Downcast failed.");
+        match payload_original.downcast_event::<TestEventPayload>() {
+            Ok(original_event) => {
+                assert_eq!(original_event.value, TEST_VAL);
+                assert_eq!(&original_event.message, TEST_MSG);
+            }
+            Err(e) => panic!("Downcast failed: {}", e),
         }
-        if let Some(cloned_event) = payload_cloned.downcast_event::<TestEventPayload>() {
-            assert_eq!(cloned_event.value, TEST_VAL);
-            assert_eq!(&cloned_event.message, TEST_MSG);
-        } else {
-            panic!("Downcast failed.");
-        }
-
-        if let Some(original_event) =
-            generic_val_original.downcast_event::<TestEventGeneric<u128>>()
-        {
-            assert_eq!(original_event.0, TEST_VAL);
-        } else {
-            panic!("Downcast failed.");
-        }
-        if let Some(cloned_event) = generic_val_cloned.downcast_event::<TestEventGeneric<u128>>() {
-            assert_eq!(cloned_event.0, TEST_VAL);
-        } else {
-            panic!("Downcast failed.");
+        match payload_cloned.downcast_event::<TestEventPayload>() {
+            Ok(cloned_event) => {
+                assert_eq!(cloned_event.value, TEST_VAL);
+                assert_eq!(&cloned_event.message, TEST_MSG);
+            }
+            Err(e) => panic!("Downcast failed: {}", e),
         }
 
-        if let Some(original_event) =
-            generic_str_original.downcast_event::<TestEventGeneric<String>>()
-        {
-            assert_eq!(original_event.0, TEST_MSG);
-        } else {
-            panic!("Downcast failed.");
+        match generic_val_original.downcast_event::<TestEventGeneric<u128>>() {
+            Ok(original_event) => assert_eq!(original_event.0, TEST_VAL),
+            Err(e) => panic!("Downcast failed: {}", e),
         }
-        if let Some(cloned_event) = generic_str_cloned.downcast_event::<TestEventGeneric<String>>()
-        {
-            assert_eq!(cloned_event.0, TEST_MSG);
-        } else {
-            panic!("Downcast failed.");
+        match generic_val_cloned.downcast_event::<TestEventGeneric<u128>>() {
+            Ok(cloned_event) => assert_eq!(cloned_event.0, TEST_VAL),
+            Err(e) => panic!("Downcast failed: {}", e),
+        }
+
+        match generic_str_original.downcast_event::<TestEventGeneric<String>>() {
+            Ok(original_event) => assert_eq!(original_event.0, TEST_MSG),
+            Err(e) => panic!("Downcast failed: {}", e),
+        }
+        match generic_str_cloned.downcast_event::<TestEventGeneric<String>>() {
+            Ok(cloned_event) => assert_eq!(cloned_event.0, TEST_MSG),
+            Err(e) => panic!("Downcast failed: {}", e),
         }
     }
 
@@ -543,10 +546,7 @@ mod tests {
     #[cfg(all(feature = "serde", feature = "json"))]
     #[test]
     fn event_json() {
-        use crate::{JsonSerde, SerdeFormat};
-        
-        let a = TestEventA;
-        let b = TestEventB;
+        use crate::{register_event, JsonSerde, SerdeFormat};
 
         let event = TestEventPayload {
             value: TEST_VAL,
@@ -576,32 +576,39 @@ mod tests {
         let same_json = JsonSerde.serialize_event(&event_same).unwrap();
         let val_json = JsonSerde.serialize_event(&event_diff_val).unwrap();
         let str_json = JsonSerde.serialize_event(&event_diff_str).unwrap();
-        let a_json = JsonSerde.serialize_event(&a).unwrap();
-        let b_json = JsonSerde.serialize_event(&b).unwrap();
+        let a_json = JsonSerde.serialize_event(&TestEventA).unwrap();
+        let b_json = JsonSerde.serialize_event(&TestEventB).unwrap();
 
         assert_eq!(event_json, JsonSerde.serialize_event(&event).unwrap());
         assert_eq!(event_json, same_json);
         assert_ne!(event_json, val_json);
         assert_ne!(event_json, str_json);
         assert_ne!(event_json, a_json);
-        // The below fails as empty structs serialize identically as events
-        //assert_ne!(a_json, b_json);
+        assert_ne!(a_json, b_json);
 
-        let a_enum = TestEventEnum::A;
+        let enum_a_json = JsonSerde.serialize_event(&TestEventEnum::A).unwrap();
+        let enum_b_json = JsonSerde
+            .serialize_event(&TestEventEnum::B(TEST_VAL))
+            .unwrap();
+        let enum_b_diff_json = JsonSerde
+            .serialize_event(&TestEventEnum::B(TEST_VAL + 1))
+            .unwrap();
+        let enum_c_json = JsonSerde
+            .serialize_event(&TestEventEnum::C(TEST_MSG.to_string()))
+            .unwrap();
+        let enum_c_diff_json = JsonSerde
+            .serialize_event(&TestEventEnum::C(TEST_MSG[1..].to_string()))
+            .unwrap();
 
-        let enum_a_json = JsonSerde.serialize_event(&a_enum).unwrap();
-        let enum_b_json = JsonSerde.serialize_event(&TestEventEnum::B(TEST_VAL)).unwrap();
-        let enum_b_diff_json = JsonSerde.serialize_event(&TestEventEnum::B(TEST_VAL + 1)).unwrap();
-        let enum_c_json = JsonSerde.serialize_event(&TestEventEnum::C(TEST_MSG.to_string())).unwrap();
-        let enum_c_diff_json = JsonSerde.serialize_event(&TestEventEnum::C(TEST_MSG[1..].to_string())).unwrap();
-
-        println!("enum_a_json: {}, a_json: {}, event_json: {}", str::from_utf8(&enum_a_json).unwrap(), str::from_utf8(&a_json).unwrap(), str::from_utf8(&event_json).unwrap());
         assert_ne!(enum_a_json, a_json);
         assert_ne!(enum_a_json, enum_b_json);
         assert_ne!(enum_b_json, enum_b_diff_json);
         assert_ne!(enum_a_json, enum_c_json);
         assert_ne!(enum_c_json, enum_c_diff_json);
-        assert_eq!(enum_a_json, JsonSerde.serialize_event(&TestEventEnum::A).unwrap());
+        assert_eq!(
+            enum_a_json,
+            JsonSerde.serialize_event(&TestEventEnum::A).unwrap()
+        );
 
         let generic_val_json = JsonSerde.serialize_event(&generic_val).unwrap();
         let generic_val_same_json = JsonSerde.serialize_event(&generic_val_same).unwrap();
@@ -625,6 +632,13 @@ mod tests {
         assert_ne!(generic_str_json, generic_str_diff_json);
         assert_ne!(generic_str_json, a_json);
 
+        register_event!(TestEventPayload);
+        register_event!(TestEventGeneric<u128>);
+        register_event!(TestEventGeneric<String>);
+        register_event!(TestEventEnum);
+        register_event!(TestEventA);
+        register_event!(TestEventB);
+
         let new_event: TestEventPayload = JsonSerde.deserialize_event(&event_json).unwrap();
         let new_same: TestEventPayload = JsonSerde.deserialize_event(&same_json).unwrap();
         let new_val: TestEventPayload = JsonSerde.deserialize_event(&val_json).unwrap();
@@ -641,9 +655,11 @@ mod tests {
 
         let enum_new_a: TestEventEnum = JsonSerde.deserialize_event(&enum_a_json).unwrap();
         let enum_new_b: TestEventEnum = JsonSerde.deserialize_event(&enum_b_json).unwrap();
-        let enum_new_b_diff: TestEventEnum = JsonSerde.deserialize_event(&enum_b_diff_json).unwrap();
+        let enum_new_b_diff: TestEventEnum =
+            JsonSerde.deserialize_event(&enum_b_diff_json).unwrap();
         let enum_new_c: TestEventEnum = JsonSerde.deserialize_event(&enum_c_json).unwrap();
-        let enum_new_c_diff: TestEventEnum = JsonSerde.deserialize_event(&enum_c_diff_json).unwrap();
+        let enum_new_c_diff: TestEventEnum =
+            JsonSerde.deserialize_event(&enum_c_diff_json).unwrap();
 
         assert_eq!(enum_new_a, TestEventEnum::A);
         assert_eq!(enum_new_b, TestEventEnum::B(TEST_VAL));
@@ -713,19 +729,47 @@ mod tests {
         let a_json = JsonSerde.serialize_command(&TestEventA.to_cmd()).unwrap();
         let b_json = JsonSerde.serialize_command(&TestEventB.to_cmd()).unwrap();
 
-        let generic_val_json = JsonSerde.serialize_command(&generic_val).unwrap();
-        let generic_val_same_json = JsonSerde.serialize_command(&generic_val_same).unwrap();
-        let generic_val_diff_json = JsonSerde.serialize_command(&generic_val_diff).unwrap();
-        let generic_str_json = JsonSerde.serialize_command(&generic_str).unwrap();
-        let generic_str_same_json = JsonSerde.serialize_command(&generic_str_same).unwrap();
-        let generic_str_diff_json = JsonSerde.serialize_command(&generic_str_diff).unwrap();
-
         assert_eq!(cmd_json, JsonSerde.serialize_command(&cmd).unwrap());
         assert_eq!(cmd_json, same_json);
         assert_ne!(cmd_json, val_json);
         assert_ne!(cmd_json, str_json);
         assert_ne!(cmd_json, a_json);
         assert_ne!(a_json, b_json);
+
+        let enum_a_json = JsonSerde
+            .serialize_command(&TestEventEnum::A.to_cmd())
+            .unwrap();
+        let enum_b_json = JsonSerde
+            .serialize_command(&TestEventEnum::B(TEST_VAL).to_cmd())
+            .unwrap();
+        let enum_b_diff_json = JsonSerde
+            .serialize_command(&TestEventEnum::B(TEST_VAL + 1).to_cmd())
+            .unwrap();
+        let enum_c_json = JsonSerde
+            .serialize_command(&TestEventEnum::C(TEST_MSG.to_string()).to_cmd())
+            .unwrap();
+        let enum_c_diff_json = JsonSerde
+            .serialize_command(&TestEventEnum::C(TEST_MSG[1..].to_string()).to_cmd())
+            .unwrap();
+
+        assert_ne!(enum_a_json, a_json);
+        assert_ne!(enum_a_json, enum_b_json);
+        assert_ne!(enum_b_json, enum_b_diff_json);
+        assert_ne!(enum_a_json, enum_c_json);
+        assert_ne!(enum_c_json, enum_c_diff_json);
+        assert_eq!(
+            enum_a_json,
+            JsonSerde
+                .serialize_command(&TestEventEnum::A.to_cmd())
+                .unwrap()
+        );
+
+        let generic_val_json = JsonSerde.serialize_command(&generic_val).unwrap();
+        let generic_val_same_json = JsonSerde.serialize_command(&generic_val_same).unwrap();
+        let generic_val_diff_json = JsonSerde.serialize_command(&generic_val_diff).unwrap();
+        let generic_str_json = JsonSerde.serialize_command(&generic_str).unwrap();
+        let generic_str_same_json = JsonSerde.serialize_command(&generic_str_same).unwrap();
+        let generic_str_diff_json = JsonSerde.serialize_command(&generic_str_diff).unwrap();
 
         assert_eq!(
             generic_val_json,
@@ -745,35 +789,17 @@ mod tests {
         register_event!(TestEventPayload);
         register_event!(TestEventGeneric<u128>);
         register_event!(TestEventGeneric<String>);
+        register_event!(TestEventEnum);
         register_event!(TestEventA);
         register_event!(TestEventB);
 
-        let new_cmd: Command = JsonSerde.deserialize_command(&cmd_json).unwrap();
-        let new_cmd_second: Command = JsonSerde.deserialize_command(&cmd_json).unwrap();
-        let new_cmd_same: Command = JsonSerde.deserialize_command(&same_json).unwrap();
-        let new_cmd_val: Command = JsonSerde.deserialize_command(&val_json).unwrap();
-        let new_cmd_str: Command = JsonSerde.deserialize_command(&str_json).unwrap();
-        let new_cmd_a: Command = JsonSerde.deserialize_command(&a_json).unwrap();
-        let new_cmd_b: Command = JsonSerde.deserialize_command(&b_json).unwrap();
-
-        let new_generic_val: Command = JsonSerde.deserialize_command(&generic_val_json).unwrap();
-        let new_generic_val_second: Command =
-            JsonSerde.deserialize_command(&generic_val_json).unwrap();
-        let new_generic_val_same: Command = JsonSerde
-            .deserialize_command(&generic_val_same_json)
-            .unwrap();
-        let new_generic_val_diff: Command = JsonSerde
-            .deserialize_command(&generic_val_diff_json)
-            .unwrap();
-        let new_generic_str: Command = JsonSerde.deserialize_command(&generic_str_json).unwrap();
-        let new_generic_str_second: Command =
-            JsonSerde.deserialize_command(&generic_str_json).unwrap();
-        let new_generic_str_same: Command = JsonSerde
-            .deserialize_command(&generic_str_same_json)
-            .unwrap();
-        let new_generic_str_diff: Command = JsonSerde
-            .deserialize_command(&generic_str_diff_json)
-            .unwrap();
+        let new_cmd = JsonSerde.deserialize_command(&cmd_json).unwrap();
+        let new_cmd_second = JsonSerde.deserialize_command(&cmd_json).unwrap();
+        let new_cmd_same = JsonSerde.deserialize_command(&same_json).unwrap();
+        let new_cmd_val = JsonSerde.deserialize_command(&val_json).unwrap();
+        let new_cmd_str = JsonSerde.deserialize_command(&str_json).unwrap();
+        let new_cmd_a = JsonSerde.deserialize_command(&a_json).unwrap();
+        let new_cmd_b = JsonSerde.deserialize_command(&b_json).unwrap();
 
         assert_eq!(cmd, new_cmd);
         assert_eq!(cmd, new_cmd_second);
@@ -789,6 +815,38 @@ mod tests {
         assert_ne!(new_cmd, new_cmd_str);
         assert_eq!(new_cmd_a, TestEventA.to_cmd());
         assert_eq!(new_cmd_b, TestEventB.to_cmd());
+
+        let enum_new_a = JsonSerde.deserialize_command(&enum_a_json).unwrap();
+        let enum_new_b = JsonSerde.deserialize_command(&enum_b_json).unwrap();
+        let enum_new_b_diff = JsonSerde.deserialize_command(&enum_b_diff_json).unwrap();
+        let enum_new_c = JsonSerde.deserialize_command(&enum_c_json).unwrap();
+        let enum_new_c_diff = JsonSerde.deserialize_command(&enum_c_diff_json).unwrap();
+
+        assert_eq!(enum_new_a, TestEventEnum::A.to_cmd());
+        assert_eq!(enum_new_b, TestEventEnum::B(TEST_VAL).to_cmd());
+        assert_eq!(enum_new_b_diff, TestEventEnum::B(TEST_VAL + 1).to_cmd());
+        assert_eq!(enum_new_c, TestEventEnum::C(TEST_MSG.to_string()).to_cmd());
+        assert_eq!(
+            enum_new_c_diff,
+            TestEventEnum::C(TEST_MSG[1..].to_string()).to_cmd()
+        );
+
+        let new_generic_val = JsonSerde.deserialize_command(&generic_val_json).unwrap();
+        let new_generic_val_second = JsonSerde.deserialize_command(&generic_val_json).unwrap();
+        let new_generic_val_same = JsonSerde
+            .deserialize_command(&generic_val_same_json)
+            .unwrap();
+        let new_generic_val_diff = JsonSerde
+            .deserialize_command(&generic_val_diff_json)
+            .unwrap();
+        let new_generic_str = JsonSerde.deserialize_command(&generic_str_json).unwrap();
+        let new_generic_str_second = JsonSerde.deserialize_command(&generic_str_json).unwrap();
+        let new_generic_str_same = JsonSerde
+            .deserialize_command(&generic_str_same_json)
+            .unwrap();
+        let new_generic_str_diff = JsonSerde
+            .deserialize_command(&generic_str_diff_json)
+            .unwrap();
 
         assert_eq!(generic_val, new_generic_val);
         assert_eq!(generic_val, new_generic_val_second);
@@ -813,6 +871,25 @@ mod tests {
         let cmd_event_str = new_cmd_str.downcast_event::<TestEventPayload>().unwrap();
         let cmd_event_a = new_cmd_a.downcast_event::<TestEventA>().unwrap();
         let cmd_event_b = new_cmd_b.downcast_event::<TestEventB>().unwrap();
+
+        assert_eq!(cmd_event, cmd_event_second);
+        assert_eq!(cmd_event, cmd_event_same);
+        assert_ne!(cmd_event, cmd_event_val);
+        assert_ne!(cmd_event, cmd_event_str);
+        assert_eq!(cmd_event_a, TestEventA);
+        assert_eq!(cmd_event_b, TestEventB);
+
+        let cmd_enum_a = enum_new_a.downcast_event::<TestEventEnum>().unwrap();
+        let cmd_enum_b = enum_new_b.downcast_event::<TestEventEnum>().unwrap();
+        let cmd_enum_b_diff = enum_new_b_diff.downcast_event::<TestEventEnum>().unwrap();
+        let cmd_enum_c = enum_new_c.downcast_event::<TestEventEnum>().unwrap();
+        let cmd_enum_c_diff = enum_new_c_diff.downcast_event::<TestEventEnum>().unwrap();
+
+        assert_eq!(cmd_enum_a, TestEventEnum::A);
+        assert_eq!(cmd_enum_b, TestEventEnum::B(TEST_VAL));
+        assert_eq!(cmd_enum_b_diff, TestEventEnum::B(TEST_VAL + 1));
+        assert_eq!(cmd_enum_c, TestEventEnum::C(TEST_MSG.to_string()));
+        assert_eq!(cmd_enum_c_diff, TestEventEnum::C(TEST_MSG[1..].to_string()));
 
         let cmd_generic_val = new_generic_val
             .downcast_event::<TestEventGeneric<u128>>()
@@ -839,13 +916,6 @@ mod tests {
             .downcast_event::<TestEventGeneric<String>>()
             .unwrap();
 
-        assert_eq!(cmd_event, cmd_event_second);
-        assert_eq!(cmd_event, cmd_event_same);
-        assert_ne!(cmd_event, cmd_event_val);
-        assert_ne!(cmd_event, cmd_event_str);
-        assert_eq!(cmd_event_a, &TestEventA);
-        assert_eq!(cmd_event_b, &TestEventB);
-
         assert_eq!(cmd_generic_val, cmd_generic_val_second);
         assert_eq!(cmd_generic_val, cmd_generic_val_same);
         assert_ne!(cmd_generic_val, cmd_generic_val_diff);
@@ -858,7 +928,7 @@ mod tests {
     #[cfg(all(feature = "serde", feature = "binary"))]
     #[test]
     fn event_binary() {
-        use crate::{BinarySerde, SerdeFormat};
+        use crate::{register_event, BinarySerde, SerdeFormat};
 
         let event = TestEventPayload {
             value: TEST_VAL,
@@ -891,20 +961,43 @@ mod tests {
         let a_binary = BinarySerde.serialize_event(&TestEventA {}).unwrap();
         let b_binary = BinarySerde.serialize_event(&TestEventB {}).unwrap();
 
+        assert_eq!(event_binary, BinarySerde.serialize_event(&event).unwrap());
+        assert_eq!(event_binary, same_binary);
+        assert_ne!(event_binary, val_binary);
+        assert_ne!(event_binary, str_binary);
+        assert_ne!(event_binary, a_binary);
+        assert_ne!(a_binary, b_binary);
+
+        let enum_a_binary = BinarySerde.serialize_event(&TestEventEnum::A).unwrap();
+        let enum_b_binary = BinarySerde
+            .serialize_event(&TestEventEnum::B(TEST_VAL))
+            .unwrap();
+        let enum_b_diff_binary = BinarySerde
+            .serialize_event(&TestEventEnum::B(TEST_VAL + 1))
+            .unwrap();
+        let enum_c_binary = BinarySerde
+            .serialize_event(&TestEventEnum::C(TEST_MSG.to_string()))
+            .unwrap();
+        let enum_c_diff_binary = BinarySerde
+            .serialize_event(&TestEventEnum::C(TEST_MSG[1..].to_string()))
+            .unwrap();
+
+        assert_ne!(enum_a_binary, a_binary);
+        assert_ne!(enum_a_binary, enum_b_binary);
+        assert_ne!(enum_b_binary, enum_b_diff_binary);
+        assert_ne!(enum_a_binary, enum_c_binary);
+        assert_ne!(enum_c_binary, enum_c_diff_binary);
+        assert_eq!(
+            enum_a_binary,
+            BinarySerde.serialize_event(&TestEventEnum::A).unwrap()
+        );
+
         let generic_val_binary = BinarySerde.serialize_event(&generic_val).unwrap();
         let generic_val_same_binary = BinarySerde.serialize_event(&generic_val_same).unwrap();
         let generic_val_diff_binary = BinarySerde.serialize_event(&generic_val_diff).unwrap();
         let generic_str_binary = BinarySerde.serialize_event(&generic_str).unwrap();
         let generic_str_same_binary = BinarySerde.serialize_event(&generic_str_same).unwrap();
         let generic_str_diff_binary = BinarySerde.serialize_event(&generic_str_diff).unwrap();
-
-        assert_eq!(event_binary, bitcode::serialize(&event).unwrap());
-        assert_eq!(event_binary, same_binary);
-        assert_ne!(event_binary, val_binary);
-        assert_ne!(event_binary, str_binary);
-        assert_ne!(event_binary, a_binary);
-        // The below fails as empty structs serialize identically as events
-        //assert_ne!(a_binary, b_binary);
 
         assert_eq!(
             generic_val_binary,
@@ -921,12 +1014,40 @@ mod tests {
         assert_ne!(generic_str_binary, generic_str_diff_binary);
         assert_ne!(generic_str_binary, a_binary);
 
+        register_event!(TestEventPayload);
+        register_event!(TestEventGeneric<u128>);
+        register_event!(TestEventGeneric<String>);
+        register_event!(TestEventEnum);
+        register_event!(TestEventA);
+        register_event!(TestEventB);
+
         let new_event: TestEventPayload = BinarySerde.deserialize_event(&event_binary).unwrap();
         let new_same: TestEventPayload = BinarySerde.deserialize_event(&same_binary).unwrap();
         let new_val: TestEventPayload = BinarySerde.deserialize_event(&val_binary).unwrap();
         let new_str: TestEventPayload = BinarySerde.deserialize_event(&str_binary).unwrap();
         let new_a: TestEventA = BinarySerde.deserialize_event(&a_binary).unwrap();
         let new_b: TestEventB = BinarySerde.deserialize_event(&b_binary).unwrap();
+
+        assert_eq!(event, new_event);
+        assert_eq!(event_same, new_same);
+        assert_eq!(event_diff_val, new_val);
+        assert_eq!(event_diff_str, new_str);
+        assert_eq!(TestEventA, new_a);
+        assert_eq!(TestEventB, new_b);
+
+        let enum_new_a: TestEventEnum = BinarySerde.deserialize_event(&enum_a_binary).unwrap();
+        let enum_new_b: TestEventEnum = BinarySerde.deserialize_event(&enum_b_binary).unwrap();
+        let enum_new_b_diff: TestEventEnum =
+            BinarySerde.deserialize_event(&enum_b_diff_binary).unwrap();
+        let enum_new_c: TestEventEnum = BinarySerde.deserialize_event(&enum_c_binary).unwrap();
+        let enum_new_c_diff: TestEventEnum =
+            BinarySerde.deserialize_event(&enum_c_diff_binary).unwrap();
+
+        assert_eq!(enum_new_a, TestEventEnum::A);
+        assert_eq!(enum_new_b, TestEventEnum::B(TEST_VAL));
+        assert_eq!(enum_new_b_diff, TestEventEnum::B(TEST_VAL + 1));
+        assert_eq!(enum_new_c, TestEventEnum::C(TEST_MSG.to_string()));
+        assert_eq!(enum_new_c_diff, TestEventEnum::C(TEST_MSG[1..].to_string()));
 
         let new_generic_val: TestEventGeneric<u128> =
             BinarySerde.deserialize_event(&generic_val_binary).unwrap();
@@ -944,13 +1065,6 @@ mod tests {
         let new_generic_str_diff: TestEventGeneric<String> = BinarySerde
             .deserialize_event(&generic_str_diff_binary)
             .unwrap();
-
-        assert_eq!(event, new_event);
-        assert_eq!(event_same, new_same);
-        assert_eq!(event_diff_val, new_val);
-        assert_eq!(event_diff_str, new_str);
-        assert_eq!(TestEventA, new_a);
-        assert_eq!(TestEventB, new_b);
 
         assert_eq!(generic_val, new_generic_val);
         assert_eq!(generic_val_same, new_generic_val_same);
@@ -1001,19 +1115,47 @@ mod tests {
         let a_binary = BinarySerde.serialize_command(&TestEventA.to_cmd()).unwrap();
         let b_binary = BinarySerde.serialize_command(&TestEventB.to_cmd()).unwrap();
 
-        let generic_val_binary = BinarySerde.serialize_command(&generic_val).unwrap();
-        let generic_val_same_binary = BinarySerde.serialize_command(&generic_val_same).unwrap();
-        let generic_val_diff_binary = BinarySerde.serialize_command(&generic_val_diff).unwrap();
-        let generic_str_binary = BinarySerde.serialize_command(&generic_str).unwrap();
-        let generic_str_same_binary = BinarySerde.serialize_command(&generic_str_same).unwrap();
-        let generic_str_diff_binary = BinarySerde.serialize_command(&generic_str_diff).unwrap();
-
         assert_eq!(cmd_binary, BinarySerde.serialize_command(&cmd).unwrap());
         assert_eq!(cmd_binary, same_binary);
         assert_ne!(cmd_binary, val_binary);
         assert_ne!(cmd_binary, str_binary);
         assert_ne!(cmd_binary, a_binary);
         assert_ne!(a_binary, b_binary);
+
+        let enum_a_binary = BinarySerde
+            .serialize_command(&TestEventEnum::A.to_cmd())
+            .unwrap();
+        let enum_b_binary = BinarySerde
+            .serialize_command(&TestEventEnum::B(TEST_VAL).to_cmd())
+            .unwrap();
+        let enum_b_diff_binary = BinarySerde
+            .serialize_command(&TestEventEnum::B(TEST_VAL + 1).to_cmd())
+            .unwrap();
+        let enum_c_binary = BinarySerde
+            .serialize_command(&TestEventEnum::C(TEST_MSG.to_string()).to_cmd())
+            .unwrap();
+        let enum_c_diff_binary = BinarySerde
+            .serialize_command(&TestEventEnum::C(TEST_MSG[1..].to_string()).to_cmd())
+            .unwrap();
+
+        assert_ne!(enum_a_binary, a_binary);
+        assert_ne!(enum_a_binary, enum_b_binary);
+        assert_ne!(enum_b_binary, enum_b_diff_binary);
+        assert_ne!(enum_a_binary, enum_c_binary);
+        assert_ne!(enum_c_binary, enum_c_diff_binary);
+        assert_eq!(
+            enum_a_binary,
+            BinarySerde
+                .serialize_command(&TestEventEnum::A.to_cmd())
+                .unwrap()
+        );
+
+        let generic_val_binary = BinarySerde.serialize_command(&generic_val).unwrap();
+        let generic_val_same_binary = BinarySerde.serialize_command(&generic_val_same).unwrap();
+        let generic_val_diff_binary = BinarySerde.serialize_command(&generic_val_diff).unwrap();
+        let generic_str_binary = BinarySerde.serialize_command(&generic_str).unwrap();
+        let generic_str_same_binary = BinarySerde.serialize_command(&generic_str_same).unwrap();
+        let generic_str_diff_binary = BinarySerde.serialize_command(&generic_str_diff).unwrap();
 
         assert_eq!(
             generic_val_binary,
@@ -1033,6 +1175,7 @@ mod tests {
         register_event!(TestEventPayload);
         register_event!(TestEventGeneric<u128>);
         register_event!(TestEventGeneric<String>);
+        register_event!(TestEventEnum);
         register_event!(TestEventA);
         register_event!(TestEventB);
 
@@ -1043,6 +1186,40 @@ mod tests {
         let new_cmd_str: Command = BinarySerde.deserialize_command(&str_binary).unwrap();
         let new_cmd_a: Command = BinarySerde.deserialize_command(&a_binary).unwrap();
         let new_cmd_b: Command = BinarySerde.deserialize_command(&b_binary).unwrap();
+
+        assert_eq!(cmd, new_cmd);
+        assert_eq!(cmd, new_cmd_second);
+        assert_eq!(cmd_same, new_cmd_same);
+        assert_eq!(cmd_diff_val, new_cmd_val);
+        assert_eq!(cmd_diff_str, new_cmd_str);
+        assert_eq!(TestEventA.to_cmd(), new_cmd_a);
+        assert_eq!(TestEventB.to_cmd(), new_cmd_b);
+
+        assert_eq!(new_cmd, new_cmd_second);
+        assert_eq!(new_cmd, new_cmd_same);
+        assert_ne!(new_cmd, new_cmd_val);
+        assert_ne!(new_cmd, new_cmd_str);
+        assert_eq!(new_cmd_a, TestEventA.to_cmd());
+        assert_eq!(new_cmd_b, TestEventB.to_cmd());
+
+        let enum_new_a = BinarySerde.deserialize_command(&enum_a_binary).unwrap();
+        let enum_new_b = BinarySerde.deserialize_command(&enum_b_binary).unwrap();
+        let enum_new_b_diff = BinarySerde
+            .deserialize_command(&enum_b_diff_binary)
+            .unwrap();
+        let enum_new_c = BinarySerde.deserialize_command(&enum_c_binary).unwrap();
+        let enum_new_c_diff = BinarySerde
+            .deserialize_command(&enum_c_diff_binary)
+            .unwrap();
+
+        assert_eq!(enum_new_a, TestEventEnum::A.to_cmd());
+        assert_eq!(enum_new_b, TestEventEnum::B(TEST_VAL).to_cmd());
+        assert_eq!(enum_new_b_diff, TestEventEnum::B(TEST_VAL + 1).to_cmd());
+        assert_eq!(enum_new_c, TestEventEnum::C(TEST_MSG.to_string()).to_cmd());
+        assert_eq!(
+            enum_new_c_diff,
+            TestEventEnum::C(TEST_MSG[1..].to_string()).to_cmd()
+        );
 
         let new_generic_val: Command = BinarySerde
             .deserialize_command(&generic_val_binary)
@@ -1069,21 +1246,6 @@ mod tests {
             .deserialize_command(&generic_str_diff_binary)
             .unwrap();
 
-        assert_eq!(cmd, new_cmd);
-        assert_eq!(cmd, new_cmd_second);
-        assert_eq!(cmd_same, new_cmd_same);
-        assert_eq!(cmd_diff_val, new_cmd_val);
-        assert_eq!(cmd_diff_str, new_cmd_str);
-        assert_eq!(TestEventA.to_cmd(), new_cmd_a);
-        assert_eq!(TestEventB.to_cmd(), new_cmd_b);
-
-        assert_eq!(new_cmd, new_cmd_second);
-        assert_eq!(new_cmd, new_cmd_same);
-        assert_ne!(new_cmd, new_cmd_val);
-        assert_ne!(new_cmd, new_cmd_str);
-        assert_eq!(new_cmd_a, TestEventA.to_cmd());
-        assert_eq!(new_cmd_b, TestEventB.to_cmd());
-
         assert_eq!(generic_val, new_generic_val);
         assert_eq!(generic_val, new_generic_val_second);
         assert_eq!(generic_val_same, new_generic_val_same);
@@ -1107,6 +1269,25 @@ mod tests {
         let cmd_event_str = new_cmd_str.downcast_event::<TestEventPayload>().unwrap();
         let cmd_event_a = new_cmd_a.downcast_event::<TestEventA>().unwrap();
         let cmd_event_b = new_cmd_b.downcast_event::<TestEventB>().unwrap();
+
+        assert_eq!(cmd_event, cmd_event_second);
+        assert_eq!(cmd_event, cmd_event_same);
+        assert_ne!(cmd_event, cmd_event_val);
+        assert_ne!(cmd_event, cmd_event_str);
+        assert_eq!(cmd_event_a, TestEventA);
+        assert_eq!(cmd_event_b, TestEventB);
+
+        let cmd_enum_a = enum_new_a.downcast_event::<TestEventEnum>().unwrap();
+        let cmd_enum_b = enum_new_b.downcast_event::<TestEventEnum>().unwrap();
+        let cmd_enum_b_diff = enum_new_b_diff.downcast_event::<TestEventEnum>().unwrap();
+        let cmd_enum_c = enum_new_c.downcast_event::<TestEventEnum>().unwrap();
+        let cmd_enum_c_diff = enum_new_c_diff.downcast_event::<TestEventEnum>().unwrap();
+
+        assert_eq!(cmd_enum_a, TestEventEnum::A);
+        assert_eq!(cmd_enum_b, TestEventEnum::B(TEST_VAL));
+        assert_eq!(cmd_enum_b_diff, TestEventEnum::B(TEST_VAL + 1));
+        assert_eq!(cmd_enum_c, TestEventEnum::C(TEST_MSG.to_string()));
+        assert_eq!(cmd_enum_c_diff, TestEventEnum::C(TEST_MSG[1..].to_string()));
 
         let cmd_generic_val = new_generic_val
             .downcast_event::<TestEventGeneric<u128>>()
@@ -1132,13 +1313,6 @@ mod tests {
         let cmd_generic_str_diff = new_generic_str_diff
             .downcast_event::<TestEventGeneric<String>>()
             .unwrap();
-
-        assert_eq!(cmd_event, cmd_event_second);
-        assert_eq!(cmd_event, cmd_event_same);
-        assert_ne!(cmd_event, cmd_event_val);
-        assert_ne!(cmd_event, cmd_event_str);
-        assert_eq!(cmd_event_a, &TestEventA);
-        assert_eq!(cmd_event_b, &TestEventB);
 
         assert_eq!(cmd_generic_val, cmd_generic_val_second);
         assert_eq!(cmd_generic_val, cmd_generic_val_same);
