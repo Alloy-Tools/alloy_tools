@@ -19,7 +19,13 @@ impl<T: std::fmt::Debug> std::fmt::Debug for Queue<T> {
     }
 }
 
-impl<T: TransportItemRequirements> Queue<T> {
+impl<T: TransportItemRequirements> From<Queue<T>> for std::sync::Arc<dyn Transport<T>> {
+    fn from(queue: Queue<T>) -> Self {
+        std::sync::Arc::new(queue)
+    }
+}
+
+impl<T> Queue<T> {
     pub fn new() -> Self {
         Queue::<T> {
             queue: Mutex::new(VecDeque::<T>::new()),

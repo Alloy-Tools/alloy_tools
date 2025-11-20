@@ -1,6 +1,6 @@
 use std::{future::Future, marker::PhantomData, sync::Arc};
 
-use crate::{Pipeline, Transport, TransportError, TransportItemRequirements};
+use crate::{Link, Transport, TransportError, TransportItemRequirements};
 
 pub struct Splice<F: TransportItemRequirements, T: TransportItemRequirements>(
     Arc<dyn Transport<F>>,
@@ -14,6 +14,14 @@ impl<F: TransportItemRequirements, T: TransportItemRequirements> std::fmt::Debug
             .field(&self.1)
             .field(&"<SpliceFn>")
             .finish()
+    }
+}
+
+impl<F: TransportItemRequirements, T: TransportItemRequirements> From<Splice<F, T>>
+    for Arc<dyn Transport<F>>
+{
+    fn from(splice: Splice<F, T>) -> Self {
+        Arc::new(splice)
     }
 }
 
@@ -41,10 +49,10 @@ impl<F: TransportItemRequirements, T: TransportItemRequirements> Splice<F, T> {
         ));
 
         // Set up a `Link` from the producer to the `SpliceTransport<F>`
-        let link = Arc::new(Pipeline::link(producer, splice_transport));
+        let link = Link::new(producer, splice_transport);
 
         // setting the new `Link` as the producer in the `Splice`
-        Arc::new(Self(link, consumer))
+        Arc::new(Self(link.into(), consumer))
     }
 
     #[allow(unused)]

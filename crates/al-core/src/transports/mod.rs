@@ -1,28 +1,28 @@
-pub mod pipeline;
+pub mod link;
+pub mod list;
+pub mod publisher;
 pub mod queue;
 pub mod splice;
+pub mod transform;
 
 #[cfg(test)]
 mod tests {
-    use crate::{Command, Pipeline, Queue, Splice, Transport, TransportItemRequirements};
+    use crate::{Command, Link, Queue, Splice, Transport, TransportItemRequirements};
     use std::sync::Arc;
 
     fn make_queue_link<T: TransportItemRequirements>(
         t0: Option<Arc<dyn Transport<T>>>,
         t1: Option<Arc<dyn Transport<T>>>,
-    ) -> Pipeline<T> {
+    ) -> Link<T> {
         let t0 = t0.unwrap_or_else(|| Arc::new(Queue::<T>::new()));
         let t1 = t1.unwrap_or_else(|| Arc::new(Queue::<T>::new()));
-        Pipeline::link(t0, t1)
+        Link::new(t0, t1)
     }
 
     #[tokio::test]
     async fn queue_debug() {
         assert_eq!(
-            format!(
-                "{:?}",
-                Queue::<Command>::new()
-            ),
+            format!("{:?}", Queue::<Command>::new()),
             "Queue { queue: [] }"
         );
     }
@@ -32,13 +32,13 @@ mod tests {
         let l0 = make_queue_link::<Command>(None, None);
         assert_eq!(
             format!("{:?}", l0),
-            "Link(Queue { queue: [] }, Queue { queue: [] }, \"<LinkFn>\")"
+            "Link { producer: Queue { queue: [] }, consumer: Queue { queue: [] }, link_task: \"<LinkFn>\" }"
         );
         let l1 = make_queue_link(
             Some(Arc::new(l0)),
             Some(Arc::new(make_queue_link(None, None))),
         );
-        assert_eq!(format!("{:?}", l1), "Link(Link(Queue { queue: [] }, Queue { queue: [] }, \"<LinkFn>\"), Link(Queue { queue: [] }, Queue { queue: [] }, \"<LinkFn>\"), \"<LinkFn>\")");
+        assert_eq!(format!("{:?}", l1), "Link { producer: Link { producer: Queue { queue: [] }, consumer: Queue { queue: [] }, link_task: \"<LinkFn>\" }, consumer: Link { producer: Queue { queue: [] }, consumer: Queue { queue: [] }, link_task: \"<LinkFn>\" }, link_task: \"<LinkFn>\" }");
     }
 
     #[tokio::test]
