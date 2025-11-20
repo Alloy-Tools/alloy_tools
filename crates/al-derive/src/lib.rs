@@ -51,12 +51,15 @@ fn derive_event_marker(input: DeriveInput) -> TokenStream {
 
 /// Attributte macro to add the required traits for an `Event`
 #[proc_macro_attribute]
-pub fn event_requirements(_: TokenStream, item: TokenStream) -> TokenStream {
-    add_event_traits(parse_macro_input!(item as DeriveInput))
+pub fn event_requirements(attrs: TokenStream, item: TokenStream) -> TokenStream {
+    add_event_traits(
+        parse_macro_input!(item as DeriveInput),
+        parse_macro_input!(attrs with Punctuated<Meta, Comma>::parse_terminated),
+    )
 }
 
 /// Helper function to add required `Event` traits to a DeriveInput
-fn add_event_traits(mut item: DeriveInput) -> TokenStream {
+fn add_event_traits(mut item: DeriveInput, attrs: Punctuated<Meta, Comma>) -> TokenStream {
     let mut required_traits: Vec<Path> = vec![
         parse_quote!(Clone),
         parse_quote!(Default),
@@ -71,7 +74,15 @@ fn add_event_traits(mut item: DeriveInput) -> TokenStream {
         parse_quote!(serde::Deserialize),
     ]);
 
-    // find any existing #[derive(...)] attributes and remove any duplicates from required_traits
+    // Remove any traits specified in the attribute arguments
+    for arg in attrs {
+        match arg {
+            Meta::Path(path) => required_traits.retain(|t| t != &path),
+            _ => panic!("Only trait paths like `Clone` or `serde::Serialize` are supported."),
+        }
+    }
+
+    // Find any existing #[derive(...)] attributes and remove any duplicates from required_traits
     let _ = &item
         .attrs
         .iter()
@@ -105,7 +116,7 @@ fn add_event_traits(mut item: DeriveInput) -> TokenStream {
 ///
 /// Will cause conflicting implementations if placed after any `#derive(...)]` attributes that implement any super traits of `EventRequirements`.
 #[proc_macro_attribute]
-pub fn event(_: TokenStream, item: TokenStream) -> TokenStream {
+pub fn event(attrs: TokenStream, item: TokenStream) -> TokenStream {
     let mut item = parse_macro_input!(item as DeriveInput);
 
     // Add the `EventMarker` derive if not already present
@@ -125,7 +136,10 @@ pub fn event(_: TokenStream, item: TokenStream) -> TokenStream {
     }
 
     // Use the `event_requirements` macro
-    add_event_traits(item)
+    add_event_traits(
+        item,
+        parse_macro_input!(attrs with Punctuated<Meta, Comma>::parse_terminated),
+    )
 }
 
 /// Helper attribute macro to add specific common bounds to functions to have a single place to edit the trait bounds
