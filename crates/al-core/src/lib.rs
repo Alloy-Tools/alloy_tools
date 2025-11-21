@@ -52,6 +52,9 @@ pub use transports::list::List;
 pub use transports::publisher::Publisher;
 pub use transports::queue::Queue;
 pub use transports::splice::Splice;
+pub use transports::transform::NoOp;
+pub use transports::transform::Transform;
+pub use transports::transform::TransformFn;
 
 #[cfg(test)]
 mod tests {

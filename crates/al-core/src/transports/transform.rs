@@ -1,39 +1,87 @@
 use std::sync::Arc;
 
-use crate::{Transport, TransportItemRequirements};
+use crate::{Transport, TransportItemRequirements, TransportRequirements};
 
-pub trait TransformFn<T>: Fn(T) -> T + Send + Sync {}
-impl<T: TransportItemRequirements, F: Fn(T) -> T + Send + Sync> TransformFn<T> for F {}
+pub trait TransformFunction<T>: Fn(T) -> T + Send + Sync {}
+impl<T: TransportItemRequirements, F: Fn(T) -> T + Send + Sync> TransformFunction<T> for F {}
 
-struct Transform<T> {
+pub trait ApplyTransform<T> {
+    fn apply(&self, data: T) -> T {
+        data
+    }
+}
+
+#[derive(Debug)]
+pub struct NoOp;
+
+impl<T> ApplyTransform<T> for NoOp {}
+
+pub struct TransformFn<T>(Arc<dyn TransformFunction<T>>);
+
+impl<T, F> From<F> for TransformFn<T>
+where
+    F: TransformFunction<T> + 'static,
+{
+    fn from(func: F) -> Self {
+        TransformFn(Arc::new(func))
+    }
+}
+
+impl<T> From<Arc<dyn TransformFunction<T>>> for TransformFn<T> {
+    fn from(func: Arc<dyn TransformFunction<T>>) -> Self {
+        TransformFn(func)
+    }
+}
+
+impl<T> ApplyTransform<T> for TransformFn<T> {
+    fn apply(&self, data: T) -> T {
+        (self.0)(data)
+    }
+}
+
+impl<T> std::fmt::Debug for TransformFn<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("TransformFn")
+            .field(&"<TransformFunction>")
+            .finish()
+    }
+}
+
+#[derive(Debug)]
+pub struct Transform<T, Send: ApplyTransform<T> = NoOp, Recv: ApplyTransform<T> = NoOp> {
     transport: Arc<dyn Transport<T>>,
-    transform_fn: Arc<dyn TransformFn<T>>,
+    transform_send: Send,
+    transform_recv: Recv,
 }
 
-pub struct TransformSend<T>(Transform<T>);
-
-impl<T> std::fmt::Debug for TransformSend<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TransformSend")
-            .field("transport", &self.0.transport)
-            .field("transform_fn", &"<TransformFn>")
-            .finish()
+impl<
+        T,
+        S: ApplyTransform<T> + TransportRequirements,
+        R: ApplyTransform<T> + TransportRequirements,
+    > Transform<T, S, R>
+{
+    pub fn new(transport: Arc<dyn Transport<T>>, transform_send: S, transform_recv: R) -> Self {
+        Self {
+            transport,
+            transform_send,
+            transform_recv,
+        }
     }
 }
 
-impl<T: TransportItemRequirements> From<TransformSend<T>> for Arc<dyn Transport<T>> {
-    fn from(transform: TransformSend<T>) -> Self {
-        Arc::new(transform)
-    }
-}
-
-impl<T: TransportItemRequirements> Transport<T> for TransformSend<T> {
+impl<
+        T: TransportItemRequirements,
+        S: ApplyTransform<T> + TransportRequirements,
+        R: ApplyTransform<T> + TransportRequirements,
+    > Transport<T> for Transform<T, S, R>
+{
     fn send_blocking(&self, data: T) -> Result<(), crate::TransportError> {
-        self.0.transport.send_blocking((self.0.transform_fn)(data))
+        self.transport
+            .send_blocking(self.transform_send.apply(data))
     }
 
     fn recv_blocking(&self) -> Result<T, crate::TransportError> {
-        self.0.transport.recv_blocking()
+        Ok(self.transform_recv.apply(self.transport.recv_blocking()?))
     }
 
     fn send(
@@ -47,7 +95,7 @@ impl<T: TransportItemRequirements> Transport<T> for TransformSend<T> {
                 + '_,
         >,
     > {
-        self.0.transport.send((self.0.transform_fn)(data))
+        self.transport.send(self.transform_send.apply(data))
     }
 
     fn recv(
@@ -60,60 +108,33 @@ impl<T: TransportItemRequirements> Transport<T> for TransformSend<T> {
                 + '_,
         >,
     > {
-        self.0.transport.recv()
+        let transform_recv = &self.transform_recv;
+        Box::pin(async move { Ok(transform_recv.apply(self.transport.recv().await?)) })
     }
 }
 
-pub struct TransformRecv<T>(Transform<T>);
+#[cfg(test)]
+mod tests {
+    use crate::{
+        event,
+        transports::transform::{Transform, TransformFn},
+        Queue, Transport,
+    };
 
-impl<T> std::fmt::Debug for TransformRecv<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TransformRecv")
-            .field("transport", &self.0.transport)
-            .field("transform_fn", &"<TransformFn>")
-            .finish()
-    }
-}
+    #[event]
+    struct AddOne(u8);
 
-impl<T: TransportItemRequirements> From<TransformRecv<T>> for Arc<dyn Transport<T>> {
-    fn from(transform: TransformRecv<T>) -> Self {
-        Arc::new(transform)
-    }
-}
+    #[test]
+    fn transform() {
+        let transform = Transform::new(
+            Queue::new().into(),
+            TransformFn::from(|mut x: AddOne| { x.0 += 1; x }),
+            TransformFn::from(|mut x: AddOne| { x.0 += 1; x }),
+        );
 
-impl<T: TransportItemRequirements> Transport<T> for TransformRecv<T> {
-    fn send_blocking(&self, data: T) -> Result<(), crate::TransportError> {
-        self.0.transport.send_blocking(data)
-    }
-
-    fn recv_blocking(&self) -> Result<T, crate::TransportError> {
-        Ok((self.0.transform_fn)(self.0.transport.recv_blocking()?))
-    }
-
-    fn send(
-        &self,
-        data: T,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::prelude::rust_2024::Future<Output = Result<(), crate::TransportError>>
-                + Send
-                + Sync
-                + '_,
-        >,
-    > {
-        self.0.transport.send(data)
-    }
-
-    fn recv(
-        &self,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::prelude::rust_2024::Future<Output = Result<T, crate::TransportError>>
-                + Send
-                + Sync
-                + '_,
-        >,
-    > {
-        Box::pin(async move { Ok((self.0.transform_fn)(self.0.transport.recv().await?)) })
+        let x = 1u8;
+        transform.send_blocking(AddOne(x)).unwrap();
+        let y = transform.recv_blocking().unwrap();
+        assert_eq!(y.0, x + 2);
     }
 }
