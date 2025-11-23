@@ -84,6 +84,22 @@ impl<
         Ok(self.transform_recv.apply(self.transport.recv_blocking()?))
     }
 
+    fn recv_avaliable_blocking(&self) -> Result<Vec<T>, crate::TransportError> {
+        Ok(self
+            .transport
+            .recv_avaliable_blocking()?
+            .into_iter()
+            .map(|data| self.transform_recv.apply(data))
+            .collect())
+    }
+
+    fn try_recv_blocking(&self) -> Result<Option<T>, crate::TransportError> {
+        Ok(self
+            .transport
+            .try_recv_blocking()?
+            .and_then(|data| Some(self.transform_recv.apply(data))))
+    }
+
     fn send(
         &self,
         data: T,
@@ -108,8 +124,47 @@ impl<
                 + '_,
         >,
     > {
-        let transform_recv = &self.transform_recv;
-        Box::pin(async move { Ok(transform_recv.apply(self.transport.recv().await?)) })
+        Box::pin(async { Ok(self.transform_recv.apply(self.transport.recv().await?)) })
+    }
+
+    fn recv_avaliable(
+        &self,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::prelude::rust_2024::Future<Output = Result<Vec<T>, crate::TransportError>>
+                + Send
+                + Sync
+                + '_,
+        >,
+    > {
+        Box::pin(async {
+            Ok(self
+                .transport
+                .recv_avaliable()
+                .await?
+                .into_iter()
+                .map(|data| self.transform_recv.apply(data))
+                .collect())
+        })
+    }
+
+    fn try_recv(
+        &self,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::prelude::rust_2024::Future<Output = Result<Option<T>, crate::TransportError>>
+                + Send
+                + Sync
+                + '_,
+        >,
+    > {
+        Box::pin(async {
+            Ok(self
+                .transport
+                .try_recv()
+                .await?
+                .and_then(|data| Some(self.transform_recv.apply(data))))
+        })
     }
 }
 
@@ -128,8 +183,14 @@ mod tests {
     fn transform() {
         let transform = Transform::new(
             Queue::new().into(),
-            TransformFn::from(|mut x: AddOne| { x.0 += 1; x }),
-            TransformFn::from(|mut x: AddOne| { x.0 += 1; x }),
+            TransformFn::from(|mut x: AddOne| {
+                x.0 += 1;
+                x
+            }),
+            TransformFn::from(|mut x: AddOne| {
+                x.0 += 1;
+                x
+            }),
         );
 
         let x = 1u8;

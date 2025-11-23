@@ -62,13 +62,22 @@ mod tests {
         let splice = Splice::new(
             Arc::new(make_queue_link::<Command>(None, None)),
             Arc::new(make_queue_link::<String>(None, None)),
-            Arc::new(move |data| async move { Ok(format!("Command: {:?}", data)) }),
+            Arc::new(|data| Ok(format!("Command: {:?}", data))),
+            Arc::new(|data| async move { Ok(format!("Command: {:?}", data)) }),
         );
 
-        // Send `Command`
+        // Send `Command` asynchronously
         splice.send(Command::Stop).await.unwrap();
 
-        // Recv `String`
+        // Recv `String` asynchronously
         assert_eq!(splice.consumer().recv().await.unwrap(), "Command: Stop");
+
+        // Send `Command` synchronously
+        splice.send_blocking(Command::Stop).unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_nanos(1)).await;
+
+        // Recv `String` synchronously
+        assert_eq!(splice.consumer().recv_blocking().unwrap(), "Command: Stop");
     }
 }

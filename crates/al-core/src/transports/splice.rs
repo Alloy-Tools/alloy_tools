@@ -13,6 +13,7 @@ impl<F: TransportItemRequirements, T: TransportItemRequirements> std::fmt::Debug
             .field(&self.0)
             .field(&self.1)
             .field(&"<SpliceFn>")
+            .field(&"<AsyncSpliceFn>")
             .finish()
     }
 }
@@ -27,23 +28,31 @@ impl<F: TransportItemRequirements, T: TransportItemRequirements> From<Splice<F, 
 
 impl<F: TransportItemRequirements, T: TransportItemRequirements> Splice<F, T> {
     /// Returns a new `Splice` joining `producer<F>` into `consumer<T>`
-    pub fn new<SpliceFn, Fut>(
+    pub fn new<SpliceFn, AsyncSpliceFn, Fut>(
         producer: Arc<dyn Transport<F>>,
         consumer: Arc<dyn Transport<T>>,
         splice_fn: Arc<SpliceFn>,
+        async_splice_fn: Arc<AsyncSpliceFn>,
     ) -> Arc<Self>
     where
-        SpliceFn: Fn(F) -> Fut + Send + Sync + 'static,
+        SpliceFn: Fn(F) -> Result<T, TransportError> + Send + Sync + 'static,
+        AsyncSpliceFn: Fn(F) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<T, TransportError>> + Send + Sync + 'static,
     {
         let consumer_clone = consumer.clone();
+        let async_consumer_clone = consumer.clone();
         // Create the new `SpliceTransport<F>` that transforms the data and sends it to the consumer
         let splice_transport = Arc::new(SpliceTransport(
+            move |data| consumer_clone.send_blocking(splice_fn(data)?),
             move |data| {
-                let consumer_clone = consumer_clone.clone();
-                let splice_fn = splice_fn.clone();
+                let async_consumer_clone = async_consumer_clone.clone();
+                let async_splice_fn = async_splice_fn.clone();
                 //TODO: Should this just be started as a task to allow a tight inner loop?
-                async move { consumer_clone.send(splice_fn(data).await?).await }
+                async move {
+                    async_consumer_clone
+                        .send(async_splice_fn(data).await?)
+                        .await
+                }
             },
             PhantomData,
         ));
@@ -76,7 +85,15 @@ impl<F: TransportItemRequirements, T: TransportItemRequirements> Transport<F> fo
     }
 
     fn recv_blocking(&self) -> Result<F, crate::TransportError> {
-        Err(crate::TransportError::NoRecv("Not receivable. Rather than `recv<F>`, must access the internal `splice.consumer<T>()` to call `recv<T>`.".to_string()))
+        Err(TransportError::UnSupported("Not receivable. Rather than `recv<F>`, must access the internal `splice.consumer<T>()` to call `recv<T>`.".to_string()))
+    }
+
+    fn recv_avaliable_blocking(&self) -> Result<Vec<F>, TransportError> {
+        Err(TransportError::UnSupported("Not receivable. Rather than `recv<F>`, must access the internal `splice.consumer<T>()` to call `recv<T>`.".to_string()))
+    }
+
+    fn try_recv_blocking(&self) -> Result<Option<F>, TransportError> {
+        Err(TransportError::UnSupported("Not receivable. Rather than `recv<F>`, must access the internal `splice.consumer<T>()` to call `recv<T>`.".to_string()))
     }
 
     fn send(
@@ -105,48 +122,78 @@ impl<F: TransportItemRequirements, T: TransportItemRequirements> Transport<F> fo
     > {
         Box::pin(async { self.recv_blocking() })
     }
+
+    fn recv_avaliable(
+        &self,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<Vec<F>, TransportError>> + Send + Sync + '_>>
+    {
+        Box::pin(async { self.recv_avaliable_blocking() })
+    }
+
+    fn try_recv(
+        &self,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<Option<F>, TransportError>> + Send + Sync + '_>>
+    {
+        Box::pin(async { self.try_recv_blocking() })
+    }
 }
 
 /* ********************
   SpliceTransport
 ******************** */
 
-/// `SpliceTransport` acts as a hook to call the `SpliceFn` of the `Splice` that created it
+/// `SpliceTransport` acts as a hook to call the `SpliceFn` or `AsyncSpliceFn` of the `Splice` that created it
 pub struct SpliceTransport<
     F: TransportItemRequirements,
-    SpliceFn: Fn(F) -> Fut + Send + Sync + 'static,
+    SpliceFn: Fn(F) -> Result<(), TransportError> + Send + Sync + 'static,
+    AsyncSpliceFn: Fn(F) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<(), TransportError>> + Send + Sync + 'static,
->(SpliceFn, PhantomData<(F, Fut)>);
+>(SpliceFn, AsyncSpliceFn, PhantomData<(F, Fut)>);
 
 impl<
         F: TransportItemRequirements,
-        SpliceFn: Fn(F) -> Fut + Send + Sync + 'static,
+        SpliceFn: Fn(F) -> Result<(), TransportError> + Send + Sync + 'static,
+        AsyncSpliceFn: Fn(F) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<(), TransportError>> + Send + Sync + 'static,
-    > std::fmt::Debug for SpliceTransport<F, SpliceFn, Fut>
+    > std::fmt::Debug for SpliceTransport<F, SpliceFn, AsyncSpliceFn, Fut>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("SpliceTransport")
             .field(&"<SpliceFn>")
+            .field(&"<AsyncSpliceFn>")
             .finish()
     }
 }
 
-/// On `send`, calls the `SpliceFn` of the `Splice` that created the `SpliceTransport`.
+/// On `send`, calls the `SpliceFn` or `AsyncSpliceFn` of the `Splice` that created the `SpliceTransport`.
 /// Not receivable. Must `recv` from the `Splice` internal consumer.
 impl<
         F: TransportItemRequirements,
-        SpliceFn: Fn(F) -> Fut + Send + Sync + 'static,
+        SpliceFn: Fn(F) -> Result<(), TransportError> + Send + Sync + 'static,
+        AsyncSpliceFn: Fn(F) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<(), TransportError>> + Send + Sync + 'static,
-    > Transport<F> for SpliceTransport<F, SpliceFn, Fut>
+    > Transport<F> for SpliceTransport<F, SpliceFn, AsyncSpliceFn, Fut>
 {
-    fn send_blocking(&self, _: F) -> Result<(), TransportError> {
-        Err(TransportError::NoRecv(
-            "Not blockable. Must `send` from the `Splice` intead.".to_string(),
-        ))
+    fn send_blocking(&self, data: F) -> Result<(), TransportError> {
+        self.0(data)
     }
 
     fn recv_blocking(&self) -> Result<F, TransportError> {
-        Err(TransportError::NoRecv(
+        Err(TransportError::UnSupported(
+            "Not receivable. Must `recv` or `recv_blocking` from the `Splice` internal consumer."
+                .to_string(),
+        ))
+    }
+
+    fn recv_avaliable_blocking(&self) -> Result<Vec<F>, TransportError> {
+        Err(TransportError::UnSupported(
+            "Not receivable. Must `recv` or `recv_blocking` from the `Splice` internal consumer."
+                .to_string(),
+        ))
+    }
+
+    fn try_recv_blocking(&self) -> Result<Option<F>, TransportError> {
+        Err(TransportError::UnSupported(
             "Not receivable. Must `recv` or `recv_blocking` from the `Splice` internal consumer."
                 .to_string(),
         ))
@@ -163,7 +210,7 @@ impl<
                 + '_,
         >,
     > {
-        Box::pin(async { self.0(data).await })
+        Box::pin(async { self.1(data).await })
     }
 
     fn recv(
@@ -177,5 +224,19 @@ impl<
         >,
     > {
         Box::pin(async { self.recv_blocking() })
+    }
+
+    fn recv_avaliable(
+        &self,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<Vec<F>, TransportError>> + Send + Sync + '_>>
+    {
+        Box::pin(async { self.recv_avaliable_blocking() })
+    }
+
+    fn try_recv(
+        &self,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<Option<F>, TransportError>> + Send + Sync + '_>>
+    {
+        Box::pin(async { self.try_recv_blocking() })
     }
 }

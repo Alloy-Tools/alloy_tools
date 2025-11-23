@@ -1,4 +1,4 @@
-use crate::{Transport, TransportItemRequirements};
+use crate::{Transport, TransportError, TransportItemRequirements};
 use std::sync::{Arc, Mutex};
 
 pub struct Publisher<T> {
@@ -44,7 +44,7 @@ impl<T> Publisher<T> {
 }
 
 impl<T: TransportItemRequirements> Transport<T> for Publisher<T> {
-    fn send_blocking(&self, data: T) -> Result<(), crate::TransportError> {
+    fn send_blocking(&self, data: T) -> Result<(), TransportError> {
         let mut err = vec![];
         if let Ok(guard) = self.subscribers.lock() {
             for transport in guard.iter() {
@@ -54,8 +54,8 @@ impl<T: TransportItemRequirements> Transport<T> for Publisher<T> {
             }
         }
         if !err.is_empty() {
-            Err(crate::TransportError::Transport(format!(
-                "Error occured when sending to subscribers: {:?}",
+            Err(TransportError::Transport(format!(
+                "Error(s) occured when sending to subscribers: {:?}",
                 err
             )))
         } else {
@@ -63,8 +63,20 @@ impl<T: TransportItemRequirements> Transport<T> for Publisher<T> {
         }
     }
 
-    fn recv_blocking(&self) -> Result<T, crate::TransportError> {
-        Err(crate::TransportError::Transport(
+    fn recv_blocking(&self) -> Result<T, TransportError> {
+        Err(TransportError::UnSupported(
+            "Publisher transport does not support recv".to_string(),
+        ))
+    }
+
+    fn recv_avaliable_blocking(&self) -> Result<Vec<T>, TransportError> {
+        Err(TransportError::UnSupported(
+            "Publisher transport does not support recv".to_string(),
+        ))
+    }
+
+    fn try_recv_blocking(&self) -> Result<Option<T>, TransportError> {
+        Err(TransportError::UnSupported(
             "Publisher transport does not support recv".to_string(),
         ))
     }
@@ -74,21 +86,22 @@ impl<T: TransportItemRequirements> Transport<T> for Publisher<T> {
         data: T,
     ) -> std::pin::Pin<
         Box<
-            dyn std::prelude::rust_2024::Future<Output = Result<(), crate::TransportError>>
+            dyn std::prelude::rust_2024::Future<Output = Result<(), TransportError>>
                 + Send
                 + Sync
                 + '_,
         >,
     > {
-        let subscribers = self.subscribers.clone();
         Box::pin(async move {
-            let transports = match subscribers.lock() {
-                Ok(guard) => guard.clone(),
-                Err(e) => {
-                    return Err(crate::TransportError::Transport(format!(
-                        "Error acquiring subscribers lock: {}",
-                        e.to_string()
-                    )))
+            let transports = {
+                match self.subscribers.lock() {
+                    Ok(guard) => guard.clone(),
+                    Err(e) => {
+                        return Err(TransportError::Transport(format!(
+                            "Error acquiring subscribers lock: {}",
+                            e.to_string()
+                        )))
+                    }
                 }
             };
 
@@ -100,8 +113,8 @@ impl<T: TransportItemRequirements> Transport<T> for Publisher<T> {
             }
 
             if !err.is_empty() {
-                Err(crate::TransportError::Transport(format!(
-                    "Error occured when sending to subscribers: {:?}",
+                Err(TransportError::Transport(format!(
+                    "Error(s) occured when sending to subscribers: {:?}",
                     err
                 )))
             } else {
@@ -114,16 +127,38 @@ impl<T: TransportItemRequirements> Transport<T> for Publisher<T> {
         &self,
     ) -> std::pin::Pin<
         Box<
-            dyn std::prelude::rust_2024::Future<Output = Result<T, crate::TransportError>>
+            dyn std::prelude::rust_2024::Future<Output = Result<T, TransportError>>
                 + Send
                 + Sync
                 + '_,
         >,
     > {
-        Box::pin(async {
-            Err(crate::TransportError::Transport(
-                "Publisher transport does not support recv".to_string(),
-            ))
-        })
+        Box::pin(async { self.recv_blocking() })
+    }
+
+    fn recv_avaliable(
+        &self,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::prelude::rust_2024::Future<Output = Result<Vec<T>, TransportError>>
+                + Send
+                + Sync
+                + '_,
+        >,
+    > {
+        Box::pin(async { self.recv_avaliable_blocking() })
+    }
+
+    fn try_recv(
+        &self,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::prelude::rust_2024::Future<Output = Result<Option<T>, TransportError>>
+                + Send
+                + Sync
+                + '_,
+        >,
+    > {
+        Box::pin(async { self.try_recv_blocking() })
     }
 }

@@ -1,10 +1,14 @@
-use crate::{transport::Transport, TransportError, TransportItemRequirements};
-use std::{collections::VecDeque, sync::Mutex};
+use crate::{Transport, TransportError, TransportItemRequirements};
+use std::{
+    collections::VecDeque,
+    sync::{Condvar, Mutex},
+};
 
 /// Queue transport to implement FIFO transport
 pub struct Queue<T> {
     queue: Mutex<VecDeque<T>>,
     notifier: tokio::sync::Notify,
+    condvar: Condvar,
 }
 
 impl<T: std::fmt::Debug> std::fmt::Debug for Queue<T> {
@@ -30,6 +34,7 @@ impl<T> Queue<T> {
         Queue::<T> {
             queue: Mutex::new(VecDeque::<T>::new()),
             notifier: tokio::sync::Notify::new(),
+            condvar: Condvar::new(),
         }
     }
 }
@@ -39,16 +44,36 @@ impl<T> Queue<T> {
 impl<T: TransportItemRequirements> Transport<T> for Queue<T> {
     fn send_blocking(&self, data: T) -> Result<(), TransportError> {
         match self.queue.lock() {
-            Ok(mut guard) => Ok(guard.push_back(data)),
+            Ok(mut guard) => {
+                guard.push_back(data);
+                self.condvar.notify_one();
+                self.notifier.notify_one();
+                Ok(())
+            }
             Err(e) => Err(e.into()),
         }
     }
 
     fn recv_blocking(&self) -> Result<T, TransportError> {
+        let mut guard = self.queue.lock()?;
+
+        while guard.is_empty() {
+            guard = self.condvar.wait(guard)?;
+        }
+
+        guard.pop_front().ok_or_else(|| TransportError::NoData)
+    }
+
+    fn recv_avaliable_blocking(&self) -> Result<Vec<T>, TransportError> {
         match self.queue.lock() {
-            Ok(mut guard) => guard
-                .pop_front()
-                .ok_or_else(|| TransportError::Transport("No data in Queue".to_string())),
+            Ok(mut guard) => Ok(guard.drain(..).collect()),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    fn try_recv_blocking(&self) -> Result<Option<T>, TransportError> {
+        match self.queue.lock() {
+            Ok(mut guard) => Ok(guard.pop_front()),
             Err(e) => Err(e.into()),
         }
     }
@@ -65,6 +90,7 @@ impl<T: TransportItemRequirements> Transport<T> for Queue<T> {
         >,
     > {
         self.queue.lock().unwrap().push_back(data);
+        self.condvar.notify_one();
         self.notifier.notify_one();
         Box::pin(async { Ok(()) })
     }
@@ -86,6 +112,42 @@ impl<T: TransportItemRequirements> Transport<T> for Queue<T> {
                 }
 
                 self.notifier.notified().await;
+            }
+        })
+    }
+
+    fn recv_avaliable(
+        &self,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::prelude::rust_2024::Future<Output = Result<Vec<T>, TransportError>>
+                + Send
+                + Sync
+                + '_,
+        >,
+    > {
+        Box::pin(async {
+            match self.queue.lock() {
+                Ok(mut queue) => Ok(queue.drain(..).collect()),
+                Err(e) => Err(e.into()),
+            }
+        })
+    }
+
+    fn try_recv(
+        &self,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::prelude::rust_2024::Future<Output = Result<Option<T>, TransportError>>
+                + Send
+                + Sync
+                + '_,
+        >,
+    > {
+        Box::pin(async {
+            match self.queue.lock() {
+                Ok(mut queue) => Ok(queue.pop_front()),
+                Err(e) => Err(e.into()),
             }
         })
     }

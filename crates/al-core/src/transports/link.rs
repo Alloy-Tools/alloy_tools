@@ -19,8 +19,7 @@ pub struct Link<T: TransportItemRequirements> {
     link_task: LinkTask<T>,
 }
 
-impl<T: TransportItemRequirements> From<Link<T>> for Arc<dyn Transport<T>>
-{
+impl<T: TransportItemRequirements> From<Link<T>> for Arc<dyn Transport<T>> {
     fn from(link: Link<T>) -> Self {
         Arc::new(link)
     }
@@ -46,12 +45,12 @@ impl<T: TransportItemRequirements> Link<T> {
             consumer: consumer.clone(),
             link_task: Arc::new(Task::infinite(
                 {
-                    move |_,
-                          state: &Arc<
+                    |_,
+                     state: &Arc<
                         RwLock<
-                            crate::ExtendedTaskState<
+                            ExtendedTaskState<
                                 (),
-                                crate::TransportError,
+                                TransportError,
                                 (Arc<dyn Transport<T>>, Arc<dyn Transport<T>>),
                             >,
                         >,
@@ -95,6 +94,14 @@ impl<T: TransportItemRequirements> Transport<T> for Link<T> {
         self.consumer.recv_blocking()
     }
 
+    fn recv_avaliable_blocking(&self) -> Result<Vec<T>, TransportError> {
+        self.consumer.recv_avaliable_blocking()
+    }
+
+    fn try_recv_blocking(&self) -> Result<Option<T>, TransportError> {
+        self.consumer.try_recv_blocking()
+    }
+
     fn send(
         &self,
         data: T,
@@ -120,5 +127,31 @@ impl<T: TransportItemRequirements> Transport<T> for Link<T> {
         >,
     > {
         self.consumer.recv()
+    }
+
+    fn recv_avaliable(
+        &self,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::prelude::rust_2024::Future<Output = Result<Vec<T>, TransportError>>
+                + Send
+                + Sync
+                + '_,
+        >,
+    > {
+        self.consumer.recv_avaliable()
+    }
+
+    fn try_recv(
+        &self,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::prelude::rust_2024::Future<Output = Result<Option<T>, TransportError>>
+                + Send
+                + Sync
+                + '_,
+        >,
+    > {
+        self.consumer.try_recv()
     }
 }

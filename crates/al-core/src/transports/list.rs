@@ -1,4 +1,4 @@
-use crate::{Transport, TransportItemRequirements};
+use crate::{Transport, TransportError, TransportItemRequirements};
 use std::sync::{Arc, Mutex};
 
 pub struct List<T> {
@@ -39,8 +39,10 @@ impl<T> std::fmt::Debug for List<T> {
     }
 }
 
+//TODO: recv should return a Vec<T> from all transports using recv_blocking and ignoring any errors that are NoData
+//`futures::join!`
 impl<T: TransportItemRequirements> Transport<T> for List<T> {
-    fn send_blocking(&self, data: T) -> Result<(), crate::TransportError> {
+    fn send_blocking(&self, data: T) -> Result<(), TransportError> {
         let mut err = vec![];
         for transport in self.transports.iter() {
             if let Err(e) = transport.send_blocking(data.clone()) {
@@ -48,7 +50,7 @@ impl<T: TransportItemRequirements> Transport<T> for List<T> {
             }
         }
         if !err.is_empty() {
-            Err(crate::TransportError::Transport(format!(
+            Err(TransportError::Transport(format!(
                 "Error occured when sending to transports: {:?}",
                 err
             )))
@@ -57,13 +59,10 @@ impl<T: TransportItemRequirements> Transport<T> for List<T> {
         }
     }
 
-    fn recv_blocking(&self) -> Result<T, crate::TransportError> {
+    fn recv_blocking(&self) -> Result<T, TransportError> {
         {
             let mut index = self.index.lock().map_err(|e| {
-                crate::TransportError::Transport(format!(
-                    "Error acquiring index lock {}",
-                    e.to_string()
-                ))
+                TransportError::Transport(format!("Error acquiring index lock {}", e.to_string()))
             })?;
             let transport = &self.transports[*index];
             *index = (*index + 1) % self.transports.len();
@@ -72,12 +71,31 @@ impl<T: TransportItemRequirements> Transport<T> for List<T> {
         .recv_blocking()
     }
 
+    fn recv_avaliable_blocking(&self) -> Result<Vec<T>, TransportError> {
+        let mut data_vec = Vec::new();
+        for transport in self.transports.iter() {
+            if let Ok(data) = transport.recv_avaliable_blocking() {
+                data_vec.extend(data);
+            }
+        }
+        Ok(data_vec)
+    }
+
+    fn try_recv_blocking(&self) -> Result<Option<T>, TransportError> {
+        for transport in self.transports.iter() {
+            if let Ok(Some(data)) = transport.try_recv_blocking() {
+                return Ok(Some(data));
+            }
+        }
+        Ok(None)
+    }
+
     fn send(
         &self,
         data: T,
     ) -> std::pin::Pin<
         Box<
-            dyn std::prelude::rust_2024::Future<Output = Result<(), crate::TransportError>>
+            dyn std::prelude::rust_2024::Future<Output = Result<(), TransportError>>
                 + Send
                 + Sync
                 + '_,
@@ -87,7 +105,7 @@ impl<T: TransportItemRequirements> Transport<T> for List<T> {
         for transport in self.transports.iter() {
             futures.push(transport.send(data.clone()));
         }
-        Box::pin(async move {
+        Box::pin(async {
             let mut err = vec![];
             for fut in futures {
                 if let Err(e) = fut.await {
@@ -95,7 +113,7 @@ impl<T: TransportItemRequirements> Transport<T> for List<T> {
                 }
             }
             if !err.is_empty() {
-                Err(crate::TransportError::Transport(format!(
+                Err(TransportError::Transport(format!(
                     "Error occured when sending to transports: {:?}",
                     err
                 )))
@@ -109,16 +127,16 @@ impl<T: TransportItemRequirements> Transport<T> for List<T> {
         &self,
     ) -> std::pin::Pin<
         Box<
-            dyn std::prelude::rust_2024::Future<Output = Result<T, crate::TransportError>>
+            dyn std::prelude::rust_2024::Future<Output = Result<T, TransportError>>
                 + Send
                 + Sync
                 + '_,
         >,
     > {
-        Box::pin(async move {
+        Box::pin(async {
             {
                 let mut index = self.index.lock().map_err(|e| {
-                    crate::TransportError::Transport(format!(
+                    TransportError::Transport(format!(
                         "Error acquiring index lock {}",
                         e.to_string()
                     ))
@@ -129,6 +147,47 @@ impl<T: TransportItemRequirements> Transport<T> for List<T> {
             }
             .recv()
             .await
+        })
+    }
+
+    fn recv_avaliable(
+        &self,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::prelude::rust_2024::Future<Output = Result<Vec<T>, TransportError>>
+                + Send
+                + Sync
+                + '_,
+        >,
+    > {
+        Box::pin(async {
+            let mut data_vec = Vec::new();
+            for transport in self.transports.iter() {
+                if let Ok(data) = transport.recv_avaliable().await {
+                    data_vec.extend(data);
+                }
+            }
+            Ok(data_vec)
+        })
+    }
+
+    fn try_recv(
+        &self,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::prelude::rust_2024::Future<Output = Result<Option<T>, crate::TransportError>>
+                + Send
+                + Sync
+                + '_,
+        >,
+    > {
+        Box::pin(async {
+            for transport in self.transports.iter() {
+                if let Ok(Some(data)) = transport.try_recv().await {
+                    return Ok(Some(data));
+                }
+            }
+            Ok(None)
         })
     }
 }
