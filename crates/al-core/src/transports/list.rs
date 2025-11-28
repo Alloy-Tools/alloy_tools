@@ -1,9 +1,32 @@
+use tokio::sync::Notify;
+
 use crate::{Transport, TransportError, TransportItemRequirements};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 pub struct List<T> {
-    pub transports: Arc<Vec<Arc<dyn Transport<T>>>>,
-    index: Mutex<usize>,
+    transports: Mutex<Vec<Arc<dyn Transport<T>>>>,
+    notifier: Notify,
+    condvar: Condvar,
+}
+
+impl<T> List<T> {
+    pub fn new() -> Self {
+        Self {
+            transports: Mutex::new(Vec::new()),
+            notifier: Notify::new(),
+            condvar: Condvar::new(),
+        }
+    }
+
+    /// Returns a mutex guard for the inner Vec<Arc<dyn Transport<T>>>
+    pub fn as_mut(&self) -> Result<MutexGuard<Vec<Arc<dyn Transport<T>>>>, TransportError> {
+        self.transports.lock().map_err(|e| e.into())
+    }
+
+    pub fn push(&self, transport: Arc<dyn Transport<T>>) -> Result<(), TransportError> {
+        self.transports.lock()?.push(transport);
+        Ok(())
+    }
 }
 
 impl<T: TransportItemRequirements> From<List<T>> for Arc<dyn Transport<T>> {
@@ -15,17 +38,19 @@ impl<T: TransportItemRequirements> From<List<T>> for Arc<dyn Transport<T>> {
 impl<T> From<Vec<Arc<dyn Transport<T>>>> for List<T> {
     fn from(transports: Vec<Arc<dyn Transport<T>>>) -> Self {
         Self {
-            transports: Arc::new(transports),
-            index: Mutex::new(0),
+            transports: Mutex::new(transports),
+            notifier: Notify::new(),
+            condvar: Condvar::new(),
         }
     }
 }
 
-impl<T> From<Arc<Vec<Arc<dyn Transport<T>>>>> for List<T> {
-    fn from(transports: Arc<Vec<Arc<dyn Transport<T>>>>) -> Self {
+impl<T> From<Mutex<Vec<Arc<dyn Transport<T>>>>> for List<T> {
+    fn from(transports: Mutex<Vec<Arc<dyn Transport<T>>>>) -> Self {
         Self {
             transports,
-            index: Mutex::new(0),
+            notifier: Notify::new(),
+            condvar: Condvar::new(),
         }
     }
 }
@@ -34,24 +59,28 @@ impl<T> std::fmt::Debug for List<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("List")
             .field("transports", &self.transports)
-            .field("index", &self.index)
             .finish()
     }
 }
 
-//TODO: recv should return a Vec<T> from all transports using recv_blocking and ignoring any errors that are NoData
-//`futures::join!`
+//TODO: need to add the inner `ListAware<T>(Arc<dyn Trnasport<T>>)` to support calling the condvar and notifier, or would it just be in the `send` and `send_blocking` here?
 impl<T: TransportItemRequirements> Transport<T> for List<T> {
     fn send_blocking(&self, data: T) -> Result<(), TransportError> {
         let mut err = vec![];
-        for transport in self.transports.iter() {
-            if let Err(e) = transport.send_blocking(data.clone()) {
-                err.push(e);
+        match self.transports.lock() {
+            Ok(transports) => {
+                for transport in transports.iter() {
+                    if let Err(e) = transport.send_blocking(data.clone()) {
+                        err.push(e);
+                    }
+                }
             }
-        }
+            Err(e) => err.push(e.into()),
+        };
+
         if !err.is_empty() {
             Err(TransportError::Transport(format!(
-                "Error occured when sending to transports: {:?}",
+                "Error(s) occured when sending to transports: {:?}",
                 err
             )))
         } else {
@@ -60,20 +89,22 @@ impl<T: TransportItemRequirements> Transport<T> for List<T> {
     }
 
     fn recv_blocking(&self) -> Result<T, TransportError> {
-        {
-            let mut index = self.index.lock().map_err(|e| {
-                TransportError::Transport(format!("Error acquiring index lock {}", e.to_string()))
-            })?;
-            let transport = &self.transports[*index];
-            *index = (*index + 1) % self.transports.len();
-            transport
+        let mut transports = self.transports.lock()?;
+
+        loop {
+            for transport in transports.iter() {
+                if let Ok(Some(data)) = transport.try_recv_blocking() {
+                    return Ok(data);
+                }
+            }
+
+            transports = self.condvar.wait(transports)?;
         }
-        .recv_blocking()
     }
 
     fn recv_avaliable_blocking(&self) -> Result<Vec<T>, TransportError> {
         let mut data_vec = Vec::new();
-        for transport in self.transports.iter() {
+        for transport in self.transports.lock()?.iter() {
             if let Ok(data) = transport.recv_avaliable_blocking() {
                 data_vec.extend(data);
             }
@@ -82,7 +113,7 @@ impl<T: TransportItemRequirements> Transport<T> for List<T> {
     }
 
     fn try_recv_blocking(&self) -> Result<Option<T>, TransportError> {
-        for transport in self.transports.iter() {
+        for transport in self.transports.lock()?.iter() {
             if let Ok(Some(data)) = transport.try_recv_blocking() {
                 return Ok(Some(data));
             }
@@ -101,14 +132,17 @@ impl<T: TransportItemRequirements> Transport<T> for List<T> {
                 + '_,
         >,
     > {
-        let mut futures = vec![];
-        for transport in self.transports.iter() {
-            futures.push(transport.send(data.clone()));
-        }
-        Box::pin(async {
+        let transports = match self.transports.lock() {
+            Ok(guard) => guard.iter().cloned().collect::<Vec<_>>(),
+            Err(e) => {
+                let err = Err(e.into());
+                return Box::pin(async move { err });
+            }
+        };
+        Box::pin(async move {
             let mut err = vec![];
-            for fut in futures {
-                if let Err(e) = fut.await {
+            for transport in transports.iter() {
+                if let Err(e) = transport.send(data.clone()).await {
                     err.push(e);
                 }
             }
@@ -133,20 +167,19 @@ impl<T: TransportItemRequirements> Transport<T> for List<T> {
                 + '_,
         >,
     > {
-        Box::pin(async {
-            {
-                let mut index = self.index.lock().map_err(|e| {
-                    TransportError::Transport(format!(
-                        "Error acquiring index lock {}",
-                        e.to_string()
-                    ))
-                })?;
-                let transport = &self.transports[*index];
-                *index = (*index + 1) % self.transports.len();
-                transport
+        let transports = match self.transports.lock() {
+            Ok(guard) => guard.iter().cloned().collect::<Vec<_>>(),
+            Err(e) => {
+                let err = Err(e.into());
+                return Box::pin(async move { err });
             }
-            .recv()
-            .await
+        };
+        Box::pin(async {
+            for transport in transports.iter() {
+                if let Ok(Some(data)) = transport.try_recv().await {
+                    return Ok(data);
+                }
+            }
         })
     }
 

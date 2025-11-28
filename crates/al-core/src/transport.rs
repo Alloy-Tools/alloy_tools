@@ -15,7 +15,7 @@ pub trait Transport<T: TransportItemRequirements>: TransportRequirements {
     /// Send the data asynchronously
     fn send(
         &self,
-        _data: T,
+        data: T,
     ) -> Pin<Box<dyn Future<Output = Result<(), TransportError>> + Send + Sync + '_>>;
     /// Wait to receive data asynchronously
     fn recv(&self) -> Pin<Box<dyn Future<Output = Result<T, TransportError>> + Send + Sync + '_>>;

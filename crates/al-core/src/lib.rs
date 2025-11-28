@@ -47,6 +47,7 @@ pub use task_utils::task_state::ExtendedTaskState;
 pub use task_utils::task_state::TaskState;
 pub use transport::Transport;
 pub use transport::TransportError;
+pub use transports::buffered::Buffered;
 pub use transports::link::Link;
 pub use transports::list::List;
 pub use transports::publisher::Publisher;
