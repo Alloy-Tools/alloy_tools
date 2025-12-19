@@ -43,9 +43,13 @@ impl<T: 'static + Send + Sync + Clone + Default + PartialEq + Any + Debug + Hash
 
 /// `EventMarker` trait acts as a marker for `Event` systems and should be derived for each event type
 /// It requires impl of `sealed::Marker` to ensure all required traits are impl'd
-/// _type_name is derived from the module_path and type name, eg. `my_crate::MyEvent`
+/// _type_name is derived from the module_path and type name, eg. `my_crate::MyEvent`. Generics are included in simple name form through the `tynm` crate. This is used for event registration and lookup.
 pub trait EventMarker: sealed::EventMarker {
-    fn _module_path() -> &'static str;
+    fn module_path() -> &'static str;
+    /// Helper function to return the simple names of generic events
+    fn type_with_generics() -> String {
+        format!("{}::{}", Self::module_path(), tynm::type_name::<Self>())
+    }
 }
 impl<T: EventMarker> sealed::EventMarker for T {}
 

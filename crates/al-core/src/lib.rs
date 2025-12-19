@@ -59,7 +59,7 @@ pub use transports::transform::TransformFn;
 
 #[cfg(test)]
 mod tests {
-    use crate::{event, Command, Event};
+    use crate::{Command, Event, EventMarker, event};
     use std::hash::{DefaultHasher, Hash, Hasher};
 
     const TEST_VAL: u128 = 7878;
@@ -100,11 +100,23 @@ mod tests {
             "al_core::tests::TestEventGeneric<String>"
         );
         assert_eq!(
+            <TestEventGeneric::<String> as EventMarker>::type_with_generics(),
+            "al_core::tests::TestEventGeneric<String>"
+        );
+        assert_eq!(
             TestEventGeneric(0u8).type_with_generics(),
             "al_core::tests::TestEventGeneric<u8>"
         );
         assert_eq!(
+            <TestEventGeneric::<u8> as EventMarker>::type_with_generics(),
+            "al_core::tests::TestEventGeneric<u8>"
+        );
+        assert_eq!(
             TestEventGeneric(TestEventGeneric(String::from(""))).type_with_generics(),
+            "al_core::tests::TestEventGeneric<TestEventGeneric<String>>"
+        );
+        assert_eq!(
+            <TestEventGeneric::<TestEventGeneric::<String>> as EventMarker>::type_with_generics(),
             "al_core::tests::TestEventGeneric<TestEventGeneric<String>>"
         );
     }

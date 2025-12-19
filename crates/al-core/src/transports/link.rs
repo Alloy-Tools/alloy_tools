@@ -72,6 +72,21 @@ impl<T: TransportItemRequirements> Link<T> {
             )),
         }
     }
+
+    /// Get the producer transport
+    pub fn producer(&self) -> &Arc<dyn Transport<T>> {
+        &self.producer
+    }
+
+    /// Get the consumer transport
+    pub fn consumer(&self) -> &Arc<dyn Transport<T>> {
+        &self.consumer
+    }
+
+    /// Get the link task
+    pub fn link_task(&self) -> &LinkTask<T> {
+        &self.link_task
+    }
 }
 
 /// Impl Debug for link manually as `Fn()` doesn't support `Debug`
@@ -88,6 +103,10 @@ impl<T: TransportItemRequirements> std::fmt::Debug for Link<T> {
 impl<T: TransportItemRequirements> Transport<T> for Link<T> {
     fn send_blocking(&self, data: T) -> Result<(), TransportError> {
         self.producer.send_blocking(data)
+    }
+
+    fn send_batch_blocking(&self, data: Vec<T>) -> Result<(), TransportError> {
+        self.producer.send_batch_blocking(data)
     }
 
     fn recv_blocking(&self) -> Result<T, TransportError> {
@@ -114,6 +133,13 @@ impl<T: TransportItemRequirements> Transport<T> for Link<T> {
         >,
     > {
         self.producer.send(data)
+    }
+
+    fn send_batch(
+            &self,
+            data: Vec<T>,
+        ) -> std::pin::Pin<Box<dyn std::prelude::rust_2024::Future<Output = Result<(), TransportError>> + Send + Sync + '_>> {
+        self.producer.send_batch(data)
     }
 
     fn recv(
@@ -154,4 +180,81 @@ impl<T: TransportItemRequirements> Transport<T> for Link<T> {
     > {
         self.consumer.try_recv()
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{Command, Link, Queue, Transport, TransportItemRequirements};
+    use std::sync::Arc;
+
+    fn make_link<T: TransportItemRequirements>(
+        t0: Option<Arc<dyn Transport<T>>>,
+        t1: Option<Arc<dyn Transport<T>>>,
+    ) -> Link<T> {
+        let t0 = t0.unwrap_or_else(|| Arc::new(Queue::<T>::new()));
+        let t1 = t1.unwrap_or_else(|| Arc::new(Queue::<T>::new()));
+        Link::new(t0, t1)
+    }
+
+    #[tokio::test]
+    async fn debug() {
+        let l0 = make_link::<Command>(None, None);
+        assert_eq!(
+            format!("{:?}", l0),
+            "Link { producer: Queue { queue: [] }, consumer: Queue { queue: [] }, link_task: \"<LinkFn>\" }"
+        );
+        let l1 = make_link(
+            Some(Arc::new(l0)),
+            Some(Arc::new(make_link(None, None))),
+        );
+        assert_eq!(format!("{:?}", l1), "Link { producer: Link { producer: Queue { queue: [] }, consumer: Queue { queue: [] }, link_task: \"<LinkFn>\" }, consumer: Link { producer: Queue { queue: [] }, consumer: Queue { queue: [] }, link_task: \"<LinkFn>\" }, link_task: \"<LinkFn>\" }");
+    }
+
+    #[tokio::test]
+    async fn send_recv() {
+        let l0 = make_link(None, None);
+        l0.send(Command::Stop).await.unwrap();
+        l0.send_batch(vec![Command::Stop, Command::Stop]).await.unwrap();
+        // Recv `String` asynchronously
+        assert_eq!(l0.recv().await.unwrap(), Command::Stop);
+        // Try recv `String` asynchronously
+        assert_eq!(l0.try_recv().await.unwrap().unwrap(), Command::Stop);
+        // Recv avaliable `String` asynchronously
+        assert_eq!(l0.recv_avaliable().await.unwrap(), vec![Command::Stop]);
+
+        l0.send_blocking(Command::Stop).unwrap();
+        l0.send_batch_blocking(vec![Command::Stop, Command::Stop]).unwrap();
+        tokio::time::sleep(std::time::Duration::from_nanos(1)).await;
+        // Recv `String` synchronously
+        assert_eq!(l0.recv_blocking().unwrap(), Command::Stop);
+        // Try recv `String` synchronously
+        assert_eq!(l0.try_recv_blocking().unwrap().unwrap(), Command::Stop);
+        // Recv avaliable `String` synchronously
+        assert_eq!(l0.recv_avaliable_blocking().unwrap(), vec![Command::Stop]);
+
+
+        let l1 = make_link(
+            Some(Arc::new(l0)),
+            Some(Arc::new(make_link(None, None))),
+        );
+        l1.send(Command::Stop).await.unwrap();
+        l1.send_batch(vec![Command::Stop, Command::Stop]).await.unwrap();
+        // Recv `String` asynchronously
+        assert_eq!(l1.recv().await.unwrap(), Command::Stop);
+        // Try recv `String` asynchronously
+        assert_eq!(l1.try_recv().await.unwrap().unwrap(), Command::Stop);
+        // Recv avaliable `String` asynchronously
+        assert_eq!(l1.recv_avaliable().await.unwrap(), vec![Command::Stop]);
+
+        l1.send_blocking(Command::Stop).unwrap();
+        l1.send_batch_blocking(vec![Command::Stop, Command::Stop]).unwrap();
+        tokio::time::sleep(std::time::Duration::from_nanos(1)).await;
+        // Recv `String` synchronously
+        assert_eq!(l1.recv_blocking().unwrap(), Command::Stop);
+        // Try recv `String` synchronously
+        assert_eq!(l1.try_recv_blocking().unwrap().unwrap(), Command::Stop);
+        // Recv avaliable `String` synchronously
+        assert_eq!(l1.recv_avaliable_blocking().unwrap(), vec![Command::Stop]);
+    }
+
 }

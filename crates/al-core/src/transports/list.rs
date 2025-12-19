@@ -19,7 +19,7 @@ impl<T> List<T> {
     }
 
     /// Returns a mutex guard for the inner Vec<Arc<dyn Transport<T>>>
-    pub fn as_mut(&self) -> Result<MutexGuard<Vec<Arc<dyn Transport<T>>>>, TransportError> {
+    pub fn as_mut(&'_ self) -> Result<MutexGuard<'_, Vec<Arc<dyn Transport<T>>>>, TransportError> {
         self.transports.lock().map_err(|e| e.into())
     }
 
@@ -32,6 +32,44 @@ impl<T> List<T> {
 impl<T: TransportItemRequirements> From<List<T>> for Arc<dyn Transport<T>> {
     fn from(list: List<T>) -> Self {
         Arc::new(list)
+    }
+}
+
+impl<T: TransportItemRequirements, U: Transport<T>> From<Vec<Arc<U>>> for List<T>
+{
+    fn from(transports: Vec<Arc<U>>) -> Self {
+        Self {
+            transports: Mutex::new(
+                transports
+                .into_iter()
+                .map(|a| {
+                    a as Arc<dyn Transport<T>>
+                })
+                .collect()
+            ),
+            notifier: Notify::new(),
+            condvar: Condvar::new(),
+        }
+    }
+}
+
+impl<T: TransportItemRequirements, U: Transport<T>> From<Mutex<Vec<Arc<U>>>> for List<T>
+{
+    fn from(transports: Mutex<Vec<Arc<U>>>) -> Self {
+        Self {
+            // lock, convert each Arc<U> into Arc<dyn Transport<T>>, then wrap in a new Mutex
+            transports: Mutex::new(
+                transports.into_inner()
+                .unwrap_or_else(|m| m.into_inner())
+                .into_iter()
+                .map(|a| {
+                    a as Arc<dyn Transport<T>>
+                })
+                .collect()
+            ),
+            notifier: Notify::new(),
+            condvar: Condvar::new(),
+        }
     }
 }
 
@@ -57,9 +95,19 @@ impl<T> From<Mutex<Vec<Arc<dyn Transport<T>>>>> for List<T> {
 
 impl<T> std::fmt::Debug for List<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("List")
-            .field("transports", &self.transports)
-            .finish()
+        match self.transports.lock() {
+            Ok(guard) => f.debug_struct("List")
+            .field("transports", &guard)
+            .finish(),
+            Err(e) => f
+                .debug_struct("List")
+                .field(
+                    "transports",
+                    &format!("<lock poisoned>: {}", e.to_string()),
+                )
+                .finish(),
+        }
+        
     }
 }
 
@@ -72,6 +120,37 @@ impl<T: TransportItemRequirements> Transport<T> for List<T> {
                 for transport in transports.iter() {
                     if let Err(e) = transport.send_blocking(data.clone()) {
                         err.push(e);
+                    } else {
+                        // Notify any waiting receivers that new data is available
+                        self.condvar.notify_one();
+                        self.notifier.notify_one();
+                    }
+                }
+            }
+            Err(e) => err.push(e.into()),
+        };
+
+        if !err.is_empty() {
+            Err(TransportError::Transport(format!(
+                "Error(s) occured when sending to transports: {:?}",
+                err
+            )))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn send_batch_blocking(&self, data: Vec<T>) -> Result<(), TransportError> {
+        let mut err = vec![];
+        match self.transports.lock() {
+            Ok(transports) => {
+                for transport in transports.iter() {
+                    if let Err(e) = transport.send_batch_blocking(data.clone()) {
+                        err.push(e);
+                    } else {
+                        // Notify all waiting receivers that new data is available
+                        self.condvar.notify_all();
+                        self.notifier.notify_waiters();
                     }
                 }
             }
@@ -132,19 +211,64 @@ impl<T: TransportItemRequirements> Transport<T> for List<T> {
                 + '_,
         >,
     > {
-        let transports = match self.transports.lock() {
-            Ok(guard) => guard.iter().cloned().collect::<Vec<_>>(),
-            Err(e) => {
-                let err = Err(e.into());
-                return Box::pin(async move { err });
-            }
-        };
         Box::pin(async move {
             let mut err = vec![];
-            for transport in transports.iter() {
-                if let Err(e) = transport.send(data.clone()).await {
-                    err.push(e);
+
+            let transports = match self.transports.lock() {
+                Ok(guard) => Ok(guard.iter().cloned().collect::<Vec<_>>()),
+                Err(e) => Err(e.into())
+            };
+
+            match transports {
+                Ok(transports) => {
+                    for transport in transports.iter() {
+                        if let Err(e) = transport.send(data.clone()).await {
+                            err.push(e);
+                        } else {
+                            // Notify any waiting receivers that new data is available
+                            self.notifier.notify_one();
+                            self.condvar.notify_one();
+                        }
+                    }
                 }
+                Err(e) => return Err(e),
+            }
+            if !err.is_empty() {
+                Err(TransportError::Transport(format!(
+                    "Error occured when sending to transports: {:?}",
+                    err
+                )))
+            } else {
+                Ok(())
+            }
+        })
+    }
+
+    fn send_batch(
+            &self,
+            data: Vec<T>,
+        ) -> std::pin::Pin<Box<dyn std::prelude::rust_2024::Future<Output = Result<(), TransportError>> + Send + Sync + '_>> {
+        Box::pin(async move {
+            let mut err = vec![];
+
+            let transports = match self.transports.lock() {
+                Ok(guard) => Ok(guard.iter().cloned().collect::<Vec<_>>()),
+                Err(e) => Err(e.into())
+            };
+
+            match transports {
+                Ok(transports) => {
+                    for transport in transports.iter() {
+                        if let Err(e) = transport.send_batch(data.clone()).await {
+                            err.push(e);
+                        } else {
+                            // Notify all waiting receivers that new data is available
+                            self.condvar.notify_all();
+                            self.notifier.notify_waiters();
+                        }
+                    }
+                }
+                Err(e) => return Err(e),
             }
             if !err.is_empty() {
                 Err(TransportError::Transport(format!(
@@ -167,18 +291,25 @@ impl<T: TransportItemRequirements> Transport<T> for List<T> {
                 + '_,
         >,
     > {
-        let transports = match self.transports.lock() {
-            Ok(guard) => guard.iter().cloned().collect::<Vec<_>>(),
-            Err(e) => {
-                let err = Err(e.into());
-                return Box::pin(async move { err });
-            }
-        };
         Box::pin(async {
-            for transport in transports.iter() {
-                if let Ok(Some(data)) = transport.try_recv().await {
-                    return Ok(data);
+            loop {
+                let transports = match self.transports.lock() {
+                    Ok(guard) => Ok(guard.iter().cloned().collect::<Vec<_>>()),
+                    Err(e) => Err(e.into())
+                };
+
+                match transports {
+                    Ok(transports) => {
+                        for transport in transports.iter() {
+                            if let Ok(Some(data)) = transport.try_recv().await {
+                                return Ok(data);
+                            }
+                        }
+                    }
+                    Err(e) => return Err(e),
                 }
+
+                self.notifier.notified().await;
             }
         })
     }
@@ -195,10 +326,21 @@ impl<T: TransportItemRequirements> Transport<T> for List<T> {
     > {
         Box::pin(async {
             let mut data_vec = Vec::new();
-            for transport in self.transports.iter() {
-                if let Ok(data) = transport.recv_avaliable().await {
-                    data_vec.extend(data);
+
+            let transports = match self.transports.lock() {
+                Ok(guard) => Ok(guard.iter().cloned().collect::<Vec<_>>()),
+                Err(e) => Err(e.into())
+            };
+
+            match transports {
+                Ok(transports) => {
+                    for transport in transports.iter() {
+                        if let Ok(data) = transport.recv_avaliable().await {
+                            data_vec.extend(data);
+                        }
+                    }
                 }
+                Err(e) => return Err(e),
             }
             Ok(data_vec)
         })
@@ -215,12 +357,59 @@ impl<T: TransportItemRequirements> Transport<T> for List<T> {
         >,
     > {
         Box::pin(async {
-            for transport in self.transports.iter() {
-                if let Ok(Some(data)) = transport.try_recv().await {
-                    return Ok(Some(data));
+            let transports = match self.transports.lock() {
+                Ok(guard) => Ok(guard.iter().cloned().collect::<Vec<_>>()),
+                Err(e) => Err(e.into())
+            };
+
+            match transports {
+                Ok(transports) => {
+                    for transport in transports.iter() {
+                        if let Ok(Some(data)) = transport.try_recv().await {
+                            return Ok(Some(data));
+                        }
+                    }
                 }
+                Err(e) => return Err(e),
             }
             Ok(None)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use crate::{Command, Queue, List, Transport};
+
+    #[tokio::test]
+    async fn debug() {
+        assert_eq!(
+            format!("{:?}", Into::<List<_>>::into(vec![Arc::new(Queue::<Command>::new())])),
+            "List { transports: [Queue { queue: [] }] }"
+        );
+    }
+
+    #[tokio::test]
+    async fn send_recv() {
+        let list = List::from(vec![Arc::new(Queue::<Command>::new())]);
+        list.send(Command::Stop).await.unwrap();
+        list.send_batch(vec![Command::Stop, Command::Stop]).await.unwrap();
+        // Recv `String` asynchronously
+        assert_eq!(list.recv().await.unwrap(), Command::Stop);
+        // Try recv `String` asynchronously
+        assert_eq!(list.try_recv().await.unwrap().unwrap(), Command::Stop);
+        // Recv avaliable `String` asynchronously
+        assert_eq!(list.recv_avaliable().await.unwrap(), vec![Command::Stop]);
+
+        list.send_blocking(Command::Stop).unwrap();
+        list.send_batch_blocking(vec![Command::Stop, Command::Stop]).unwrap();
+        tokio::time::sleep(std::time::Duration::from_nanos(1)).await;
+        // Recv `String` synchronously
+        assert_eq!(list.recv_blocking().unwrap(), Command::Stop);
+        // Try recv `String` synchronously
+        assert_eq!(list.try_recv_blocking().unwrap().unwrap(), Command::Stop);
+        // Recv avaliable `String` synchronously
+        assert_eq!(list.recv_avaliable_blocking().unwrap(), vec![Command::Stop]);
     }
 }

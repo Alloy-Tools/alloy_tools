@@ -40,10 +40,19 @@ impl<F: TransportItemRequirements, T: TransportItemRequirements> Splice<F, T> {
         Fut: Future<Output = Result<T, TransportError>> + Send + Sync + 'static,
     {
         let consumer_clone = consumer.clone();
+        let batch_consumer_clone = consumer.clone();
         let async_consumer_clone = consumer.clone();
+        let batch_async_consumer_clone = consumer.clone();
+        let batch_splice_fn = splice_fn.clone();
+        let batch_async_splice_fn = async_splice_fn.clone();
         // Create the new `SpliceTransport<F>` that transforms the data and sends it to the consumer
         let splice_transport = Arc::new(SpliceTransport(
             move |data| consumer_clone.send_blocking(splice_fn(data)?),
+            move |data| batch_consumer_clone.send_batch_blocking(
+                data.into_iter()
+                    .map(|item| batch_splice_fn(item))
+                    .collect::<Result<Vec<T>, TransportError>>()?,
+            ),
             move |data| {
                 let async_consumer_clone = async_consumer_clone.clone();
                 let async_splice_fn = async_splice_fn.clone();
@@ -52,6 +61,21 @@ impl<F: TransportItemRequirements, T: TransportItemRequirements> Splice<F, T> {
                     async_consumer_clone
                         .send(async_splice_fn(data).await?)
                         .await
+                }
+            },
+            move |data| {
+                let batch_async_consumer_clone = batch_async_consumer_clone.clone();
+                let batch_async_splice_fn = batch_async_splice_fn.clone();
+                //TODO: Should this just be started as a task to allow a tight inner loop?
+                async move {
+                    let results = {
+                        let mut vec = Vec::with_capacity(data.len());
+                        for item in data {
+                            vec.push(batch_async_splice_fn(item).await?);
+                        }
+                        vec
+                    };
+                    batch_async_consumer_clone.send_batch(results).await
                 }
             },
             PhantomData,
@@ -84,6 +108,10 @@ impl<F: TransportItemRequirements, T: TransportItemRequirements> Transport<F> fo
         self.0.send_blocking(data)
     }
 
+    fn send_batch_blocking(&self, data: Vec<F>) -> Result<(), TransportError> {
+        self.0.send_batch_blocking(data)
+    }
+
     fn recv_blocking(&self) -> Result<F, crate::TransportError> {
         Err(TransportError::UnSupported("Not receivable. Rather than `recv<F>`, must access the internal `splice.consumer<T>()` to call `recv<T>`.".to_string()))
     }
@@ -108,6 +136,13 @@ impl<F: TransportItemRequirements, T: TransportItemRequirements> Transport<F> fo
         >,
     > {
         Box::pin(async { self.0.send(data).await })
+    }
+
+    fn send_batch(
+            &self,
+            data: Vec<F>,
+        ) -> std::pin::Pin<Box<dyn Future<Output = Result<(), TransportError>> + Send + Sync + '_>> {
+        self.0.send_batch(data)
     }
 
     fn recv(
@@ -146,16 +181,22 @@ impl<F: TransportItemRequirements, T: TransportItemRequirements> Transport<F> fo
 pub struct SpliceTransport<
     F: TransportItemRequirements,
     SpliceFn: Fn(F) -> Result<(), TransportError> + Send + Sync + 'static,
+    BatchSpliceFn: Fn(Vec<F>) -> Result<(), TransportError> + Send + Sync + 'static,
     AsyncSpliceFn: Fn(F) -> Fut + Send + Sync + 'static,
+    BatchAsyncSpliceFn: Fn(Vec<F>) -> BatchFut + Send + Sync + 'static,
     Fut: Future<Output = Result<(), TransportError>> + Send + Sync + 'static,
->(SpliceFn, AsyncSpliceFn, PhantomData<(F, Fut)>);
+    BatchFut: Future<Output = Result<(), TransportError>> + Send + Sync + 'static,
+>(SpliceFn, BatchSpliceFn, AsyncSpliceFn, BatchAsyncSpliceFn, PhantomData<(F, Fut)>);
 
 impl<
         F: TransportItemRequirements,
         SpliceFn: Fn(F) -> Result<(), TransportError> + Send + Sync + 'static,
+        BatchSpliceFn: Fn(Vec<F>) -> Result<(), TransportError> + Send + Sync + 'static,
         AsyncSpliceFn: Fn(F) -> Fut + Send + Sync + 'static,
+        BatchAsyncSpliceFn: Fn(Vec<F>) -> BatchFut + Send + Sync + 'static,
         Fut: Future<Output = Result<(), TransportError>> + Send + Sync + 'static,
-    > std::fmt::Debug for SpliceTransport<F, SpliceFn, AsyncSpliceFn, Fut>
+        BatchFut: Future<Output = Result<(), TransportError>> + Send + Sync + 'static,
+    > std::fmt::Debug for SpliceTransport<F, SpliceFn, BatchSpliceFn, AsyncSpliceFn, BatchAsyncSpliceFn, Fut, BatchFut>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("SpliceTransport")
@@ -170,12 +211,19 @@ impl<
 impl<
         F: TransportItemRequirements,
         SpliceFn: Fn(F) -> Result<(), TransportError> + Send + Sync + 'static,
+        BatchSpliceFn: Fn(Vec<F>) -> Result<(), TransportError> + Send + Sync + 'static,
         AsyncSpliceFn: Fn(F) -> Fut + Send + Sync + 'static,
+        BatchAsyncSpliceFn: Fn(Vec<F>) -> BatchFut + Send + Sync + 'static,
         Fut: Future<Output = Result<(), TransportError>> + Send + Sync + 'static,
-    > Transport<F> for SpliceTransport<F, SpliceFn, AsyncSpliceFn, Fut>
+        BatchFut: Future<Output = Result<(), TransportError>> + Send + Sync + 'static,
+    > Transport<F> for SpliceTransport<F, SpliceFn, BatchSpliceFn, AsyncSpliceFn, BatchAsyncSpliceFn, Fut, BatchFut>
 {
     fn send_blocking(&self, data: F) -> Result<(), TransportError> {
         self.0(data)
+    }
+
+    fn send_batch_blocking(&self, data: Vec<F>) -> Result<(), TransportError> {
+        self.1(data)
     }
 
     fn recv_blocking(&self) -> Result<F, TransportError> {
@@ -210,7 +258,14 @@ impl<
                 + '_,
         >,
     > {
-        Box::pin(async { self.1(data).await })
+        Box::pin(async { self.2(data).await })
+    }
+
+    fn send_batch(
+            &self,
+            data: Vec<F>,
+        ) -> std::pin::Pin<Box<dyn Future<Output = Result<(), TransportError>> + Send + Sync + '_>> {
+        Box::pin(async { self.3(data).await })
     }
 
     fn recv(
@@ -238,5 +293,58 @@ impl<
     ) -> std::pin::Pin<Box<dyn Future<Output = Result<Option<F>, TransportError>> + Send + Sync + '_>>
     {
         Box::pin(async { self.try_recv_blocking() })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{Command, Queue, Splice, Transport};
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn debug() {
+        let splice = Splice::new(
+            Arc::new(Queue::<Command>::new()),
+            Arc::new(Queue::<String>::new()),
+            Arc::new(|data| Ok(format!("Command: {:?}", data))),
+            Arc::new(|data| async move { Ok(format!("Command: {:?}", data)) }),
+        );
+        assert_eq!(
+            format!("{:?}", splice),
+            "Splice(Link { producer: Queue { queue: [] }, consumer: SpliceTransport(\"<SpliceFn>\", \"<AsyncSpliceFn>\"), link_task: \"<LinkFn>\" }, Queue { queue: [] }, \"<SpliceFn>\", \"<AsyncSpliceFn>\")"
+        );
+    }
+
+
+    #[tokio::test]
+    async fn send_recv() {
+        // `Splice::new` inserts a `SpliceTransport` between the pipelines, returning the `Splice` as the transport
+        let splice = Splice::new(
+            Arc::new(Queue::<Command>::new()),
+            Arc::new(Queue::<String>::new()),
+            Arc::new(|data| Ok(format!("Command: {:?}", data))),
+            Arc::new(|data| async move { Ok(format!("Command: {:?}", data)) }),
+        );
+
+        // Send `Command` asynchronously
+        splice.send(Command::Stop).await.unwrap();
+        splice.send_batch(vec![Command::Stop, Command::Stop]).await.unwrap();
+        // Recv `String` asynchronously
+        assert_eq!(splice.consumer().recv().await.unwrap(), "Command: Stop");
+        // Try recv `String` asynchronously
+        assert_eq!(splice.consumer().try_recv().await.unwrap().unwrap(), "Command: Stop");
+        // Recv avaliable `String` asynchronously
+        assert_eq!(splice.consumer().recv_avaliable().await.unwrap(), vec!["Command: Stop"]);
+
+        // Send `Command` synchronously
+        splice.send_blocking(Command::Stop).unwrap();
+        splice.send_batch_blocking(vec![Command::Stop, Command::Stop]).unwrap();
+        tokio::time::sleep(std::time::Duration::from_nanos(1)).await;
+        // Recv `String` synchronously
+        assert_eq!(splice.consumer().recv_blocking().unwrap(), "Command: Stop");
+        // Try recv `String` synchronously
+        assert_eq!(splice.consumer().try_recv_blocking().unwrap().unwrap(), "Command: Stop");
+        // Recv avaliable `String` synchronously
+        assert_eq!(splice.consumer().recv_avaliable_blocking().unwrap(), vec!["Command: Stop"]);
     }
 }

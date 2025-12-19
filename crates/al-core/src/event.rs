@@ -10,7 +10,7 @@ use std::{
 pub static EVENT_REGISTRY: once_cell::sync::Lazy<crate::serde_utils::registry::EventRegistry> =
     once_cell::sync::Lazy::new(|| crate::serde_utils::registry::EventRegistry::new());
 
-/// Helper function to return the simple names of generic events
+/// Helper function to return the simple names of types with generics using the `tynm` crate
 pub fn type_with_generics<T>(_: &T) -> String {
     tynm::type_name::<T>()
 }
@@ -67,7 +67,7 @@ impl<T: EventMarker + EventRequirements + crate::SerdeFeature> Event for T {
 
     /// Returns the type name of the event with any generics simple names filled out using the `tynm` crate
     fn type_with_generics(&self) -> String {
-        format!("{}::{}", T::_module_path(), type_with_generics(self))
+        T::type_with_generics()
     }
 
     /// Clones the event and returns it as a boxed event

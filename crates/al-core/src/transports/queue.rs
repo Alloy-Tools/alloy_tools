@@ -54,6 +54,18 @@ impl<T: TransportItemRequirements> Transport<T> for Queue<T> {
         }
     }
 
+    fn send_batch_blocking(&self, data: Vec<T>) -> Result<(), TransportError> {
+        match self.queue.lock() {
+            Ok(mut guard) => {
+                guard.extend(data);
+                self.condvar.notify_all();
+                self.notifier.notify_waiters();
+                Ok(())
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+
     fn recv_blocking(&self) -> Result<T, TransportError> {
         let mut guard = self.queue.lock()?;
 
@@ -89,9 +101,29 @@ impl<T: TransportItemRequirements> Transport<T> for Queue<T> {
                 + '_,
         >,
     > {
-        self.queue.lock().unwrap().push_back(data);
+        if let Err(e) = match self.queue.lock() {
+            Ok(mut guard) => Ok(guard.push_back(data)),
+            Err(e) => Err(e.into()),
+        } {
+            return Box::pin(async { Err(e) });
+        }
         self.condvar.notify_one();
         self.notifier.notify_one();
+        Box::pin(async { Ok(()) })
+    }
+
+    fn send_batch(
+            &self,
+            data: Vec<T>,
+        ) -> std::pin::Pin<Box<dyn std::prelude::rust_2024::Future<Output = Result<(), TransportError>> + Send + Sync + '_>> {
+        if let Err(e) = match self.queue.lock() {
+            Ok(mut guard) => Ok(guard.extend(data)),
+            Err(e) => Err(e.into()),
+        } {
+            return Box::pin(async { Err(e) });
+        }
+        self.condvar.notify_all();
+        self.notifier.notify_waiters();
         Box::pin(async { Ok(()) })
     }
 
@@ -107,8 +139,13 @@ impl<T: TransportItemRequirements> Transport<T> for Queue<T> {
     > {
         Box::pin(async {
             loop {
-                if let Some(data) = self.queue.lock().unwrap().pop_front() {
-                    return Ok(data);
+                match self.queue.lock() {
+                    Ok(mut queue) => {
+                        if let Some(item) = queue.pop_front() {
+                            return Ok(item);
+                        }
+                    }
+                    Err(e) => return Err(e.into()),
                 }
 
                 self.notifier.notified().await;
@@ -150,5 +187,41 @@ impl<T: TransportItemRequirements> Transport<T> for Queue<T> {
                 Err(e) => Err(e.into()),
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{Command, Queue, Transport};
+
+    #[tokio::test]
+    async fn debug() {
+        assert_eq!(
+            format!("{:?}", Queue::<Command>::new()),
+            "Queue { queue: [] }"
+        );
+    }
+
+    #[tokio::test]
+    async fn send_recv() {
+        let queue = Queue::<Command>::new();
+        queue.send(Command::Stop).await.unwrap();
+        queue.send_batch(vec![Command::Stop, Command::Stop]).await.unwrap();
+        // Recv `String` asynchronously
+        assert_eq!(queue.recv().await.unwrap(), Command::Stop);
+        // Try recv `String` asynchronously
+        assert_eq!(queue.try_recv().await.unwrap().unwrap(), Command::Stop);
+        // Recv avaliable `String` asynchronously
+        assert_eq!(queue.recv_avaliable().await.unwrap(), vec![Command::Stop]);
+
+        queue.send_blocking(Command::Stop).unwrap();
+        queue.send_batch_blocking(vec![Command::Stop, Command::Stop]).unwrap();
+        tokio::time::sleep(std::time::Duration::from_nanos(1)).await;
+        // Recv `String` synchronously
+        assert_eq!(queue.recv_blocking().unwrap(), Command::Stop);
+        // Try recv `String` synchronously
+        assert_eq!(queue.try_recv_blocking().unwrap().unwrap(), Command::Stop);
+        // Recv avaliable `String` synchronously
+        assert_eq!(queue.recv_avaliable_blocking().unwrap(), vec![Command::Stop]);
     }
 }

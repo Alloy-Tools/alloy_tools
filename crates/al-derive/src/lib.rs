@@ -42,7 +42,7 @@ fn derive_event_marker(input: DeriveInput) -> TokenStream {
     let name = &input.ident;
     let (impl_generics, type_generics, where_clause) = &input.generics.split_for_impl();
     quote! {impl #impl_generics al_core::EventMarker for #name #type_generics #where_clause {
-        fn _module_path() -> &'static str {
+        fn module_path() -> &'static str {
             module_path!()
         }
     }}

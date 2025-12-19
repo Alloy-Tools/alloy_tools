@@ -2,28 +2,35 @@ use crate::{TransportItemRequirements, TransportRequirements};
 use std::{fmt::Debug, future::Future, pin::Pin, sync::PoisonError};
 
 pub trait Transport<T: TransportItemRequirements>: TransportRequirements {
-    /// Send the data synchronously
+    /// Synchronously send the data
     fn send_blocking(&self, data: T) -> Result<(), TransportError>;
-    /// Wait to receive data synchronously
+    /// Synchronously send the data in a batch
+    fn send_batch_blocking(&self, data: Vec<T>) -> Result<(), TransportError>;
+    /// Synchronously wait to receive data
     fn recv_blocking(&self) -> Result<T, TransportError>;
-    /// Receive all currently avaliable data synchronously
+    /// Synchronously receive all currently avaliable data
     fn recv_avaliable_blocking(&self) -> Result<Vec<T>, TransportError>;
-    /// Try to receive data synchronously if any is currently avaliable
+    /// Synchronously try to receive data, if any is currently avaliable
     fn try_recv_blocking(&self) -> Result<Option<T>, TransportError>;
 
     //TODO: make a `ReusableFutureBox` that can replace its held future without reallocating. Making the tight loops in `Link` and `Splice` more efficient
-    /// Send the data asynchronously
+    /// Asynchronously send the data
     fn send(
         &self,
         data: T,
     ) -> Pin<Box<dyn Future<Output = Result<(), TransportError>> + Send + Sync + '_>>;
-    /// Wait to receive data asynchronously
+    /// Asynchronously send the data in a batch
+    fn send_batch(
+        &self,
+        data: Vec<T>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), TransportError>> + Send + Sync + '_>>;
+    /// Asynchronously wait to receive data
     fn recv(&self) -> Pin<Box<dyn Future<Output = Result<T, TransportError>> + Send + Sync + '_>>;
-    /// Receive all currently avaliable data asynchronously
+    /// Asynchronously receive all currently avaliable data
     fn recv_avaliable(
         &self,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<T>, TransportError>> + Send + Sync + '_>>;
-    /// Try to receive data asynchronously if any is currently avaliable
+    /// Asynchronously try to receive data, if any is currently avaliable
     fn try_recv(
         &self,
     ) -> Pin<Box<dyn Future<Output = Result<Option<T>, TransportError>> + Send + Sync + '_>>;
