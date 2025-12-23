@@ -1,8 +1,11 @@
+#[cfg(feature = "event")]
 use crate::event::Event;
 
 /// A command that can be sent through the system to signal actions, including custom events.
-#[crate::event_requirements]
+#[cfg_attr(feature = "event", crate::event_requirements)]
+#[cfg_attr(not(feature = "event"), derive(Default))]
 pub enum Command {
+    #[cfg(feature = "event")]
     Event(Box<dyn Event>),
     Restart,
     Stop,
@@ -10,6 +13,7 @@ pub enum Command {
     Pulse,
 }
 
+#[cfg(feature = "event")]
 impl Command {
     /// Returns true if the command is an event variant, otherwise false
     pub fn is_event(&self) -> bool {

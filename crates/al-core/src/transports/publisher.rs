@@ -143,9 +143,16 @@ impl<T: TransportItemRequirements> Transport<T> for Publisher<T> {
     }
 
     fn send_batch(
-            &self,
-            data: Vec<T>,
-        ) -> std::pin::Pin<Box<dyn std::prelude::rust_2024::Future<Output = Result<(), TransportError>> + Send + Sync + '_>> {
+        &self,
+        data: Vec<T>,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::prelude::rust_2024::Future<Output = Result<(), TransportError>>
+                + Send
+                + Sync
+                + '_,
+        >,
+    > {
         Box::pin(async move {
             let transports = {
                 match self.subscribers.lock() {
@@ -219,81 +226,80 @@ impl<T: TransportItemRequirements> Transport<T> for Publisher<T> {
 
 #[cfg(test)]
 mod tests {
+    use crate::{Publisher, Queue, Transport};
     use std::sync::Arc;
-    use crate::{Command, Publisher, Queue, Transport};
 
     #[tokio::test]
     async fn debug() {
-        let publisher = Publisher::<Command>::new();
+        let publisher = Publisher::<u8>::new();
         assert_eq!(
             format!("{:?}", publisher),
             "Publisher { subscribers_count: 0 }"
         );
-        publisher.subscribe(Arc::new(Publisher::<Command>::new()));
+        publisher.subscribe(Arc::new(Publisher::<u8>::new()));
         assert_eq!(
             format!("{:?}", publisher),
             "Publisher { subscribers_count: 1 }"
         );
     }
 
-
     #[tokio::test]
     async fn send_recv() {
-        let publisher = Publisher::<Command>::new();
+        let publisher = Publisher::<u8>::new();
         let mut subscribers = vec![];
         for _ in 0..3 {
-            let subscriber = Arc::new(Queue::<Command>::new());
+            let subscriber = Arc::new(Queue::<u8>::new());
             publisher.subscribe(subscriber.clone());
             subscribers.push(subscriber);
         }
 
         // Send `Command` asynchronously
-        publisher.send(Command::Stop).await.unwrap();
-        publisher.send_batch(vec![Command::Stop, Command::Stop]).await.unwrap();
+        publisher.send(1).await.unwrap();
+        publisher.send_batch(vec![2, 3]).await.unwrap();
         // Recv `String` asynchronously
-        assert_eq!(subscribers[0].recv().await.unwrap(), Command::Stop);
+        assert_eq!(subscribers[0].recv().await.unwrap(), 1);
         // Try recv `String` asynchronously
-        assert_eq!(subscribers[0].try_recv().await.unwrap().unwrap(), Command::Stop);
+        assert_eq!(subscribers[0].try_recv().await.unwrap().unwrap(), 2);
         // Recv avaliable `String` asynchronously
-        assert_eq!(subscribers[0].recv_avaliable().await.unwrap(), vec![Command::Stop]);
+        assert_eq!(subscribers[0].recv_avaliable().await.unwrap(), vec![3]);
 
         // Recv `String` asynchronously
-        assert_eq!(subscribers[1].recv().await.unwrap(), Command::Stop);
+        assert_eq!(subscribers[1].recv().await.unwrap(), 1);
         // Try recv `String` asynchronously
-        assert_eq!(subscribers[1].try_recv().await.unwrap().unwrap(), Command::Stop);
+        assert_eq!(subscribers[1].try_recv().await.unwrap().unwrap(), 2);
         // Recv avaliable `String` asynchronously
-        assert_eq!(subscribers[1].recv_avaliable().await.unwrap(), vec![Command::Stop]);
+        assert_eq!(subscribers[1].recv_avaliable().await.unwrap(), vec![3]);
 
         // Recv `String` asynchronously
-        assert_eq!(subscribers[2].recv().await.unwrap(), Command::Stop);
+        assert_eq!(subscribers[2].recv().await.unwrap(), 1);
         // Try recv `String` asynchronously
-        assert_eq!(subscribers[2].try_recv().await.unwrap().unwrap(), Command::Stop);
+        assert_eq!(subscribers[2].try_recv().await.unwrap().unwrap(), 2);
         // Recv avaliable `String` asynchronously
-        assert_eq!(subscribers[2].recv_avaliable().await.unwrap(), vec![Command::Stop]);
+        assert_eq!(subscribers[2].recv_avaliable().await.unwrap(), vec![3]);
 
         // Send `Command` synchronously
-        publisher.send_blocking(Command::Stop).unwrap();
-        publisher.send_batch_blocking(vec![Command::Stop, Command::Stop]).unwrap();
+        publisher.send_blocking(1).unwrap();
+        publisher.send_batch_blocking(vec![2, 3]).unwrap();
         tokio::time::sleep(std::time::Duration::from_nanos(1)).await;
         // Recv `String` synchronously
-        assert_eq!(subscribers[0].recv_blocking().unwrap(), Command::Stop);
+        assert_eq!(subscribers[0].recv_blocking().unwrap(), 1);
         // Try recv `String` synchronously
-        assert_eq!(subscribers[0].try_recv_blocking().unwrap().unwrap(), Command::Stop);
+        assert_eq!(subscribers[0].try_recv_blocking().unwrap().unwrap(), 2);
         // Recv avaliable `String` synchronously
-        assert_eq!(subscribers[0].recv_avaliable_blocking().unwrap(), vec![Command::Stop]);
+        assert_eq!(subscribers[0].recv_avaliable_blocking().unwrap(), vec![3]);
 
         // Recv `String` synchronously
-        assert_eq!(subscribers[1].recv_blocking().unwrap(), Command::Stop);
+        assert_eq!(subscribers[1].recv_blocking().unwrap(), 1);
         // Try recv `String` synchronously
-        assert_eq!(subscribers[1].try_recv_blocking().unwrap().unwrap(), Command::Stop);
+        assert_eq!(subscribers[1].try_recv_blocking().unwrap().unwrap(), 2);
         // Recv avaliable `String` synchronously
-        assert_eq!(subscribers[1].recv_avaliable_blocking().unwrap(), vec![Command::Stop]);
+        assert_eq!(subscribers[1].recv_avaliable_blocking().unwrap(), vec![3]);
 
         // Recv `String` synchronously
-        assert_eq!(subscribers[2].recv_blocking().unwrap(), Command::Stop);
+        assert_eq!(subscribers[2].recv_blocking().unwrap(), 1);
         // Try recv `String` synchronously
-        assert_eq!(subscribers[2].try_recv_blocking().unwrap().unwrap(), Command::Stop);
+        assert_eq!(subscribers[2].try_recv_blocking().unwrap().unwrap(), 2);
         // Recv avaliable `String` synchronously
-        assert_eq!(subscribers[2].recv_avaliable_blocking().unwrap(), vec![Command::Stop]);
+        assert_eq!(subscribers[2].recv_avaliable_blocking().unwrap(), vec![3]);
     }
 }

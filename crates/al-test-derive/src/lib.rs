@@ -1,4 +1,4 @@
-#[cfg(test)]
+#[cfg(all(test, feature = "event"))]
 mod tests {
     use al_derive::event;
 

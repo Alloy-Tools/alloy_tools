@@ -12,3 +12,7 @@ doctest = false
 al-core = { path = "../al-core" }
 al-derive = { path = "../al-derive" }
 serde = { version = "1.0.219", features = ["derive"] }
+
+[features]
+default = ["event"]
+event = ["al-core/event"]

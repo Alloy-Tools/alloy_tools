@@ -1,4 +1,4 @@
-use crate::{command::Command, EventMarker, EventRequirements};
+use crate::{EventMarker, EventRequirements};
 use std::{
     any::Any,
     fmt::Debug,
@@ -7,8 +7,9 @@ use std::{
 
 /// Lazy static initialization of the global event registry allowing `Box<dyn Event>` and therefore `Command::Event` variants to be deserialized
 #[cfg(feature = "serde")]
-pub static EVENT_REGISTRY: once_cell::sync::Lazy<crate::serde_utils::registry::EventRegistry> =
-    once_cell::sync::Lazy::new(|| crate::serde_utils::registry::EventRegistry::new());
+pub static EVENT_REGISTRY: once_cell::sync::Lazy<
+    crate::serde_utils::event_registry::EventRegistry,
+> = once_cell::sync::Lazy::new(|| crate::serde_utils::event_registry::EventRegistry::new());
 
 /// Helper function to return the simple names of types with generics using the `tynm` crate
 pub fn type_with_generics<T>(_: &T) -> String {
@@ -16,7 +17,9 @@ pub fn type_with_generics<T>(_: &T) -> String {
 }
 
 /// Helper function to downcast an event to a specific type, returning None if the downcast fails
-pub fn downcast<T: Event + EventRequirements + 'static>(event: Box<dyn Event>) -> Result<T, Box<dyn Event>> {
+pub fn downcast<T: Event + EventRequirements + 'static>(
+    event: Box<dyn Event>,
+) -> Result<T, Box<dyn Event>> {
     match event.as_any().downcast_ref::<T>() {
         Some(t) => Ok(t.clone()),
         None => Err(event),
@@ -36,11 +39,12 @@ pub trait Event: Send + Sync + Debug + Any + crate::SerdeFeature + 'static {
     fn _partial_equals_event(&self, other: &dyn Any) -> bool;
     fn _hash_event(&self, state: &mut dyn Hasher);
 
-    fn to_cmd(self) -> Command
+    #[cfg(feature = "command")]
+    fn to_cmd(self) -> crate::Command
     where
         Self: Sized,
     {
-        Command::Event(Box::new(self))
+        crate::Command::Event(Box::new(self))
     }
 }
 

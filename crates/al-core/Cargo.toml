@@ -24,10 +24,18 @@ tokio = { version = "1", features = [
 ] }
 
 [features]
-default = ["test-utils"]
+default = ["base", "transport-base", "test-utils"]
 none = []
+base = ["command", "event"]
+transport-base = ["transport", "task"]
+
+command = []
+event = []
+transport = []
+task = []
+
 serde = ["dep:serde", "dep:erased-serde", "dep:once_cell", "al-derive/serde"]
 json = ["serde", "dep:serde_json"]
 binary = ["serde", "dep:bitcode"]
 test-utils = ["serde", "json", "binary"]
-test-tasks = ["test-utils"]
+test-tasks = ["task"]

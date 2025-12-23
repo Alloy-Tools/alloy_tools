@@ -1,7 +1,10 @@
+#[cfg(feature = "task")]
 pub mod buffered;
+#[cfg(feature = "task")]
 pub mod link;
 pub mod list;
 pub mod publisher;
 pub mod queue;
+#[cfg(feature = "task")]
 pub mod splice;
 pub mod transform;

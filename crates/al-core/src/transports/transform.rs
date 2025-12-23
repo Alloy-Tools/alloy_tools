@@ -43,8 +43,7 @@ impl<T> ApplyTransform<T> for TransformFn<T> {
 impl<T> std::fmt::Debug for TransformFn<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Debug as a unit struct `TransformFn` since we can't print the inner function
-        f.debug_struct("TransformFn")
-            .finish()
+        f.debug_struct("TransformFn").finish()
     }
 }
 
@@ -124,10 +123,21 @@ impl<
     }
 
     fn send_batch(
-            &self,
-            data: Vec<T>,
-        ) -> std::pin::Pin<Box<dyn std::prelude::rust_2024::Future<Output = Result<(), crate::TransportError>> + Send + Sync + '_>> {
-        self.transport.send_batch(data.into_iter().map(|d| self.transform_send.apply(d)).collect())
+        &self,
+        data: Vec<T>,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::prelude::rust_2024::Future<Output = Result<(), crate::TransportError>>
+                + Send
+                + Sync
+                + '_,
+        >,
+    > {
+        self.transport.send_batch(
+            data.into_iter()
+                .map(|d| self.transform_send.apply(d))
+                .collect(),
+        )
     }
 
     fn recv(
@@ -188,15 +198,21 @@ impl<
 mod tests {
     use std::vec;
 
+    #[cfg(feature = "event")]
+    use crate::event;
+
     use crate::{
-        NoOp, Queue, Transport, event, transports::transform::{Transform, TransformFn}
+        transports::transform::{Transform, TransformFn},
+        NoOp, Queue, Transport,
     };
 
+    #[cfg(feature = "event")]
     #[event]
     struct AddOne(u8);
 
+    #[cfg(feature = "event")]
     #[test]
-    fn transform() {
+    fn with_event() {
         let transform = Transform::new(
             Queue::new().into(),
             TransformFn::from(|mut x: AddOne| {
@@ -215,14 +231,34 @@ mod tests {
         assert_eq!(y.0, x + 2);
     }
 
+    #[test]
+    fn transform() {
+        let transform = Transform::new(
+            Queue::new().into(),
+            TransformFn::from(|mut x: u8| {
+                x += 1;
+                x
+            }),
+            TransformFn::from(|mut x: u8| {
+                x += 1;
+                x
+            }),
+        );
+
+        let x = 1u8;
+        transform.send_blocking(x).unwrap();
+        let y = transform.recv_blocking().unwrap();
+        assert_eq!(y, x + 2);
+    }
+
     #[tokio::test]
     async fn debug() {
         assert_eq!(
             format!("{:?}", Transform::new(
                 Queue::new().into(),
                 NoOp,
-                TransformFn::from(|mut x: AddOne| {
-                    x.0 += 1;
+                TransformFn::from(|mut x: u8| {
+                    x += 1;
                     x
                 })
             )),
@@ -233,64 +269,65 @@ mod tests {
     async fn send_recv() {
         let transform = Transform::new(
             Queue::new().into(),
-            TransformFn::from(|mut x: AddOne| {
-                x.0 += 1;
+            TransformFn::from(|mut x: u8| {
+                x += 1;
                 x
             }),
-            TransformFn::from(|mut x: AddOne| {
-                x.0 += 1;
+            TransformFn::from(|mut x: u8| {
+                x += 1;
                 x
             }),
         );
-        
-        let noop_transform = Transform::new(
-            Queue::new().into(),
-            NoOp,
-            NoOp,
-        );
+
+        let noop_transform = Transform::new(Queue::new().into(), NoOp, NoOp);
 
         let x = 1u8;
         // Send `AddOne` asynchronously
-        transform.send(AddOne(x)).await.unwrap();
-        transform.send_batch(vec![AddOne(x+1), AddOne(x+2)]).await.unwrap();
+        transform.send(x).await.unwrap();
+        transform.send_batch(vec![x + 1, x + 2]).await.unwrap();
         // Recv `String` asynchronously
-        assert_eq!(transform.recv().await.unwrap().0, x + 2);
+        assert_eq!(transform.recv().await.unwrap(), x + 2);
         // Try recv `String` asynchronously
-        assert_eq!(transform.try_recv().await.unwrap().unwrap().0, x + 3);
+        assert_eq!(transform.try_recv().await.unwrap().unwrap(), x + 3);
         // Recv avaliable `String` asynchronously
-        assert_eq!(transform.recv_avaliable().await.unwrap(), vec![AddOne(x + 4)]);
+        assert_eq!(transform.recv_avaliable().await.unwrap(), vec![x + 4]);
 
         // Send `AddOne` synchronously
-        transform.send_blocking(AddOne(x)).unwrap();
-        transform.send_batch_blocking(vec![AddOne(x+1), AddOne(x+2)]).unwrap();
+        transform.send_blocking(x).unwrap();
+        transform.send_batch_blocking(vec![x + 1, x + 2]).unwrap();
         tokio::time::sleep(std::time::Duration::from_nanos(1)).await;
         // Recv `String` synchronously
-        assert_eq!(transform.recv_blocking().unwrap().0, x + 2);
+        assert_eq!(transform.recv_blocking().unwrap(), x + 2);
         // Try recv `String` synchronously
-        assert_eq!(transform.try_recv_blocking().unwrap().unwrap().0, x + 3);
+        assert_eq!(transform.try_recv_blocking().unwrap().unwrap(), x + 3);
         // Recv avaliable `String` synchronously
-        assert_eq!(transform.recv_avaliable_blocking().unwrap(), vec![AddOne(x + 4)]);
+        assert_eq!(transform.recv_avaliable_blocking().unwrap(), vec![x + 4]);
 
         let z = 3u8;
         // Send `AddOne` asynchronously
-        noop_transform.send(AddOne(z)).await.unwrap();
-        noop_transform.send_batch(vec![AddOne(z+1), AddOne(z+2)]).await.unwrap();
+        noop_transform.send(z).await.unwrap();
+        noop_transform.send_batch(vec![z + 1, z + 2]).await.unwrap();
         // Recv `String` asynchronously
-        assert_eq!(noop_transform.recv().await.unwrap().0, z);
+        assert_eq!(noop_transform.recv().await.unwrap(), z);
         // Try recv `String` asynchronously
-        assert_eq!(noop_transform.try_recv().await.unwrap().unwrap().0, z + 1);
+        assert_eq!(noop_transform.try_recv().await.unwrap().unwrap(), z + 1);
         // Recv avaliable `String` asynchronously
-        assert_eq!(noop_transform.recv_avaliable().await.unwrap(), vec![AddOne(z + 2)]);
+        assert_eq!(noop_transform.recv_avaliable().await.unwrap(), vec![z + 2]);
 
         // Send `AddOne` synchronously
-        noop_transform.send_blocking(AddOne(z)).unwrap();
-        noop_transform.send_batch_blocking(vec![AddOne(z+1), AddOne(z+2)]).unwrap();
+        noop_transform.send_blocking(z).unwrap();
+        noop_transform
+            .send_batch_blocking(vec![z + 1, z + 2])
+            .unwrap();
         tokio::time::sleep(std::time::Duration::from_nanos(1)).await;
         // Recv `String` synchronously
-        assert_eq!(noop_transform.recv_blocking().unwrap().0, z);
+        assert_eq!(noop_transform.recv_blocking().unwrap(), z);
         // Try recv `String` synchronously
-        assert_eq!(noop_transform.try_recv_blocking().unwrap().unwrap().0, z + 1);
+        assert_eq!(noop_transform.try_recv_blocking().unwrap().unwrap(), z + 1);
         // Recv avaliable `String` synchronously
-        assert_eq!(noop_transform.recv_avaliable_blocking().unwrap(), vec![AddOne(z + 2)]);
+        assert_eq!(
+            noop_transform.recv_avaliable_blocking().unwrap(),
+            vec![z + 2]
+        );
     }
 }

@@ -192,36 +192,36 @@ impl<T: TransportItemRequirements> Transport<T> for Queue<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Command, Queue, Transport};
+    use crate::{Queue, Transport};
 
     #[tokio::test]
     async fn debug() {
         assert_eq!(
-            format!("{:?}", Queue::<Command>::new()),
+            format!("{:?}", Queue::<u8>::new()),
             "Queue { queue: [] }"
         );
     }
 
     #[tokio::test]
     async fn send_recv() {
-        let queue = Queue::<Command>::new();
-        queue.send(Command::Stop).await.unwrap();
-        queue.send_batch(vec![Command::Stop, Command::Stop]).await.unwrap();
+        let queue = Queue::<u8>::new();
+        queue.send(1).await.unwrap();
+        queue.send_batch(vec![2, 3]).await.unwrap();
         // Recv `String` asynchronously
-        assert_eq!(queue.recv().await.unwrap(), Command::Stop);
+        assert_eq!(queue.recv().await.unwrap(), 1);
         // Try recv `String` asynchronously
-        assert_eq!(queue.try_recv().await.unwrap().unwrap(), Command::Stop);
+        assert_eq!(queue.try_recv().await.unwrap().unwrap(), 2);
         // Recv avaliable `String` asynchronously
-        assert_eq!(queue.recv_avaliable().await.unwrap(), vec![Command::Stop]);
+        assert_eq!(queue.recv_avaliable().await.unwrap(), vec![3]);
 
-        queue.send_blocking(Command::Stop).unwrap();
-        queue.send_batch_blocking(vec![Command::Stop, Command::Stop]).unwrap();
+        queue.send_blocking(1).unwrap();
+        queue.send_batch_blocking(vec![2, 3]).unwrap();
         tokio::time::sleep(std::time::Duration::from_nanos(1)).await;
         // Recv `String` synchronously
-        assert_eq!(queue.recv_blocking().unwrap(), Command::Stop);
+        assert_eq!(queue.recv_blocking().unwrap(), 1);
         // Try recv `String` synchronously
-        assert_eq!(queue.try_recv_blocking().unwrap().unwrap(), Command::Stop);
+        assert_eq!(queue.try_recv_blocking().unwrap().unwrap(), 2);
         // Recv avaliable `String` synchronously
-        assert_eq!(queue.recv_avaliable_blocking().unwrap(), vec![Command::Stop]);
+        assert_eq!(queue.recv_avaliable_blocking().unwrap(), vec![3]);
     }
 }

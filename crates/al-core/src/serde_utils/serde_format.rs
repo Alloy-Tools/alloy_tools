@@ -11,29 +11,34 @@ impl<T> SerdeWrapper<T> {
 pub trait SerdeFormat:
     Send + Sync + Clone + Default + PartialEq + std::any::Any + std::fmt::Debug + std::hash::Hash
 {
+    #[cfg(feature = "event")]
     /// Serialize the passed event into a vector of bytes.
     fn serialize_event(
         &self,
         event: &dyn crate::Event,
     ) -> Result<Vec<u8>, Box<dyn std::error::Error>>;
 
+    #[cfg(feature = "event")]
     /// Deserialize an event as type T from the passed byte slice.
     fn deserialize_event<T>(&self, data: &[u8]) -> Result<T, Box<dyn std::error::Error>>
     where
         T: crate::Event + crate::EventRequirements + for<'de> serde::Deserialize<'de>;
 
+    #[cfg(feature = "event")]
     /// Deserialize an event as a `Box<dyn Event>` from the passed byte slice.
     fn deserialize_event_dyn(
         &self,
         data: &[u8],
     ) -> Result<Box<dyn crate::Event>, Box<dyn std::error::Error>>;
 
+    #[cfg(feature = "command")]
     /// Serialize the passed command into a vector of bytes.
     fn serialize_command(
         &self,
         command: &crate::Command,
     ) -> Result<Vec<u8>, Box<dyn std::error::Error>>;
 
+    #[cfg(feature = "command")]
     /// Deserialize a command from the passed byte slice.
     fn deserialize_command<'a>(
         &self,
@@ -48,6 +53,7 @@ pub struct JsonSerde;
 
 #[cfg(feature = "json")]
 impl SerdeFormat for JsonSerde {
+    #[cfg(feature = "event")]
     fn serialize_event(
         &self,
         event: &dyn crate::Event,
@@ -55,6 +61,7 @@ impl SerdeFormat for JsonSerde {
         serde_json::to_vec(&event).map_err(|e| e.into())
     }
 
+    #[cfg(feature = "event")]
     fn deserialize_event<T>(&self, data: &[u8]) -> Result<T, Box<dyn std::error::Error>>
     where
         T: crate::Event + crate::EventRequirements + for<'de> serde::Deserialize<'de> + 'static,
@@ -64,6 +71,7 @@ impl SerdeFormat for JsonSerde {
             .as_result()
     }
 
+    #[cfg(feature = "event")]
     fn deserialize_event_dyn(
         &self,
         data: &[u8],
@@ -71,6 +79,7 @@ impl SerdeFormat for JsonSerde {
         serde_json::from_slice(data).map_err(|e| e.into())
     }
 
+    #[cfg(feature = "command")]
     fn serialize_command(
         &self,
         command: &crate::Command,
@@ -78,6 +87,7 @@ impl SerdeFormat for JsonSerde {
         serde_json::to_vec(command).map_err(|e| e.into())
     }
 
+    #[cfg(feature = "command")]
     fn deserialize_command<'a>(
         &self,
         data: &'a [u8],
@@ -93,6 +103,7 @@ pub struct BinarySerde;
 
 #[cfg(feature = "binary")]
 impl SerdeFormat for BinarySerde {
+    #[cfg(feature = "event")]
     fn serialize_event(
         &self,
         event: &dyn crate::Event,
@@ -100,6 +111,7 @@ impl SerdeFormat for BinarySerde {
         bitcode::serialize(&event).map_err(|e| e.into())
     }
 
+    #[cfg(feature = "event")]
     fn deserialize_event<T>(&self, data: &[u8]) -> Result<T, Box<dyn std::error::Error>>
     where
         T: crate::Event + crate::EventRequirements + for<'de> serde::Deserialize<'de>,
@@ -109,6 +121,7 @@ impl SerdeFormat for BinarySerde {
             .as_result()
     }
 
+    #[cfg(feature = "event")]
     fn deserialize_event_dyn(
         &self,
         data: &[u8],
@@ -116,6 +129,7 @@ impl SerdeFormat for BinarySerde {
         bitcode::deserialize(data).map_err(|e| e.into())
     }
 
+    #[cfg(feature = "command")]
     fn serialize_command(
         &self,
         command: &crate::Command,
@@ -123,6 +137,7 @@ impl SerdeFormat for BinarySerde {
         bitcode::serialize(command).map_err(|e| e.into())
     }
 
+    #[cfg(feature = "command")]
     fn deserialize_command<'a>(
         &self,
         data: &'a [u8],

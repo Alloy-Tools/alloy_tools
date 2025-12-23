@@ -1,79 +1,92 @@
 // map `self` to `al_core` allowing the use of derive macros that use `al_core::..`
 extern crate self as al_core;
+#[cfg(feature = "command")]
 mod command;
+#[cfg(feature = "event")]
 mod event;
 mod markers;
 #[cfg(feature = "serde")]
 mod serde_utils;
+#[cfg(feature = "task")]
 mod task;
+#[cfg(feature = "task")]
 mod task_utils;
+#[cfg(feature = "transport")]
 mod transport;
+#[cfg(feature = "transport")]
 mod transports;
 
-pub use al_derive::event;
-pub use al_derive::event_requirements;
-pub use al_derive::EventMarker as DeriveEventMarker;
+#[cfg(feature = "command")]
 pub use command::Command;
-pub use event::downcast as downcast_event;
-pub use event::type_with_generics;
-pub use event::Event;
-#[cfg(feature = "serde")]
+#[cfg(all(feature = "event", feature = "serde"))]
 pub use event::EVENT_REGISTRY;
-pub use markers::EventMarker;
-pub use markers::EventRequirements;
-#[cfg(feature = "serde")]
-pub use markers::SerdeFeature;
-pub use markers::TaskStateRequirements;
-pub use markers::TaskTypes;
-pub use markers::TransportItemRequirements;
-pub use markers::TransportRequirements;
-#[cfg(feature = "serde")]
-pub use serde_utils::registry::Registry;
-#[cfg(feature = "serde")]
-pub use serde_utils::registry::SharedRegistry;
-#[cfg(all(feature = "serde", feature = "binary"))]
+#[cfg(all(
+    any(feature = "event", feature = "command"),
+    feature = "serde",
+    feature = "binary"
+))]
 pub use serde_utils::serde_format::BinarySerde;
-#[cfg(all(feature = "serde", feature = "json"))]
+#[cfg(all(
+    any(feature = "event", feature = "command"),
+    feature = "serde",
+    feature = "json"
+))]
 pub use serde_utils::serde_format::JsonSerde;
-#[cfg(feature = "serde")]
+#[cfg(all(any(feature = "event", feature = "command"), feature = "serde"))]
 pub use serde_utils::serde_format::SerdeFormat;
-pub use task::Task;
-pub use task_utils::task_elements::TaskConfig;
-pub use task_utils::task_elements::TaskError;
-pub use task_utils::task_elements::TaskMode;
-pub use task_utils::task_state::AsTaskState;
-pub use task_utils::task_state::BaseTaskState;
-pub use task_utils::task_state::ExtendedTaskState;
-pub use task_utils::task_state::TaskState;
-pub use transport::Transport;
-pub use transport::TransportError;
-pub use transports::buffered::Buffered;
-pub use transports::link::Link;
-pub use transports::list::List;
-pub use transports::publisher::Publisher;
-pub use transports::queue::Queue;
-pub use transports::splice::Splice;
-pub use transports::transform::NoOp;
-pub use transports::transform::Transform;
-pub use transports::transform::TransformFn;
+#[cfg(feature = "event")]
+pub use {
+    al_derive::event, al_derive::event_requirements, al_derive::EventMarker as DeriveEventMarker,
+    event::downcast as downcast_event, event::type_with_generics, event::Event,
+    markers::EventMarker, markers::EventRequirements, markers::SerdeFeature,
+};
+#[cfg(feature = "task")]
+pub use {
+    markers::TaskStateRequirements, markers::TaskTypes, task::Task,
+    task_utils::task_elements::TaskConfig, task_utils::task_elements::TaskError,
+    task_utils::task_elements::TaskMode, task_utils::task_state::AsTaskState,
+    task_utils::task_state::BaseTaskState, task_utils::task_state::ExtendedTaskState,
+    task_utils::task_state::TaskState,
+};
+#[cfg(feature = "transport")]
+pub use {
+    markers::TransportItemRequirements, markers::TransportRequirements, transport::Transport,
+    transport::TransportError, transports::list::List, transports::publisher::Publisher,
+    transports::queue::Queue, transports::transform::NoOp, transports::transform::Transform,
+    transports::transform::TransformFn,
+};
+#[cfg(feature = "serde")]
+pub use {serde_utils::registry::Registry, serde_utils::registry::SharedRegistry};
+#[cfg(all(feature = "transport", feature = "task"))]
+pub use {transports::buffered::Buffered, transports::link::Link, transports::splice::Splice};
 
 #[cfg(test)]
 mod tests {
-    use crate::{Command, Event, EventMarker, event};
+    #[cfg(all(feature = "command", feature = "event"))]
+    use crate::Command;
+    #[cfg(feature = "event")]
+    use crate::{event, Event, EventMarker};
+    #[cfg(feature = "event")]
     use std::hash::{DefaultHasher, Hash, Hasher};
 
+    #[cfg(feature = "event")]
     const TEST_VAL: u128 = 7878;
+
+    #[cfg(feature = "event")]
     const TEST_MSG: &str = "Test";
 
+    #[cfg(feature = "event")]
     /// Simple event for testing using the `event` attribute macro
     #[event]
     struct TestEventA;
 
+    #[cfg(feature = "event")]
     /// Second simple event for testing using the `EventMarker` derive macro
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     #[derive(Clone, Default, PartialEq, Hash, Debug, al_derive::EventMarker)]
     struct TestEventB;
 
+    #[cfg(feature = "event")]
     /// Enum for testing
     #[event]
     enum TestEventEnum {
@@ -83,16 +96,20 @@ mod tests {
         C(String),
     }
 
+    #[cfg(feature = "event")]
     /// Event with payload for testing
     #[event]
     struct TestEventPayload {
         value: u128,
         message: String,
     }
+
+    #[cfg(feature = "event")]
     /// Event with generic for testing
     #[event]
     struct TestEventGeneric<T>(T);
 
+    #[cfg(feature = "event")]
     #[test]
     fn type_with_generics() {
         assert_eq!(
@@ -121,6 +138,7 @@ mod tests {
         );
     }
 
+    #[cfg(all(feature = "command", feature = "event"))]
     /// Test converting event to command
     #[test]
     fn event_to_command() {
@@ -140,11 +158,14 @@ mod tests {
         assert!(matches!(generic_str, Command::Event(_)));
     }
 
+    #[cfg(all(feature = "command", feature = "event"))]
     /// Test downcasting commands back to their original event types
     #[test]
     fn verify_downcast() {
         let cmd = TestEventA.to_cmd();
-        let enum_cmd = TestEventEnum::A.to_cmd();
+        let enum_a_cmd = TestEventEnum::A.to_cmd();
+        let enum_b_cmd = TestEventEnum::B(1).to_cmd();
+        let enum_c_cmd = TestEventEnum::C(TEST_MSG.to_string()).to_cmd();
         let payload_cmd = TestEventPayload {
             value: TEST_VAL,
             message: TEST_MSG.to_string(),
@@ -156,8 +177,12 @@ mod tests {
         assert!(cmd.clone().downcast_event::<TestEventA>().is_ok());
         assert!(cmd.downcast_event::<TestEventB>().is_err());
         assert!(Command::Stop.downcast_event::<TestEventB>().is_err());
-        assert!(enum_cmd.clone().downcast_event::<TestEventEnum>().is_ok());
-        assert!(enum_cmd.downcast_event::<TestEventA>().is_err());
+        assert!(enum_a_cmd.clone().downcast_event::<TestEventEnum>().is_ok());
+        assert!(enum_a_cmd.downcast_event::<TestEventA>().is_err());
+        assert!(enum_b_cmd.clone().downcast_event::<TestEventEnum>().is_ok());
+        assert!(enum_b_cmd.downcast_event::<TestEventA>().is_err());
+        assert!(enum_c_cmd.clone().downcast_event::<TestEventEnum>().is_ok());
+        assert!(enum_c_cmd.downcast_event::<TestEventA>().is_err());
         assert!(payload_cmd
             .clone()
             .downcast_event::<TestEventPayload>()
@@ -183,6 +208,7 @@ mod tests {
         assert!(generic_str.downcast_event::<TestEventA>().is_err());
     }
 
+    #[cfg(all(feature = "command", feature = "event"))]
     /// Test function for identification of commands as events
     #[test]
     fn command_is_event() {
@@ -195,6 +221,7 @@ mod tests {
         assert!(!stop_cmd.is_event());
     }
 
+    #[cfg(all(feature = "command", feature = "event"))]
     /// Test function for retrieving event type names from commands
     #[test]
     fn command_event_type_identification() {
@@ -212,6 +239,7 @@ mod tests {
         assert!(Command::Stop.event_type_name().is_none());
     }
 
+    #[cfg(feature = "event")]
     /// Test to ensure event type names are unique across different crates to prevent registry collisions
     #[test]
     fn event_name_collisions() {
@@ -235,6 +263,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "event")]
     /// Test hashing of events to ensure uniqueness based on type and content
     #[test]
     fn event_hash() {
@@ -317,6 +346,7 @@ mod tests {
         assert_ne!(generic_str_hash, generic_str_diff_hash);
     }
 
+    #[cfg(all(feature = "command", feature = "event"))]
     /// Test hashing of commands to ensure uniqueness based on contained event type and content
     #[test]
     fn command_hash() {
@@ -403,13 +433,18 @@ mod tests {
         assert_ne!(generic_str_hash, generic_str_diff_hash);
     }
 
+    #[cfg(feature = "event")]
     /// Test cloning of events
     #[test]
     fn event_clone() {
         let original = TestEventA;
         let cloned = original.clone();
-        let enum_original = TestEventEnum::A;
-        let enum_cloned = enum_original.clone();
+        let enum_a_original = TestEventEnum::A;
+        let enum_a_cloned = enum_a_original.clone();
+        let enum_b_original = TestEventEnum::B(1);
+        let enum_b_cloned = enum_b_original.clone();
+        let enum_c_original = TestEventEnum::C(TEST_MSG.to_string());
+        let enum_c_cloned = enum_c_original.clone();
         let payload_original = TestEventPayload {
             value: TEST_VAL,
             message: TEST_MSG.to_string(),
@@ -421,12 +456,15 @@ mod tests {
         let generic_str_cloned = generic_str_original.clone();
 
         assert_eq!(original, cloned);
-        assert_eq!(enum_original, enum_cloned);
+        assert_eq!(enum_a_original, enum_a_cloned);
+        assert_eq!(enum_b_original, enum_b_cloned);
+        assert_eq!(enum_c_original, enum_c_cloned);
         assert_eq!(payload_original, payload_cloned);
         assert_eq!(generic_val_original, generic_val_cloned);
         assert_eq!(generic_str_original, generic_str_cloned);
     }
 
+    #[cfg(all(feature = "command", feature = "event"))]
     /// Test cloning of commands
     #[test]
     fn command_clone() {
@@ -485,6 +523,7 @@ mod tests {
         }
     }
 
+    #[cfg(all(feature = "command", feature = "event"))]
     /// Test partial equality of commands
     #[test]
     fn command_partial_equals() {
@@ -532,6 +571,7 @@ mod tests {
         assert_eq!(Command::Stop, Command::Stop);
     }
 
+    #[cfg(feature = "event")]
     /// Test to ensure events meet thread safety and trait requirements
     #[test]
     fn event_marker_thread_safety() {
@@ -561,7 +601,7 @@ mod tests {
     }
 
     /// Test serialization and deserialization of events using JSON format
-    #[cfg(all(feature = "serde", feature = "json"))]
+    #[cfg(all(feature = "event", feature = "serde", feature = "json"))]
     #[test]
     fn event_json() {
         use crate::{register_event, JsonSerde, SerdeFormat};
@@ -707,7 +747,12 @@ mod tests {
     }
 
     /// Test serialization and deserialization of commands using JSON format
-    #[cfg(all(feature = "serde", feature = "json"))]
+    #[cfg(all(
+        feature = "command",
+        feature = "event",
+        feature = "serde",
+        feature = "json"
+    ))]
     #[test]
     fn command_json() {
         use crate::{register_event, JsonSerde, SerdeFormat};
@@ -943,7 +988,7 @@ mod tests {
     }
 
     /// Test serialization and deserialization of events using binary format
-    #[cfg(all(feature = "serde", feature = "binary"))]
+    #[cfg(all(feature = "event", feature = "serde", feature = "binary"))]
     #[test]
     fn event_binary() {
         use crate::{register_event, BinarySerde, SerdeFormat};
@@ -1093,7 +1138,12 @@ mod tests {
     }
 
     /// Test serialization and deserialization of commands using binary format
-    #[cfg(all(feature = "serde", feature = "binary"))]
+    #[cfg(all(
+        feature = "command",
+        feature = "event",
+        feature = "serde",
+        feature = "binary"
+    ))]
     #[test]
     fn command_binary() {
         use crate::{register_event, BinarySerde, SerdeFormat};
