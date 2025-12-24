@@ -25,9 +25,15 @@ mod tests {
             y: u8,
         }
 
+        // Using the `event` attribute macro with omitting derives
+        #[event(Clone, Default)]
+        #[derive(Clone, Default)]
+        struct TestEventD;
+
         has_impl_marker::<TestEventA>();
         has_impl_marker::<TestEventB>();
         has_impl_marker::<TestEventC>();
+        has_impl_marker::<TestEventD>();
     }
 
     /// Test `event` attribute and `EventMarker` derive macros with generics

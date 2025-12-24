@@ -87,8 +87,9 @@ mod tests {
     struct TestEventB;
 
     #[cfg(feature = "event")]
-    /// Enum for testing
-    #[event]
+    /// Enum for testing, along with omitting traits within the `event` attribute macro
+    #[event(Default, Clone)]
+    #[derive(Default, Clone)]
     enum TestEventEnum {
         #[default]
         A,
