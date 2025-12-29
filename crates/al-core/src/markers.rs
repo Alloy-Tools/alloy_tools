@@ -64,9 +64,15 @@ impl<T: EventMarker> sealed::EventMarker for T {}
 
 #[cfg(feature = "transport")]
 /// Trait marking an item as valid to be a `Transport`
-pub trait TransportRequirements: 'static + Send + Sync + Debug {}
+pub trait TransportRequirements: 'static + Send + Sync + Debug + Any {
+    fn as_any(&self) -> &dyn std::any::Any;
+}
 #[cfg(feature = "transport")]
-impl<T: 'static + Send + Sync + Debug> TransportRequirements for T {}
+impl<T: 'static + Send + Sync + Debug + Any> TransportRequirements for T {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
 
 #[cfg(feature = "transport")]
 /// Trait marking an item as valid for passing through a `Transport`

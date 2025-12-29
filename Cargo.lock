@@ -32,6 +32,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "al-crypto"
+version = "0.1.0"
+
+[[package]]
 name = "al-derive"
 version = "0.1.0"
 dependencies = [
@@ -50,7 +54,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "al-net"
+version = "0.1.0"
+
+[[package]]
 name = "al-tui"
+version = "0.1.0"
+
+[[package]]
+name = "al-vault"
 version = "0.1.0"
 
 [[package]]

@@ -326,7 +326,7 @@ impl<
 
 #[cfg(test)]
 mod tests {
-    use crate::{Queue, Splice, Transport};
+    use crate::{Link, Queue, Splice, Transport};
     use std::sync::Arc;
 
     #[tokio::test]
@@ -342,8 +342,17 @@ mod tests {
             "Splice(Link { producer: Queue { queue: [] }, consumer: SpliceTransport(\"<SpliceFn>\", \"<AsyncSpliceFn>\"), link_task: \"<LinkFn>\" }, Queue { queue: [] }, \"<SpliceFn>\", \"<AsyncSpliceFn>\")"
         );
         splice.send(1).await.unwrap();
-        println!("{:?}", splice);
-        println!("{:?}", splice.consumer());
+        println!("Splice:\n{:?}\n\n", splice);
+        println!(
+            "Producer:\n{:?}\n\n",
+            splice
+                .producer()
+                .as_any()
+                .downcast_ref::<Link<u8>>()
+                .unwrap()
+                .producer()
+        );
+        println!("Consumer:\n{:?}\n\n", splice.consumer());
     }
 
     #[tokio::test]
@@ -358,10 +367,7 @@ mod tests {
 
         // Send `Command` asynchronously
         splice.send(1).await.unwrap();
-        splice
-            .send_batch(vec![2, 3])
-            .await
-            .unwrap();
+        splice.send_batch(vec![2, 3]).await.unwrap();
         // Recv `String` asynchronously
         assert_eq!(splice.consumer().recv().await.unwrap(), "u8: 1");
         // Try recv `String` asynchronously
@@ -377,9 +383,7 @@ mod tests {
 
         // Send `Command` synchronously
         splice.send_blocking(1).unwrap();
-        splice
-            .send_batch_blocking(vec![2, 3])
-            .unwrap();
+        splice.send_batch_blocking(vec![2, 3]).unwrap();
         tokio::time::sleep(std::time::Duration::from_nanos(1)).await;
         // Recv `String` synchronously
         assert_eq!(splice.consumer().recv_blocking().unwrap(), "u8: 1");
