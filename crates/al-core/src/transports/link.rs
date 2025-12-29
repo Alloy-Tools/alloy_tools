@@ -95,7 +95,7 @@ impl<T: TransportItemRequirements> std::fmt::Debug for Link<T> {
         f.debug_struct("Link")
             .field("producer", &self.producer)
             .field("consumer", &self.consumer)
-            .field("link_task", &"<LinkFn>")
+            .field("link_task", &"LinkFn")
             .finish()
     }
 }
@@ -208,10 +208,10 @@ mod tests {
         let l0 = make_link::<u8>(None, None);
         assert_eq!(
             format!("{:?}", l0),
-            "Link { producer: Queue { queue: [] }, consumer: Queue { queue: [] }, link_task: \"<LinkFn>\" }"
+            "Link { producer: Queue { queue: [] }, consumer: Queue { queue: [] }, link_task: \"LinkFn\" }"
         );
         let l1 = make_link(Some(Arc::new(l0)), Some(Arc::new(make_link(None, None))));
-        assert_eq!(format!("{:?}", l1), "Link { producer: Link { producer: Queue { queue: [] }, consumer: Queue { queue: [] }, link_task: \"<LinkFn>\" }, consumer: Link { producer: Queue { queue: [] }, consumer: Queue { queue: [] }, link_task: \"<LinkFn>\" }, link_task: \"<LinkFn>\" }");
+        assert_eq!(format!("{:?}", l1), "Link { producer: Link { producer: Queue { queue: [] }, consumer: Queue { queue: [] }, link_task: \"LinkFn\" }, consumer: Link { producer: Queue { queue: [] }, consumer: Queue { queue: [] }, link_task: \"LinkFn\" }, link_task: \"LinkFn\" }");
     }
 
     #[tokio::test]

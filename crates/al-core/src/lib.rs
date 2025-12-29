@@ -60,6 +60,29 @@ pub use {serde_utils::registry::Registry, serde_utils::registry::SharedRegistry}
 #[cfg(all(feature = "transport", feature = "task"))]
 pub use {transports::buffered::Buffered, transports::link::Link, transports::splice::Splice};
 
+pub struct DisplayString<'a>(&'a str);
+impl<'a> std::fmt::Debug for DisplayString<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+pub struct SliceDebug<'a, T>(pub &'a [T]);
+impl<'a, T: std::fmt::Debug> std::fmt::Debug for SliceDebug<'a, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let len = self.0.len();
+        let display_len = 3.min(len);
+        let mut debug_list = f.debug_list();
+        for item in &self.0[0..display_len] {
+            debug_list.entry(item);
+        }
+        if len > display_len {
+            debug_list.entry(&DisplayString(&format!("+{} more...", len - display_len)));
+        }
+        debug_list.finish()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[cfg(all(feature = "command", feature = "event"))]

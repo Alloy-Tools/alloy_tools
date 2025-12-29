@@ -1,4 +1,4 @@
-use crate::{Transport, TransportError, TransportItemRequirements};
+use crate::{SliceDebug, Transport, TransportError, TransportItemRequirements};
 use std::{
     collections::VecDeque,
     sync::{Condvar, Mutex},
@@ -14,10 +14,13 @@ pub struct Queue<T> {
 impl<T: std::fmt::Debug> std::fmt::Debug for Queue<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.queue.lock() {
-            Ok(queue) => f.debug_struct("Queue").field("queue", &*queue).finish(),
+            Ok(mut queue) => f
+                .debug_struct("Queue")
+                .field("queue", &SliceDebug(queue.make_contiguous()))
+                .finish(),
             Err(e) => f
                 .debug_struct("Queue")
-                .field("queue", &format!("<lock poisoned>: {}", e.to_string()))
+                .field("queue", &format!("<LockPoisoned>: {}", e.to_string()))
                 .finish(),
         }
     }
@@ -113,9 +116,16 @@ impl<T: TransportItemRequirements> Transport<T> for Queue<T> {
     }
 
     fn send_batch(
-            &self,
-            data: Vec<T>,
-        ) -> std::pin::Pin<Box<dyn std::prelude::rust_2024::Future<Output = Result<(), TransportError>> + Send + Sync + '_>> {
+        &self,
+        data: Vec<T>,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::prelude::rust_2024::Future<Output = Result<(), TransportError>>
+                + Send
+                + Sync
+                + '_,
+        >,
+    > {
         if let Err(e) = match self.queue.lock() {
             Ok(mut guard) => Ok(guard.extend(data)),
             Err(e) => Err(e.into()),
@@ -196,10 +206,18 @@ mod tests {
 
     #[tokio::test]
     async fn debug() {
-        assert_eq!(
-            format!("{:?}", Queue::<u8>::new()),
-            "Queue { queue: [] }"
-        );
+        let queue = Queue::<u8>::new();
+        assert_eq!(format!("{:?}", queue), "Queue { queue: [] }");
+        queue.send_blocking(1).unwrap();
+        assert_eq!(format!("{:?}", queue), "Queue { queue: [1] }");
+        queue.send_blocking(2).unwrap();
+        assert_eq!(format!("{:?}", queue), "Queue { queue: [1, 2] }");
+        assert_eq!(queue.recv_blocking().unwrap(), 1);
+        assert_eq!(format!("{:?}", queue), "Queue { queue: [2] }");
+        assert_eq!(queue.recv_blocking().unwrap(), 2);
+        assert_eq!(format!("{:?}", queue), "Queue { queue: [] }");
+        queue.send_batch_blocking(vec![1, 2, 3, 4]).unwrap();
+        assert_eq!(format!("{:?}", queue), "Queue { queue: [1, 2, 3, +1 more...] }");
     }
 
     #[tokio::test]

@@ -1,4 +1,4 @@
-use crate::{Transport, TransportError, TransportItemRequirements};
+use crate::{SliceDebug, Transport, TransportError, TransportItemRequirements};
 use std::sync::{Arc, Mutex};
 
 pub struct Publisher<T> {
@@ -11,13 +11,11 @@ impl<T> std::fmt::Debug for Publisher<T> {
             Ok(guard) => f
                 .debug_struct("Publisher")
                 .field("subscribers_count", &guard.len())
+                .field("subscribers", &SliceDebug(&guard))
                 .finish(),
             Err(e) => f
                 .debug_struct("Publisher")
-                .field(
-                    "subscribers",
-                    &format!("<lock poisoned>: {}", e.to_string()),
-                )
+                .field("subscribers", &format!("<LockPoisoned>: {}", e.to_string()))
                 .finish(),
         }
     }
@@ -234,12 +232,23 @@ mod tests {
         let publisher = Publisher::<u8>::new();
         assert_eq!(
             format!("{:?}", publisher),
-            "Publisher { subscribers_count: 0 }"
+            "Publisher { subscribers_count: 0, subscribers: [] }"
         );
         publisher.subscribe(Arc::new(Publisher::<u8>::new()));
         assert_eq!(
             format!("{:?}", publisher),
-            "Publisher { subscribers_count: 1 }"
+            "Publisher { subscribers_count: 1, subscribers: [Publisher { subscribers_count: 0, subscribers: [] }] }"
+        );
+        publisher.subscribe(Arc::new(Publisher::<u8>::new()));
+        publisher.subscribe(Arc::new(Publisher::<u8>::new()));
+        assert_eq!(
+            format!("{:?}", publisher),
+            "Publisher { subscribers_count: 3, subscribers: [Publisher { subscribers_count: 0, subscribers: [] }, Publisher { subscribers_count: 0, subscribers: [] }, Publisher { subscribers_count: 0, subscribers: [] }] }"
+        );
+        publisher.subscribe(Arc::new(Publisher::<u8>::new()));
+        assert_eq!(
+            format!("{:?}", publisher),
+            "Publisher { subscribers_count: 4, subscribers: [Publisher { subscribers_count: 0, subscribers: [] }, Publisher { subscribers_count: 0, subscribers: [] }, Publisher { subscribers_count: 0, subscribers: [] }, +1 more...] }"
         );
     }
 

@@ -1,6 +1,6 @@
 use tokio::sync::Notify;
 
-use crate::{Transport, TransportError, TransportItemRequirements};
+use crate::{SliceDebug, Transport, TransportError, TransportItemRequirements};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 pub struct List<T> {
@@ -91,10 +91,10 @@ impl<T> From<Mutex<Vec<Arc<dyn Transport<T>>>>> for List<T> {
 impl<T> std::fmt::Debug for List<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.transports.lock() {
-            Ok(guard) => f.debug_struct("List").field("transports", &guard).finish(),
+            Ok(guard) => f.debug_struct("List").field("transports", &SliceDebug(&guard)).finish(),
             Err(e) => f
                 .debug_struct("List")
-                .field("transports", &format!("<lock poisoned>: {}", e.to_string()))
+                .field("transports", &format!("<LockPoisoned>: {}", e.to_string()))
                 .finish(),
         }
     }

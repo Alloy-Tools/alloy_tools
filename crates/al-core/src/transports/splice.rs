@@ -12,8 +12,8 @@ impl<F: TransportItemRequirements, T: TransportItemRequirements> std::fmt::Debug
         f.debug_tuple("Splice")
             .field(&self.0)
             .field(&self.1)
-            .field(&"<SpliceFn>")
-            .field(&"<AsyncSpliceFn>")
+            .field(&"SpliceFn")
+            .field(&"AsyncSpliceFn")
             .finish()
     }
 }
@@ -218,8 +218,10 @@ impl<
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("SpliceTransport")
-            .field(&"<SpliceFn>")
-            .field(&"<AsyncSpliceFn>")
+            .field(&"SpliceFn")
+            .field(&"BatchSpliceFn")
+            .field(&"AsyncSpliceFn")
+            .field(&"BatchAsyncSpliceFn")
             .finish()
     }
 }
@@ -326,8 +328,10 @@ impl<
 
 #[cfg(test)]
 mod tests {
+    use tokio::time::sleep;
+
     use crate::{Link, Queue, Splice, Transport};
-    use std::sync::Arc;
+    use std::{sync::Arc, time::Duration};
 
     #[tokio::test]
     async fn debug() {
@@ -337,22 +341,26 @@ mod tests {
             Arc::new(|data| Ok(format!("u8: {:?}", data))),
             Arc::new(|data| async move { Ok(format!("u8: {:?}", data)) }),
         );
+        let producer_queue = splice
+            .producer()
+            .as_any()
+            .downcast_ref::<Link<u8>>()
+            .unwrap()
+            .producer();
         assert_eq!(
             format!("{:?}", splice),
-            "Splice(Link { producer: Queue { queue: [] }, consumer: SpliceTransport(\"<SpliceFn>\", \"<AsyncSpliceFn>\"), link_task: \"<LinkFn>\" }, Queue { queue: [] }, \"<SpliceFn>\", \"<AsyncSpliceFn>\")"
+            "Splice(Link { producer: Queue { queue: [] }, consumer: SpliceTransport(\"SpliceFn\", \"BatchSpliceFn\", \"AsyncSpliceFn\", \"BatchAsyncSpliceFn\"), link_task: \"LinkFn\" }, Queue { queue: [] }, \"SpliceFn\", \"AsyncSpliceFn\")"
         );
         splice.send(1).await.unwrap();
-        println!("Splice:\n{:?}\n\n", splice);
-        println!(
-            "Producer:\n{:?}\n\n",
-            splice
-                .producer()
-                .as_any()
-                .downcast_ref::<Link<u8>>()
-                .unwrap()
-                .producer()
+        assert_eq!(format!("{:?}", producer_queue), "Queue { queue: [1] }");
+        sleep(Duration::from_nanos(1)).await;
+        assert_eq!(format!("{:?}", producer_queue), "Queue { queue: [] }");
+        assert_eq!(
+            format!("{:?}", splice.consumer()),
+            "Queue { queue: [\"u8: 1\"] }"
         );
-        println!("Consumer:\n{:?}\n\n", splice.consumer());
+        assert_eq!(splice.consumer().recv().await.unwrap(), "u8: 1");
+        assert_eq!(format!("{:?}", splice.consumer()), "Queue { queue: [] }");
     }
 
     #[tokio::test]
@@ -384,7 +392,7 @@ mod tests {
         // Send `Command` synchronously
         splice.send_blocking(1).unwrap();
         splice.send_batch_blocking(vec![2, 3]).unwrap();
-        tokio::time::sleep(std::time::Duration::from_nanos(1)).await;
+        sleep(Duration::from_nanos(1)).await;
         // Recv `String` synchronously
         assert_eq!(splice.consumer().recv_blocking().unwrap(), "u8: 1");
         // Try recv `String` synchronously
