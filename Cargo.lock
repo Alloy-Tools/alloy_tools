@@ -41,7 +41,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "al-test-derive"
+name = "al-derive-test"
 version = "0.1.0"
 dependencies = [
  "al-core",

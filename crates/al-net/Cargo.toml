@@ -1,0 +1,8 @@
+[package]
+name = "al-net"
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+edition.workspace = true
+
+[dependencies]
