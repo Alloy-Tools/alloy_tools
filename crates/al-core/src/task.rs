@@ -38,35 +38,36 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
     /// Creates a `Task` with the default `TaskConfig`
     #[with_bounds(F)]
     pub fn infinite(f: F, state: S) -> Self {
-        Self::_infinite(f, TaskMode::Infinite.into(), state)
+        Self::_infinite(f, TaskMode::Infinite, state)
     }
 
     /// Creates a `Task` that runs a fixed number of times, with the default `TaskConfig`
     #[with_bounds(F)]
     pub fn fixed(iterations: usize, f: F, state: S) -> Self {
-        Self::_fixed(f, TaskMode::Fixed(iterations).into(), state)
+        Self::_fixed(f, TaskMode::Fixed(iterations), state)
     }
 
     /// Creates a `Task` that runs for a specific duration, with the default `TaskConfig`
     #[with_bounds(F)]
     pub fn for_duration(duration: std::time::Duration, f: F, state: S) -> Self {
-        Self::_duration(f, TaskMode::Duration(duration).into(), state, Instant::now())
+        Self::_duration(f, TaskMode::Duration(duration), state, Instant::now())
     }
 
     /// Creates a `Task` that runs until a condition is met, with the default `TaskConfig`
     #[with_bounds(F, C)]
     pub fn until_condition(f: F, state: S, condition: C) -> Self {
-        Self::_conditional(f, TaskMode::Conditional.into(), state, condition)
+        Self::_conditional(f, TaskMode::Conditional, state, condition)
     }
 
     /// Creates a `Task` with a specific `TaskConfig`
     #[with_bounds(F, C)]
     pub fn with_config(
         f: F,
-        config: TaskConfig,
+        config: impl Into<TaskConfig>,
         state: S,
         condition: Option<C>,
     ) -> Result<Self, TaskError> {
+        let config = config.into();
         match config.mode() {
             TaskMode::Infinite => Ok(Task::_infinite(f, config, state)),
             TaskMode::Fixed(_) => Ok(Task::_fixed(f, config, state)),
@@ -86,7 +87,9 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
 
     /// Starts a `Task` with a infinite structure, only checking cancelation
     #[with_bounds(F)]
-    fn _infinite(mut f: F, config: TaskConfig, state: S) -> Self {
+    fn _infinite(mut f: F, config: impl Into<TaskConfig>, state: S) -> Self {
+        let config = config.into();
+
         let cancelled = Arc::new(RwLock::new(false));
         let cancelled_clone = cancelled.clone();
 
@@ -147,7 +150,9 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
 
     /// Starts a `Task` with a fixed structure, checking cancelation along with iterations
     #[with_bounds(F)]
-    fn _fixed(mut f: F, config: TaskConfig, state: S) -> Self {
+    fn _fixed(mut f: F, config: impl Into<TaskConfig>, state: S) -> Self {
+        let config = config.into();
+
         let cancelled = Arc::new(RwLock::new(false));
         let cancelled_clone = cancelled.clone();
 
@@ -212,7 +217,9 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
 
     /// Starts a `Task` with a conditional structure, checking cancelation along with conditions
     #[with_bounds(F, C)]
-    fn _conditional(mut f: F, config: TaskConfig, state: S, mut condition: C) -> Self {
+    fn _conditional(mut f: F, config: impl Into<TaskConfig>, state: S, mut condition: C) -> Self {
+        let config = config.into();
+
         let cancelled = Arc::new(RwLock::new(false));
         let cancelled_clone = cancelled.clone();
 
@@ -277,7 +284,9 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
 
     /// Starts a `Task` with a duration structure, checking cancelation along with elapsed time
     #[with_bounds(F)]
-    fn _duration(mut f: F, config: TaskConfig, state: S, start_time: Instant) -> Self {
+    fn _duration(mut f: F, config: impl Into<TaskConfig>, state: S, start_time: Instant) -> Self {
+        let config = config.into();
+
         let cancelled = Arc::new(RwLock::new(false));
         let cancelled_clone = cancelled.clone();
 
@@ -450,7 +459,7 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
 
 #[cfg(all(test, feature = "test-tasks"))]
 mod tests {
-    use crate::{BaseTaskState, Task, TaskMode, AsTaskState};
+    use crate::{AsTaskState, BaseTaskState, Task, TaskMode};
     use std::time::Duration;
     use tokio::time::{sleep, Instant};
 
@@ -482,7 +491,7 @@ mod tests {
                     // Get the ith element of the Vec stored in the `TaskState`
                     let x = state.read().await.into_inner()[i];
                     assert!((i + 1) == x);
-			        // Set the task last_result as the ith element of the Vec
+                    // Set the task last_result as the ith element of the Vec
                     Ok::<_, ()>(x)
                 }
             },
@@ -577,7 +586,7 @@ mod tests {
         let duration = 5;
         let mut task = Task::with_config(
             |i, _| async move { Ok::<_, ()>(i) },
-            TaskMode::Infinite.into(),
+            TaskMode::Infinite,
             BaseTaskState::new(),
             Task::NO_CONDITION,
         )
@@ -599,7 +608,7 @@ mod tests {
                     Ok::<_, ()>(x)
                 }
             },
-            TaskMode::Fixed(list.len()).into(),
+            TaskMode::Fixed(list.len()),
             list.clone().as_task_state(),
             Task::NO_CONDITION
         )
@@ -623,7 +632,7 @@ mod tests {
                     Ok::<_, ()>(i)
                 }
             },
-            TaskMode::Conditional.into(),
+            TaskMode::Conditional,
             cond_state.clone(),
             Task::some_condition(&cond_state, |state| {
                 let state = state.clone();
@@ -645,7 +654,7 @@ mod tests {
                 expected_end,
                 Task::with_config(
                     |_, _| async move { Ok::<_, ()>(Instant::now()) },
-                    TaskMode::Duration(duration).into(),
+                    TaskMode::Duration(duration),
                     BaseTaskState::new(),
                     Task::NO_CONDITION,
                 )

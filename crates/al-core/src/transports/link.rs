@@ -2,7 +2,6 @@ use crate::{
     AsTaskState, ExtendedTaskState, Task, Transport, TransportError, TransportItemRequirements,
 };
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 type LinkTask<T> = Arc<
     Task<
@@ -44,26 +43,15 @@ impl<T: TransportItemRequirements> Link<T> {
             producer: producer.clone(),
             consumer: consumer.clone(),
             link_task: Arc::new(Task::infinite(
-                {
-                    |_,
-                     state: &Arc<
-                        RwLock<
-                            ExtendedTaskState<
-                                (),
-                                TransportError,
-                                (Arc<dyn Transport<T>>, Arc<dyn Transport<T>>),
-                            >,
-                        >,
-                    >| {
-                        let state = state.clone();
-                        async move {
-                            let (producer, consumer) = state.read().await.inner_clone();
-                            // This tight inner loop ignores errors and never ends, meaning the above clones only happen on the first iteration
-                            // This means any `Task` a `Link` starts will only stop after `task.abort()`
-                            loop {
-                                if let Ok(data) = producer.recv().await {
-                                    let _ = consumer.send(data).await;
-                                }
+                |_, state| {
+                    let state = state.clone();
+                    async move {
+                        let (producer, consumer) = state.read().await.inner_clone();
+                        // This tight inner loop ignores errors and never ends, meaning the above clones only happen on the first iteration
+                        // This means any `Task` a `Link` starts will only stop after `task.abort()`
+                        loop {
+                            if let Ok(data) = producer.recv().await {
+                                let _ = consumer.send(data).await;
                             }
                         }
                     }

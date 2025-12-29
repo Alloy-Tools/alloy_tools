@@ -1,8 +1,7 @@
 use crate::{TaskStateRequirements, TaskTypes};
 
 /// `TaskState` contains all required functions hooks and should hold all values a `Task` tracks between iterations
-pub trait TaskState<T: TaskTypes = (), E: TaskTypes = ()>: TaskStateRequirements
-{
+pub trait TaskState<T: TaskTypes = (), E: TaskTypes = ()>: TaskStateRequirements {
     fn get_iterations(&self) -> usize;
     fn set_iteration(&mut self, iterations: usize);
 
@@ -73,6 +72,12 @@ pub trait AsTaskState<T: TaskTypes, E: TaskTypes>: TaskStateRequirements {
 impl<T: TaskTypes, E: TaskTypes, S: TaskStateRequirements> AsTaskState<T, E> for S {
     fn as_task_state(self) -> ExtendedTaskState<T, E, Self> {
         ExtendedTaskState::new(self)
+    }
+}
+
+impl<T: TaskTypes, E: TaskTypes, S: TaskStateRequirements> From<S> for ExtendedTaskState<T, E, S> {
+    fn from(value: S) -> Self {
+        value.as_task_state()
     }
 }
 
