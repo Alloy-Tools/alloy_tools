@@ -16,7 +16,7 @@ impl<T: std::fmt::Debug> std::fmt::Debug for Queue<T> {
         match self.queue.lock() {
             Ok(mut queue) => f
                 .debug_struct("Queue")
-                .field("queue", &SliceDebug(queue.make_contiguous()))
+                .field("queue", &SliceDebug::with_len(3, queue.make_contiguous()))
                 .finish(),
             Err(e) => f
                 .debug_struct("Queue")
@@ -217,7 +217,10 @@ mod tests {
         assert_eq!(queue.recv_blocking().unwrap(), 2);
         assert_eq!(format!("{:?}", queue), "Queue { queue: [] }");
         queue.send_batch_blocking(vec![1, 2, 3, 4]).unwrap();
-        assert_eq!(format!("{:?}", queue), "Queue { queue: [1, 2, 3, +1 more...] }");
+        assert_eq!(
+            format!("{:?}", queue),
+            "Queue { queue: [1, 2, 3, +1 more...] }"
+        );
     }
 
     #[tokio::test]

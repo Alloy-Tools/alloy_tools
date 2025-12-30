@@ -16,6 +16,8 @@ mod transport;
 #[cfg(feature = "transport")]
 mod transports;
 
+use std::marker::PhantomData;
+
 #[cfg(feature = "command")]
 pub use command::Command;
 #[cfg(all(feature = "event", feature = "serde"))]
@@ -60,20 +62,23 @@ pub use {serde_utils::registry::Registry, serde_utils::registry::SharedRegistry}
 #[cfg(all(feature = "transport", feature = "task"))]
 pub use {transports::buffered::Buffered, transports::link::Link, transports::splice::Splice};
 
-pub struct DisplayString<'a>(&'a str);
-impl<'a> std::fmt::Debug for DisplayString<'a> {
+/// Helper struct to debug strings without outer " displayed
+pub struct DisplayString<S: AsRef<str>>(S);
+impl<S: AsRef<str>> std::fmt::Debug for DisplayString<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        write!(f, "{}", self.0.as_ref())
     }
 }
 
-pub struct SliceDebug<'a, T>(pub &'a [T]);
-impl<'a, T: std::fmt::Debug> std::fmt::Debug for SliceDebug<'a, T> {
+/// Helper struct to concisely debug anything that can be coerced to a &[T] slice with N elements shown
+struct SliceDebug<'a, T: 'a, V: AsRef<[T]>>(V, usize, PhantomData<&'a T>);
+impl<'a, T: 'a + std::fmt::Debug, V: AsRef<[T]>> std::fmt::Debug for SliceDebug<'a, T, V> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let len = self.0.len();
-        let display_len = 3.min(len);
+        let slice = self.0.as_ref();
+        let len = slice.len();
+        let display_len = self.1.min(len);
         let mut debug_list = f.debug_list();
-        for item in &self.0[0..display_len] {
+        for item in &slice[0..display_len] {
             debug_list.entry(item);
         }
         if len > display_len {
@@ -82,11 +87,23 @@ impl<'a, T: std::fmt::Debug> std::fmt::Debug for SliceDebug<'a, T> {
         debug_list.finish()
     }
 }
+impl<'a, T: 'a, V: AsRef<[T]>> SliceDebug<'a, T, V> {
+    const DEFAULT_MAX: usize = 3;
+
+    pub fn new(slice: V) -> Self {
+        Self(slice, Self::DEFAULT_MAX, PhantomData)
+    }
+
+    pub fn with_len(len: usize, slice: V) -> Self {
+        Self(slice, len, PhantomData)
+    }
+}
 
 #[cfg(test)]
 mod tests {
     #[cfg(all(feature = "command", feature = "event"))]
     use crate::Command;
+    use crate::SliceDebug;
     #[cfg(feature = "event")]
     use crate::{event, Event, EventMarker};
     #[cfg(feature = "event")]
@@ -132,6 +149,13 @@ mod tests {
     /// Event with generic for testing
     #[event]
     struct TestEventGeneric<T>(T);
+
+    #[test]
+    fn slice_debug() {
+        assert_eq!(format!("{:?}", SliceDebug::new([1, 2, 3, 4])), "[1, 2, 3, +1 more...]");
+        assert_eq!(format!("{:?}", SliceDebug::with_len(4, [1, 2, 3, 4])), "[1, 2, 3, 4]");
+        assert_eq!(format!("{:?}", SliceDebug::with_len(4, [1, 2, 3, 4, 5])), "[1, 2, 3, 4, +1 more...]");
+    }
 
     #[cfg(feature = "event")]
     #[test]

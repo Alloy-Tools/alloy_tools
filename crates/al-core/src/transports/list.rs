@@ -91,7 +91,7 @@ impl<T> From<Mutex<Vec<Arc<dyn Transport<T>>>>> for List<T> {
 impl<T> std::fmt::Debug for List<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.transports.lock() {
-            Ok(guard) => f.debug_struct("List").field("transports", &SliceDebug(&guard)).finish(),
+            Ok(guard) => f.debug_struct("List").field("transports", &SliceDebug::new(&*guard)).finish(),
             Err(e) => f
                 .debug_struct("List")
                 .field("transports", &format!("<LockPoisoned>: {}", e.to_string()))

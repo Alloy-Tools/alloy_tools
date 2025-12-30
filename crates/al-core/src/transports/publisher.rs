@@ -11,7 +11,7 @@ impl<T> std::fmt::Debug for Publisher<T> {
             Ok(guard) => f
                 .debug_struct("Publisher")
                 .field("subscribers_count", &guard.len())
-                .field("subscribers", &SliceDebug(&guard))
+                .field("subscribers", &SliceDebug::new(&*guard))
                 .finish(),
             Err(e) => f
                 .debug_struct("Publisher")
