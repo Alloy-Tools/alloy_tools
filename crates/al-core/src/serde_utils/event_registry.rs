@@ -48,15 +48,15 @@ impl EventRegistry {
     }
 
     /// Returns a deserializer function for the given event type name if registered, None if not registered, or an error if the lock is poisoned.
-    pub fn get_deserializer(
+    pub fn get_deserializer<T: AsRef<str>>(
         &self,
-        type_name: &str,
+        type_name: T,
     ) -> Result<Option<EventDeserializer>, Box<dyn std::error::Error + Send + Sync>> {
         Ok(self
             .deserializers
             .read()
             .map_err(|e| format!("Event registry read lock poisoned: {e}"))?
-            .get(type_name)
+            .get(type_name.as_ref())
             .cloned())
     }
 }
