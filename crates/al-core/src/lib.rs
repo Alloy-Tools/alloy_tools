@@ -15,7 +15,6 @@ mod task_utils;
 mod transport;
 #[cfg(feature = "transport")]
 mod transports;
-
 use std::marker::PhantomData;
 
 #[cfg(feature = "command")]
@@ -42,6 +41,14 @@ pub use {
     event::downcast as downcast_event, event::type_with_generics, event::Event,
     markers::EventMarker, markers::EventRequirements, markers::SerdeFeature,
 };
+#[cfg(feature = "transport")]
+pub use {
+    markers::NoOp, markers::TransportItemRequirements, markers::TransportRequirements,
+    transport::Transport, transport::TransportError, transports::list::List,
+    transports::publisher::Publisher, transports::queue::Queue,
+    transports::transform::ApplyTransform, transports::transform::Transform,
+    transports::transform::TransformFn,
+};
 #[cfg(feature = "task")]
 pub use {
     markers::TaskStateRequirements, markers::TaskTypes, task::Task,
@@ -49,13 +56,6 @@ pub use {
     task_utils::task_elements::TaskMode, task_utils::task_state::AsTaskState,
     task_utils::task_state::BaseTaskState, task_utils::task_state::ExtendedTaskState,
     task_utils::task_state::TaskState,
-};
-#[cfg(feature = "transport")]
-pub use {
-    markers::TransportItemRequirements, markers::TransportRequirements, transport::Transport,
-    transport::TransportError, transports::list::List, transports::publisher::Publisher,
-    transports::queue::Queue, transports::transform::NoOp, transports::transform::Transform,
-    transports::transform::TransformFn,
 };
 #[cfg(feature = "serde")]
 pub use {serde_utils::registry::Registry, serde_utils::registry::SharedRegistry};
@@ -152,9 +152,18 @@ mod tests {
 
     #[test]
     fn slice_debug() {
-        assert_eq!(format!("{:?}", SliceDebug::new([1, 2, 3, 4])), "[1, 2, 3, +1 more...]");
-        assert_eq!(format!("{:?}", SliceDebug::with_len(4, [1, 2, 3, 4])), "[1, 2, 3, 4]");
-        assert_eq!(format!("{:?}", SliceDebug::with_len(4, [1, 2, 3, 4, 5])), "[1, 2, 3, 4, +1 more...]");
+        assert_eq!(
+            format!("{:?}", SliceDebug::new([1, 2, 3, 4])),
+            "[1, 2, 3, +1 more...]"
+        );
+        assert_eq!(
+            format!("{:?}", SliceDebug::with_len(4, [1, 2, 3, 4])),
+            "[1, 2, 3, 4]"
+        );
+        assert_eq!(
+            format!("{:?}", SliceDebug::with_len(4, [1, 2, 3, 4, 5])),
+            "[1, 2, 3, 4, +1 more...]"
+        );
     }
 
     #[cfg(feature = "event")]

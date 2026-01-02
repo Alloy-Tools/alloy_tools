@@ -80,6 +80,10 @@ pub trait TransportItemRequirements: TransportRequirements + Clone {}
 #[cfg(feature = "transport")]
 impl<T: TransportRequirements + Clone> TransportItemRequirements for T {}
 
+/// Zero sized type used for type state pattern, transform transports specifically
+#[derive(Debug, Clone)]
+pub struct NoOp;
+
 #[cfg(feature = "task")]
 /// `TaskTypes` trait represents the required traits for `Task`s generic types
 pub trait TaskTypes: Send + Sync + Clone + 'static {}

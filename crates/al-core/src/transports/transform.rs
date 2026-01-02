@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{Transport, TransportItemRequirements, TransportRequirements};
+use crate::{NoOp, Transport, TransportItemRequirements, TransportRequirements};
 
 pub trait TransformFunction<T>: Fn(T) -> T + Send + Sync {}
 impl<T: TransportItemRequirements, F: Fn(T) -> T + Send + Sync> TransformFunction<T> for F {}
@@ -12,72 +12,146 @@ pub trait ApplyTransform<T> {
     }
 }
 
-#[derive(Debug)]
-pub struct NoOp;
+/// Allow NoOp to be used as `ApplyTransform<T>` type state
+impl<T> crate::ApplyTransform<T> for NoOp {}
+impl<T> From<NoOp> for TransformFn<T> {
+    fn from(value: NoOp) -> Self {
+        TransformFn::NoOp(value)
+    }
+}
 
-impl<T> ApplyTransform<T> for NoOp {}
+trait TransformStruct<T>: ApplyTransform<T> + TransportRequirements {}
+impl<T: ApplyTransform<T> + TransportRequirements> TransformStruct<T> for T {}
 
-pub struct TransformFn<T>(Arc<dyn TransformFunction<T>>);
+#[derive(Clone)]
+pub enum TransformFn<T> {
+    NoOp(NoOp),
+    Fn(Arc<dyn TransformFunction<T>>),
+    Struct(Arc<dyn TransformStruct<T>>),
+}
+
+impl<T, S> From<S> for TransformFn<T>
+where
+    S: TransformStruct<T> + 'static,
+{
+    fn from(value: S) -> Self {
+        TransformFn::Struct(Arc::new(value))
+    }
+}
 
 impl<T, F> From<F> for TransformFn<T>
 where
     F: TransformFunction<T> + 'static,
 {
     fn from(func: F) -> Self {
-        TransformFn(Arc::new(func))
+        TransformFn::Fn(Arc::new(func))
     }
 }
 
 impl<T> From<Arc<dyn TransformFunction<T>>> for TransformFn<T> {
     fn from(func: Arc<dyn TransformFunction<T>>) -> Self {
-        TransformFn(func)
-    }
-}
-
-impl<T> ApplyTransform<T> for TransformFn<T> {
-    fn apply(&self, data: T) -> T {
-        (self.0)(data)
+        TransformFn::Fn(func)
     }
 }
 
 impl<T> std::fmt::Debug for TransformFn<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Debug as a unit struct `TransformFn` since we can't print the inner function
-        f.debug_struct("TransformFn").finish()
-    }
-}
-
-#[derive(Debug)]
-pub struct Transform<T, Send: ApplyTransform<T> = NoOp, Recv: ApplyTransform<T> = NoOp> {
-    transport: Arc<dyn Transport<T>>,
-    transform_send: Send,
-    transform_recv: Recv,
-}
-
-impl<
-        T,
-        S: ApplyTransform<T> + TransportRequirements,
-        R: ApplyTransform<T> + TransportRequirements,
-    > Transform<T, S, R>
-{
-    pub fn new(transport: Arc<dyn Transport<T>>, transform_send: S, transform_recv: R) -> Self {
-        Self {
-            transport,
-            transform_send,
-            transform_recv,
+        match self {
+            TransformFn::NoOp(_) => f.debug_struct("NoOp").finish(),
+            // Debug as a unit struct `TransformFn` since we can't print the inner function
+            TransformFn::Fn(_) | TransformFn::Struct(_) => f.debug_struct("TransformFn").finish(),
         }
     }
 }
 
-impl<
-        T: TransportItemRequirements,
-        S: ApplyTransform<T> + TransportRequirements,
-        R: ApplyTransform<T> + TransportRequirements,
-    > Transport<T> for Transform<T, S, R>
-{
+/*0impl<T> ApplyTransform<T> for TransformFn<T> {
+    fn apply(&self, data: T) -> T {
+        match self {
+            TransformFn::NoOp(no_op) => no_op.apply(data),
+            TransformFn::Fn(func) => func(data),
+            TransformFn::Struct(s) => s.apply(data),
+        }
+    }
+}*/
+
+impl<T: TransportItemRequirements> From<Transform<T>> for Arc<dyn Transport<T>> {
+    fn from(value: Transform<T>) -> Self {
+        Arc::new(value)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TransformBuilder<T: TransportItemRequirements> {
+    transport: Arc<dyn Transport<T>>,
+    transform_send: TransformFn<T>,
+    transform_recv: TransformFn<T>,
+}
+
+impl<T: TransportItemRequirements> TransformBuilder<T> {
+    pub fn new(
+        transport: Arc<dyn Transport<T>>,
+        send: impl Into<TransformFn<T>>,
+        recv: impl Into<TransformFn<T>>,
+    ) -> Self {
+        TransformBuilder {
+            transport,
+            transform_send: send.into(),
+            transform_recv: recv.into(),
+        }
+    }
+
+    pub fn with_send(self, send: impl Into<TransformFn<T>>) -> TransformBuilder<T> {
+        TransformBuilder::new(self.transport, send.into(), self.transform_recv)
+    }
+
+    pub fn with_recv(self, recv: impl Into<TransformFn<T>>) -> TransformBuilder<T> {
+        TransformBuilder::new(self.transport, self.transform_send, recv.into())
+    }
+
+    pub fn build(self) -> Transform<T> {
+        Transform {
+            transport: self.transport,
+            transform_send: self.transform_send,
+            transform_recv: self.transform_recv,
+        }
+    }
+}
+
+impl<T: TransportItemRequirements> TransformBuilder<T> {
+    pub fn no_op(transport: Arc<dyn Transport<T>>) -> Self {
+        Self::new(transport, NoOp, NoOp)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Transform<T: TransportItemRequirements> {
+    transport: Arc<dyn Transport<T>>,
+    transform_send: TransformFn<T>,
+    transform_recv: TransformFn<T>,
+}
+
+impl<T: TransportItemRequirements> Transform<T> {
+    pub fn new(transport: Arc<dyn Transport<T>>) -> TransformBuilder<T> {
+        TransformBuilder::no_op(transport)
+    }
+
+    pub fn from(
+        transport: Arc<dyn Transport<T>>,
+        send: impl Into<TransformFn<T>>,
+        recv: impl Into<TransformFn<T>>,
+    ) -> Transform<T> {
+        Self::new(transport).with_send(send).with_recv(recv).build()
+    }
+}
+
+impl<T: TransportItemRequirements> Transport<T> for Transform<T> {
     fn send_blocking(&self, data: T) -> Result<(), crate::TransportError> {
         self.transport
-            .send_blocking(self.transform_send.apply(data))
+            .send_blocking(match &self.transform_send {
+                TransformFn::NoOp(no_op) => no_op.apply(data),
+                TransformFn::Fn(func) => func(data),
+                TransformFn::Struct(s) => s.apply(data),
+            })
     }
 
     fn send_batch_blocking(&self, data: Vec<T>) -> Result<(), crate::TransportError> {
@@ -196,14 +270,13 @@ impl<
 
 #[cfg(test)]
 mod tests {
-    use std::vec;
+    use std::{sync::Arc, vec};
 
     #[cfg(feature = "event")]
     use crate::event;
 
     use crate::{
-        transports::transform::{Transform, TransformFn},
-        NoOp, Queue, Transport,
+        transports::transform::Transform, ApplyTransform, NoOp, Queue, TransformFn, Transport,
     };
 
     #[cfg(feature = "event")]
@@ -213,18 +286,16 @@ mod tests {
     #[cfg(feature = "event")]
     #[test]
     fn with_event() {
-        let transform = Transform::new(
-            Queue::new().into(),
-            TransformFn::from(|mut x: AddOne| {
+        let transform = Transform::<_>::new(Queue::new().into())
+            .with_send(|mut x: AddOne| {
                 x.0 += 1;
                 x
-            }),
-            TransformFn::from(|mut x: AddOne| {
+            })
+            .with_recv(|mut x: AddOne| {
                 x.0 += 1;
                 x
-            }),
-        );
-
+            })
+            .build();
         let x = 1u8;
         transform.send_blocking(AddOne(x)).unwrap();
         let y = transform.recv_blocking().unwrap();
@@ -232,17 +303,39 @@ mod tests {
     }
 
     #[test]
+    fn with_struct() {
+        struct TestStruct;
+        impl ApplyTransform<u8> for TestStruct {
+            fn apply(&self, data: u8) -> u8 {
+                // Add one but don't overflow
+                data.saturating_add(1)
+            }
+        }
+        impl From<TestStruct> for TransformFn<u8> {
+            fn from(value: TestStruct) -> Self {
+                TransformFn::Struct(Arc::new(value.into()))
+            }
+        }
+
+        let transform = Transform::<u8>::new(Queue::new().into())
+            .with_send(TestStruct)
+            .build();
+
+        assert_eq!(format!("{:?}", transform), "Transform { transport: Queue { queue: [] }, transform_send: TransformFn, transform_recv: NoOp }")
+    }
+
+    #[test]
     fn transform() {
-        let transform = Transform::new(
+        let transform = Transform::<_>::from(
             Queue::new().into(),
-            TransformFn::from(|mut x: u8| {
+            |mut x| {
                 x += 1;
                 x
-            }),
-            TransformFn::from(|mut x: u8| {
+            },
+            |mut x| {
                 x += 1;
                 x
-            }),
+            },
         );
 
         let x = 1u8;
@@ -254,32 +347,40 @@ mod tests {
     #[tokio::test]
     async fn debug() {
         assert_eq!(
-            format!("{:?}", Transform::new(
+            format!("{:?}", Transform::<u8>::from(
                 Queue::new().into(),
                 NoOp,
-                TransformFn::from(|mut x: u8| {
+                |mut x| {
                     x += 1;
                     x
-                })
+                }
             )),
             "Transform { transport: Queue { queue: [] }, transform_send: NoOp, transform_recv: TransformFn }"
-        )
+        );
+        assert_eq!(
+            format!("{:?}", Transform::<u8>::new(Queue::new().into())
+            .with_recv(|mut x| {
+                    x += 1;
+                    x
+                }).build()),
+            "Transform { transport: Queue { queue: [] }, transform_send: NoOp, transform_recv: TransformFn }"
+        );
     }
     #[tokio::test]
     async fn send_recv() {
-        let transform = Transform::new(
+        let transform = Transform::<_>::from(
             Queue::new().into(),
-            TransformFn::from(|mut x: u8| {
+            |mut x| {
                 x += 1;
                 x
-            }),
-            TransformFn::from(|mut x: u8| {
+            },
+            |mut x| {
                 x += 1;
                 x
-            }),
+            },
         );
 
-        let noop_transform = Transform::new(Queue::new().into(), NoOp, NoOp);
+        let noop_transform = Transform::<_>::from(Queue::new().into(), NoOp, NoOp);
 
         let x = 1u8;
         // Send `AddOne` asynchronously
