@@ -13,8 +13,7 @@ impl<T: TransportItemRequirements> std::fmt::Debug for Buffered<T> {
 }
 
 impl<T: TransportItemRequirements> Buffered<T> {
-    pub fn new(transport: impl Into<Arc<dyn Transport<T>>>) -> Self {
-        let transport = transport.into();
+    pub fn new(transport: Arc<dyn Transport<T>>) -> Self {
         Self(
             Link::new(crate::Queue::new().into(), transport.clone()),
             transport,
@@ -131,14 +130,14 @@ mod tests {
     #[tokio::test]
     async fn debug() {
         assert_eq!(
-            format!("{:?}", Buffered::new(Queue::<String>::new())),
+            format!("{:?}", Buffered::new(Queue::<String>::new().into())),
             "Buffered(Queue { queue: [] }, Queue { queue: [] })"
         );
     }
 
     #[tokio::test]
     async fn send_recv() {
-        let buffered = Buffered::new(Queue::<u8>::new());
+        let buffered = Buffered::new(Queue::<u8>::new().into());
         buffered.send(1).await.unwrap();
         buffered.send_batch(vec![2, 3]).await.unwrap();
         // Recv `String` asynchronously

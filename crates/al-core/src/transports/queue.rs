@@ -34,8 +34,8 @@ impl<T: TransportItemRequirements> From<Queue<T>> for std::sync::Arc<dyn Transpo
 
 impl<T> Queue<T> {
     pub fn new() -> Self {
-        Queue::<T> {
-            queue: Mutex::new(VecDeque::<T>::new()),
+        Self {
+            queue: Mutex::new(VecDeque::new()),
             notifier: tokio::sync::Notify::new(),
             condvar: Condvar::new(),
         }
