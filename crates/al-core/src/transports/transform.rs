@@ -2,44 +2,57 @@ use std::sync::Arc;
 
 use crate::{NoOp, Transport, TransportItemRequirements, TransportRequirements};
 
-pub trait TransformFunction<T>: Fn(T) -> T + Send + Sync {}
-impl<T: TransportItemRequirements, F: Fn(T) -> T + Send + Sync> TransformFunction<T> for F {}
-
-pub trait ApplyTransform<T> {
+/// Trait for applying a transformation to data passing through a `Transform` transport
+pub trait ApplyTransform<T: TransportItemRequirements> {
     #[inline(always)]
     fn apply(&self, data: T) -> T {
         data
     }
 }
 
-/// Allow NoOp to be used as `ApplyTransform<T>` type state
-impl<T> crate::ApplyTransform<T> for NoOp {}
-impl<T> From<NoOp> for TransformFn<T> {
-    fn from(value: NoOp) -> Self {
-        TransformFn::NoOp(value)
+/// Allow `NoOp` to be used as `ApplyTransform<T>`
+impl<T: TransportItemRequirements> crate::ApplyTransform<T> for NoOp {}
+impl<T: TransportItemRequirements> From<NoOp> for TransformFn<T> {
+    fn from(_: NoOp) -> Self {
+        TransformFn::NoOp
     }
 }
 
-trait TransformStruct<T>: ApplyTransform<T> + TransportRequirements {}
-impl<T: ApplyTransform<T> + TransportRequirements> TransformStruct<T> for T {}
+/// Trait for a function that can be used to transform data passing through a `Transform` transport
+pub trait TransformFunction<T: TransportItemRequirements>: Fn(T) -> T + Send + Sync {}
+impl<T: TransportItemRequirements, F: Fn(T) -> T + Send + Sync> TransformFunction<T> for F {}
 
+/// Trait for a struct that can be used to transform data passing through a `Transform` transport
+pub trait TransformStruct<T: TransportItemRequirements>:
+    ApplyTransform<T> + TransportRequirements
+{
+}
+impl<T: TransportItemRequirements, S: ApplyTransform<T> + TransportRequirements> TransformStruct<T>
+    for S
+{
+}
+
+/// Enum to hold either `NoOp`, a function, or a struct to transform data passing through a `Transform` transport
 #[derive(Clone)]
-pub enum TransformFn<T> {
-    NoOp(NoOp),
+pub enum TransformFn<T: TransportItemRequirements> {
+    NoOp,
     Fn(Arc<dyn TransformFunction<T>>),
     Struct(Arc<dyn TransformStruct<T>>),
 }
 
-impl<T, S> From<S> for TransformFn<T>
-where
-    S: TransformStruct<T> + 'static,
-{
-    fn from(value: S) -> Self {
-        TransformFn::Struct(Arc::new(value))
+/// Impl `ApplyTransform` for `TransformFn` to allow `.apply()` rather than pattern matching in any `Transform`
+impl<T: TransportItemRequirements> ApplyTransform<T> for TransformFn<T> {
+    fn apply(&self, data: T) -> T {
+        match self {
+            TransformFn::NoOp => NoOp.apply(data),
+            TransformFn::Fn(func) => func(data),
+            TransformFn::Struct(s) => s.apply(data),
+        }
     }
 }
 
-impl<T, F> From<F> for TransformFn<T>
+/// Impl block to allow functions to be converted to a `TransformFn` via `Into`
+impl<T: TransportItemRequirements, F> From<F> for TransformFn<T>
 where
     F: TransformFunction<T> + 'static,
 {
@@ -48,38 +61,25 @@ where
     }
 }
 
-impl<T> From<Arc<dyn TransformFunction<T>>> for TransformFn<T> {
+/// Impl block to allow functions already wrapped in an `Arc` to be converted to a `TransformFn` via `Into`
+impl<T: TransportItemRequirements> From<Arc<dyn TransformFunction<T>>> for TransformFn<T> {
     fn from(func: Arc<dyn TransformFunction<T>>) -> Self {
         TransformFn::Fn(func)
     }
 }
 
-impl<T> std::fmt::Debug for TransformFn<T> {
+/// Impl `Debug` for `TransformFn` to allow it to be a `Transport` type
+impl<T: TransportItemRequirements> std::fmt::Debug for TransformFn<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TransformFn::NoOp(_) => f.debug_struct("NoOp").finish(),
+            TransformFn::NoOp => f.debug_struct("NoOp").finish(),
             // Debug as a unit struct `TransformFn` since we can't print the inner function
             TransformFn::Fn(_) | TransformFn::Struct(_) => f.debug_struct("TransformFn").finish(),
         }
     }
 }
 
-/*0impl<T> ApplyTransform<T> for TransformFn<T> {
-    fn apply(&self, data: T) -> T {
-        match self {
-            TransformFn::NoOp(no_op) => no_op.apply(data),
-            TransformFn::Fn(func) => func(data),
-            TransformFn::Struct(s) => s.apply(data),
-        }
-    }
-}*/
-
-impl<T: TransportItemRequirements> From<Transform<T>> for Arc<dyn Transport<T>> {
-    fn from(value: Transform<T>) -> Self {
-        Arc::new(value)
-    }
-}
-
+/// Builder pattern for `Transform` types, allowing calls to be chained together
 #[derive(Debug, Clone)]
 pub struct TransformBuilder<T: TransportItemRequirements> {
     transport: Arc<dyn Transport<T>>,
@@ -88,6 +88,7 @@ pub struct TransformBuilder<T: TransportItemRequirements> {
 }
 
 impl<T: TransportItemRequirements> TransformBuilder<T> {
+    /// Returns a new `TransformBuilder` with the passed `send` and `recv` functionality
     pub fn new(
         transport: Arc<dyn Transport<T>>,
         send: impl Into<TransformFn<T>>,
@@ -100,14 +101,22 @@ impl<T: TransportItemRequirements> TransformBuilder<T> {
         }
     }
 
+    /// Helper function to return a new `TransformBuilder` with `NoOp` for both `send` and `recv`
+    pub fn no_op(transport: Arc<dyn Transport<T>>) -> Self {
+        Self::new(transport, NoOp, NoOp)
+    }
+
+    /// Set the `TransformBuilder` `send` to the passed functionality
     pub fn with_send(self, send: impl Into<TransformFn<T>>) -> TransformBuilder<T> {
         TransformBuilder::new(self.transport, send.into(), self.transform_recv)
     }
 
+    /// Set the `TransformBuilder` `recv` to the passed functionality
     pub fn with_recv(self, recv: impl Into<TransformFn<T>>) -> TransformBuilder<T> {
         TransformBuilder::new(self.transport, self.transform_send, recv.into())
     }
 
+    /// Build the `Transform` from the `TransformBuilder`
     pub fn build(self) -> Transform<T> {
         Transform {
             transport: self.transport,
@@ -117,12 +126,7 @@ impl<T: TransportItemRequirements> TransformBuilder<T> {
     }
 }
 
-impl<T: TransportItemRequirements> TransformBuilder<T> {
-    pub fn no_op(transport: Arc<dyn Transport<T>>) -> Self {
-        Self::new(transport, NoOp, NoOp)
-    }
-}
-
+/// A `Transform` wraps a `Transport` and applies transformations to the data being sent and received.
 #[derive(Debug, Clone)]
 pub struct Transform<T: TransportItemRequirements> {
     transport: Arc<dyn Transport<T>>,
@@ -131,10 +135,12 @@ pub struct Transform<T: TransportItemRequirements> {
 }
 
 impl<T: TransportItemRequirements> Transform<T> {
+    /// Returns a new `TransformBuilder` to allow `Transform` configuration
     pub fn new(transport: Arc<dyn Transport<T>>) -> TransformBuilder<T> {
         TransformBuilder::no_op(transport)
     }
 
+    /// Returns a new `Transform` with the passed `send` and `recv` configuration
     pub fn from(
         transport: Arc<dyn Transport<T>>,
         send: impl Into<TransformFn<T>>,
@@ -147,11 +153,7 @@ impl<T: TransportItemRequirements> Transform<T> {
 impl<T: TransportItemRequirements> Transport<T> for Transform<T> {
     fn send_blocking(&self, data: T) -> Result<(), crate::TransportError> {
         self.transport
-            .send_blocking(match &self.transform_send {
-                TransformFn::NoOp(no_op) => no_op.apply(data),
-                TransformFn::Fn(func) => func(data),
-                TransformFn::Struct(s) => s.apply(data),
-            })
+            .send_blocking(self.transform_send.apply(data))
     }
 
     fn send_batch_blocking(&self, data: Vec<T>) -> Result<(), crate::TransportError> {
@@ -268,6 +270,13 @@ impl<T: TransportItemRequirements> Transport<T> for Transform<T> {
     }
 }
 
+/// Impl block to allow `Transform` to be converted to `Transport` via `Into`
+impl<T: TransportItemRequirements> From<Transform<T>> for Arc<dyn Transport<T>> {
+    fn from(value: Transform<T>) -> Self {
+        Arc::new(value)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{sync::Arc, vec};
@@ -304,6 +313,7 @@ mod tests {
 
     #[test]
     fn with_struct() {
+        #[derive(Debug)]
         struct TestStruct;
         impl ApplyTransform<u8> for TestStruct {
             fn apply(&self, data: u8) -> u8 {
@@ -313,7 +323,7 @@ mod tests {
         }
         impl From<TestStruct> for TransformFn<u8> {
             fn from(value: TestStruct) -> Self {
-                TransformFn::Struct(Arc::new(value.into()))
+                TransformFn::Struct(Arc::new(value))
             }
         }
 
