@@ -36,7 +36,7 @@ pub trait Event: Send + Sync + Debug + Any + crate::SerdeFeature + 'static {
     fn as_any_mut(&mut self) -> &mut dyn Any;
     fn type_with_generics(&self) -> String;
     fn _clone_event(&self) -> Box<dyn Event>;
-    fn _partial_equals_event(&self, other: &dyn Any) -> bool;
+    fn _partial_equals_event(&self, other: &dyn Event) -> bool;
     fn _hash_event(&self, state: &mut dyn Hasher);
 
     #[cfg(feature = "command")]
@@ -80,8 +80,8 @@ impl<T: EventMarker + EventRequirements + crate::SerdeFeature> Event for T {
     }
 
     /// Attempts to downcast the other event to the same type and compares them if successful, otherwise returns false
-    fn _partial_equals_event(&self, other: &dyn Any) -> bool {
-        if let Some(other) = other.downcast_ref::<T>() {
+    fn _partial_equals_event(&self, other: &dyn Event) -> bool {
+        if let Some(other) = other.as_any().downcast_ref::<T>() {
             self == other
         } else {
             false
@@ -105,7 +105,13 @@ impl Clone for Box<dyn Event> {
 /// Implement PartialEq for Box<dyn Event> allowing `Command::Event` variants to compare their internal events
 impl PartialEq for Box<dyn Event> {
     fn eq(&self, other: &Self) -> bool {
-        self._partial_equals_event(other.as_any())
+        self._partial_equals_event(other.as_ref())
+    }
+}
+
+impl PartialEq for &dyn Event {
+    fn eq(&self, other: &Self) -> bool {
+        self._partial_equals_event(*other)
     }
 }
 
