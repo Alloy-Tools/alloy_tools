@@ -102,29 +102,23 @@ impl Clone for Box<dyn Event> {
     }
 }
 
-/// Implement PartialEq for Box<dyn Event> allowing `Command::Event` variants to compare their internal events
-impl PartialEq for Box<dyn Event> {
+/// Implement `PartialEq` for `dyn Event` allowing `Command::Event` variants to compare their internal events. Covers `Box<dyn Event>` and `&dyn Event` via Rust's standard library blanket impls.
+impl PartialEq for dyn Event {
     fn eq(&self, other: &Self) -> bool {
-        self._partial_equals_event(other.as_ref())
+        self._partial_equals_event(other)
     }
 }
 
-impl PartialEq for &dyn Event {
-    fn eq(&self, other: &Self) -> bool {
-        self._partial_equals_event(*other)
-    }
-}
-
-/// Implement Hash for Box<dyn Event> allowing `Command::Event` variants to hash their internal events
-impl Hash for Box<dyn Event> {
+/// Implement `Hash` for `dyn Event` allowing `Command::Event` variants to hash their internal events. Covers `Box<dyn Event>` and `&dyn Event` via Rust's standard library blanket impls.
+impl Hash for dyn Event {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self._hash_event(state);
     }
 }
 
-/// Implement serialization for `&dyn Event` using `erased_serde` by serializing into the tuple format `(type name, type data)`
+/// Implement serialization for `dyn Event` using `erased_serde` by serializing into the tuple format `(type name, type data)`. Covers `Box<dyn Event>` and `&dyn Event` via Rust's standard library blanket impls.
 #[cfg(feature = "serde")]
-impl serde::Serialize for &dyn Event {
+impl serde::Serialize for dyn Event {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -132,7 +126,7 @@ impl serde::Serialize for &dyn Event {
         erased_serde::serialize(
             &(
                 self.type_with_generics(),
-                *self as &dyn erased_serde::Serialize,
+                self as &dyn erased_serde::Serialize,
             ),
             serializer,
         )
@@ -152,16 +146,5 @@ impl<'de> serde::Deserialize<'de> for Box<dyn Event> {
                 registry: &EVENT_REGISTRY,
             },
         )
-    }
-}
-
-/// Implement serialization for `Box<dyn Event>` using `erased_serde` by serializing into the tuple format `(type name, type data)`
-#[cfg(feature = "serde")]
-impl serde::Serialize for Box<dyn Event> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        (self.as_ref() as &dyn Event).serialize(serializer)
     }
 }

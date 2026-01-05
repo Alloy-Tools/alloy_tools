@@ -57,10 +57,14 @@ pub use {
     task_utils::task_state::BaseTaskState, task_utils::task_state::ExtendedTaskState,
     task_utils::task_state::TaskState,
 };
-#[cfg(feature = "serde")]
-pub use {serde_utils::registry::Registry, serde_utils::registry::SharedRegistry};
 #[cfg(all(feature = "transport", feature = "task"))]
 pub use {transports::buffered::Buffered, transports::link::Link, transports::splice::Splice};
+
+/// A generic registry type using a HashMap.
+pub type Registry<K, V> = std::collections::HashMap<K, V>;
+
+/// A thread-safe shared registry using Arc and RwLock.
+pub type SharedRegistry<K, V> = std::sync::Arc<std::sync::RwLock<Registry<K, V>>>;
 
 /// Helper struct to debug strings without outer " displayed
 pub struct DisplayString<S: AsRef<str>>(S);

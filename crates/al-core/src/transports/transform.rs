@@ -90,19 +90,19 @@ pub struct TransformBuilder<T: TransportItemRequirements> {
 impl<T: TransportItemRequirements> TransformBuilder<T> {
     /// Returns a new `TransformBuilder` with the passed `send` and `recv` functionality
     pub fn new(
-        transport: Arc<dyn Transport<T>>,
+        transport: impl Into<Arc<dyn Transport<T>>>,
         send: impl Into<TransformFn<T>>,
         recv: impl Into<TransformFn<T>>,
     ) -> Self {
         TransformBuilder {
-            transport,
+            transport: transport.into(),
             transform_send: send.into(),
             transform_recv: recv.into(),
         }
     }
 
     /// Helper function to return a new `TransformBuilder` with `NoOp` for both `send` and `recv`
-    pub fn no_op(transport: Arc<dyn Transport<T>>) -> Self {
+    pub fn no_op(transport: impl Into<Arc<dyn Transport<T>>>) -> Self {
         Self::new(transport, NoOp, NoOp)
     }
 
@@ -136,13 +136,13 @@ pub struct Transform<T: TransportItemRequirements> {
 
 impl<T: TransportItemRequirements> Transform<T> {
     /// Returns a new `TransformBuilder` to allow `Transform` configuration
-    pub fn new(transport: Arc<dyn Transport<T>>) -> TransformBuilder<T> {
+    pub fn new(transport: impl Into<Arc<dyn Transport<T>>>) -> TransformBuilder<T> {
         TransformBuilder::no_op(transport)
     }
 
     /// Returns a new `Transform` with the passed `send` and `recv` configuration
     pub fn from(
-        transport: Arc<dyn Transport<T>>,
+        transport: impl Into<Arc<dyn Transport<T>>>,
         send: impl Into<TransformFn<T>>,
         recv: impl Into<TransformFn<T>>,
     ) -> Transform<T> {
@@ -295,7 +295,7 @@ mod tests {
     #[cfg(feature = "event")]
     #[test]
     fn with_event() {
-        let transform = Transform::<_>::new(Queue::new().into())
+        let transform = Transform::<_>::new(Queue::new())
             .with_send(|mut x: AddOne| {
                 x.0 += 1;
                 x
@@ -327,7 +327,7 @@ mod tests {
             }
         }
 
-        let transform = Transform::<u8>::new(Queue::new().into())
+        let transform = Transform::<u8>::new(Queue::new())
             .with_send(TestStruct)
             .build();
 
@@ -337,7 +337,7 @@ mod tests {
     #[test]
     fn transform() {
         let transform = Transform::<_>::from(
-            Queue::new().into(),
+            Queue::new(),
             |mut x| {
                 x += 1;
                 x
@@ -358,7 +358,7 @@ mod tests {
     async fn debug() {
         assert_eq!(
             format!("{:?}", Transform::<u8>::from(
-                Queue::new().into(),
+                Queue::new(),
                 NoOp,
                 |mut x| {
                     x += 1;
@@ -368,7 +368,7 @@ mod tests {
             "Transform { transport: Queue { queue: [] }, transform_send: NoOp, transform_recv: TransformFn }"
         );
         assert_eq!(
-            format!("{:?}", Transform::<u8>::new(Queue::new().into())
+            format!("{:?}", Transform::<u8>::new(Queue::new())
             .with_recv(|mut x| {
                     x += 1;
                     x
@@ -379,7 +379,7 @@ mod tests {
     #[tokio::test]
     async fn send_recv() {
         let transform = Transform::<_>::from(
-            Queue::new().into(),
+            Queue::new(),
             |mut x| {
                 x += 1;
                 x
@@ -390,7 +390,7 @@ mod tests {
             },
         );
 
-        let noop_transform = Transform::<_>::from(Queue::new().into(), NoOp, NoOp);
+        let noop_transform = Transform::<_>::from(Queue::new(), NoOp, NoOp);
 
         let x = 1u8;
         // Send `AddOne` asynchronously

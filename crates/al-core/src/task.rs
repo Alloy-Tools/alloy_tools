@@ -361,6 +361,15 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
         state.clone()
     }
 
+    /// Allows using or modifying the internal state of the `Task` within a closure
+    pub async fn with_state<Ok, Err>(
+        &self,
+        f: impl FnOnce(&mut S) -> Result<Ok, Err>,
+    ) -> Result<Ok, Err> {
+        let mut state = self.state.write().await;
+        f(&mut *state)
+    }
+
     pub async fn last_result(&self) -> Option<Result<T, E>> {
         self.state.read().await.get_last_result().clone()
     }

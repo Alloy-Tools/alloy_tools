@@ -62,16 +62,14 @@ impl TaskConfig {
     }
 
     pub fn on_task_start(&self) {
-        match &self.on_task_start {
-            Some(f) => f(),
-            None => {}
+        if let Some(f) = &self.on_task_start {
+            f();
         }
     }
 
     pub fn on_task_complete(&self) {
-        match &self.on_task_complete {
-            Some(f) => f(),
-            None => {}
+        if let Some(f) = &self.on_task_complete {
+            f();
         }
     }
 
@@ -161,18 +159,36 @@ impl std::hash::Hash for TaskConfig {
 
 impl From<Duration> for TaskConfig {
     fn from(interval: Duration) -> Self {
-        Self::new(interval, TaskConfig::default_stop_on_error(), TaskMode::default(), None, None)
+        Self::new(
+            interval,
+            TaskConfig::default_stop_on_error(),
+            TaskMode::default(),
+            None,
+            None,
+        )
     }
 }
 
 impl From<bool> for TaskConfig {
     fn from(stop_on_error: bool) -> Self {
-        Self::new(TaskConfig::default_interval(), stop_on_error, TaskMode::default(), None, None)
+        Self::new(
+            TaskConfig::default_interval(),
+            stop_on_error,
+            TaskMode::default(),
+            None,
+            None,
+        )
     }
 }
 
 impl From<TaskMode> for TaskConfig {
     fn from(mode: TaskMode) -> Self {
-        Self::new(TaskConfig::default_interval(), TaskConfig::default_stop_on_error(), mode, None, None)
+        Self::new(
+            TaskConfig::default_interval(),
+            TaskConfig::default_stop_on_error(),
+            mode,
+            None,
+            None,
+        )
     }
 }

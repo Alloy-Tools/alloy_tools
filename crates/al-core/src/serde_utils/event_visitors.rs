@@ -16,10 +16,7 @@ impl<'de, 'a> Visitor<'de> for EventVisitor<'a> {
     }
 
     /// Visit a sequence and deserialize it into a `Box<dyn Event>` using the event type name and the event registry
-    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-    where
-        A: serde::de::SeqAccess<'de>,
-    {
+    fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
         // Get the type name from the first element of the sequence
         let type_name = seq
             .next_element::<String>()?
@@ -43,10 +40,10 @@ struct EventSeed<'a> {
 impl<'de, 'a> DeserializeSeed<'de> for EventSeed<'a> {
     type Value = Box<dyn crate::Event>;
 
-    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        self,
+        deserializer: D,
+    ) -> Result<Self::Value, D::Error> {
         // Get the deserializer for the given type name from the registry
         let deser = self
             .registry
