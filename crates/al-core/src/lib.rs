@@ -632,6 +632,86 @@ mod tests {
         assert_eq!(Command::Stop, Command::Stop);
     }
 
+    #[cfg(all(feature = "command", feature = "event"))]
+    /// Test partial equality of events
+    #[test]
+    fn event_partial_equals() {
+        let event = TestEventPayload {
+            value: TEST_VAL,
+            message: TEST_MSG.to_string(),
+        };
+        let event_same = TestEventPayload {
+            value: TEST_VAL,
+            message: TEST_MSG.to_string(),
+        };
+        let event_diff_val = TestEventPayload {
+            value: TEST_VAL + 1,
+            message: TEST_MSG.to_string(),
+        };
+        let event_diff_str = TestEventPayload {
+            value: TEST_VAL,
+            message: TEST_MSG[1..].to_string(),
+        };
+
+        assert_eq!(event, event.clone());
+        assert_eq!(event, event_same);
+        assert_eq!(&event, &event_same);
+        assert_ne!(event, event_diff_val);
+        assert_ne!(event, event_diff_str);
+        // Test &dyn Event
+        let event_dyn: &dyn Event = &event;
+        let event_same_dyn: &dyn Event = &event_same;
+        let event_diff_val_dyn: &dyn Event = &event_diff_val;
+        let event_diff_str_dyn: &dyn Event = &event_diff_str;
+        assert_eq!(event_dyn, event_same_dyn);
+        assert_ne!(event_dyn, event_diff_val_dyn);
+        assert_ne!(event_dyn, event_diff_str_dyn);
+        // Test Box<dyn Event>
+        let boxed = Box::new(event.clone()) as Box<dyn Event>;
+        let boxed_same = Box::new(event_same.clone()) as Box<dyn Event>;
+        let boxed_val_diff = Box::new(event_diff_val.clone()) as Box<dyn Event>;
+        let boxed_str_diff = Box::new(event_diff_str.clone()) as Box<dyn Event>;
+        assert_eq!(&boxed, &boxed_same);
+        assert_ne!(&boxed, &boxed_val_diff);
+        assert_ne!(&boxed, &boxed_str_diff);
+
+        let generic_val = TestEventGeneric(TEST_VAL);
+        let generic_val_same = TestEventGeneric(TEST_VAL);
+        let generic_val_diff = TestEventGeneric(TEST_VAL + 1);
+        let generic_str = TestEventGeneric(TEST_MSG.to_string());
+        let generic_str_same = TestEventGeneric(TEST_MSG.to_string());
+        let generic_str_diff = TestEventGeneric(TEST_MSG[1..].to_string());
+
+        assert_eq!(generic_val, generic_val.clone());
+        assert_eq!(generic_val, generic_val_same);
+        assert_ne!(generic_val, generic_val_diff);
+        assert_eq!(generic_str, generic_str.clone());
+        assert_eq!(generic_str, generic_str_same);
+        assert_ne!(generic_str, generic_str_diff);
+        // Test &dyn Event
+        let genernic_val_dyn: &dyn Event = &generic_val;
+        let genernic_val_same_dyn: &dyn Event = &generic_val_same;
+        let genernic_val_diff_dyn: &dyn Event = &generic_val_diff;
+        let genernic_str_dyn: &dyn Event = &generic_str;
+        let genernic_str_same_dyn: &dyn Event = &generic_str_same;
+        let genernic_str_diff_dyn: &dyn Event = &generic_str_diff;
+        assert_eq!(genernic_val_dyn, genernic_val_same_dyn);
+        assert_ne!(genernic_val_dyn, genernic_val_diff_dyn);
+        assert_eq!(genernic_str_dyn, genernic_str_same_dyn);
+        assert_ne!(genernic_str_dyn, genernic_str_diff_dyn);
+        // Test Box<dyn Event>
+        let generic_val_boxed = Box::new(generic_val.clone()) as Box<dyn Event>;
+        let generic_val_boxed_same = Box::new(generic_val_same.clone()) as Box<dyn Event>;
+        let generic_val_boxed_val_diff = Box::new(generic_val_diff.clone()) as Box<dyn Event>;
+        let generic_str_boxed = Box::new(generic_str.clone()) as Box<dyn Event>;
+        let generic_str_boxed_same = Box::new(generic_str_same.clone()) as Box<dyn Event>;
+        let generic_str_boxed_val_diff = Box::new(generic_str_diff.clone()) as Box<dyn Event>;
+        assert_eq!(&generic_val_boxed, &generic_val_boxed_same);
+        assert_ne!(&generic_val_boxed, &generic_val_boxed_val_diff);
+        assert_eq!(&generic_str_boxed, &generic_str_boxed_same);
+        assert_ne!(&generic_str_boxed, &generic_str_boxed_val_diff);
+    }
+
     #[cfg(feature = "event")]
     /// Test to ensure events meet thread safety and trait requirements
     #[test]
