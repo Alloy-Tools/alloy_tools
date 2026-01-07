@@ -300,19 +300,34 @@ mod tests {
     #[event]
     struct AddOne(u8);
 
+    #[derive(Debug)]
+    struct TestStruct;
+    impl ApplyTransform<u8> for TestStruct {
+        fn apply(&self, data: u8) -> u8 {
+            // Add one but don't overflow
+            data.saturating_add(1)
+        }
+    }
+    impl From<TestStruct> for TransformFn<u8> {
+        fn from(value: TestStruct) -> Self {
+            TransformFn::Struct(Arc::new(value))
+        }
+    }
+
     #[cfg(feature = "event")]
     #[test]
     fn with_event() {
-        let transform = Transform::<_>::new(Queue::new().into())
-            .with_send(|mut x: AddOne| {
+        let transform = Transform::<_>::from(
+            Queue::new().into(),
+            |mut x: AddOne| {
                 x.0 += 1;
                 x
-            })
-            .with_recv(|mut x: AddOne| {
+            },
+            |mut x: AddOne| {
                 x.0 += 1;
                 x
-            })
-            .build();
+            },
+        );
         let x = 1u8;
         transform.send_blocking(AddOne(x)).unwrap();
         let y = transform.recv_blocking().unwrap();
@@ -321,25 +336,7 @@ mod tests {
 
     #[test]
     fn with_struct() {
-        #[derive(Debug)]
-        struct TestStruct;
-        impl ApplyTransform<u8> for TestStruct {
-            fn apply(&self, data: u8) -> u8 {
-                // Add one but don't overflow
-                data.saturating_add(1)
-            }
-        }
-        impl From<TestStruct> for TransformFn<u8> {
-            fn from(value: TestStruct) -> Self {
-                TransformFn::Struct(Arc::new(value))
-            }
-        }
-
-        let transform = Transform::<u8>::new(Queue::new().into())
-            .with_send(TestStruct)
-            .build();
-
-        assert_eq!(format!("{:?}", transform), "Transform { transport: Queue { queue: [] }, transform_send: TransformFn, transform_recv: NoOp }")
+        assert_eq!(format!("{:?}", Transform::<u8>::from(Queue::new().into(), TestStruct, NoOp)), "Transform { transport: Queue { queue: [] }, transform_send: TransformFn, transform_recv: NoOp }")
     }
 
     #[test]
@@ -480,5 +477,13 @@ mod tests {
         transform.send(40).await.unwrap();
 
         tokio_handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn builder() {
+        Transform::<u8>::new(Queue::new().into())
+            .with_send(TestStruct)
+            .with_recv(|x| { x + 1 })
+            .build();
     }
 }

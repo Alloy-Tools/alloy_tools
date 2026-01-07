@@ -745,7 +745,7 @@ mod tests {
     #[cfg(all(feature = "event", feature = "serde", feature = "json"))]
     #[test]
     fn event_json() {
-        use crate::{register_event, JsonSerde, SerdeFormat};
+        use crate::{downcast_event, register_event, JsonSerde, SerdeFormat};
 
         let event = TestEventPayload {
             value: TEST_VAL,
@@ -851,6 +851,27 @@ mod tests {
         assert_eq!(event_diff_str, new_str);
         assert_eq!(new_a, TestEventA);
         assert_eq!(new_b, TestEventB);
+
+        let new_event_box = JsonSerde.deserialize_event_dyn(&event_json).unwrap();
+        let new_same_box = JsonSerde.deserialize_event_dyn(&same_json).unwrap();
+        let new_val_box = JsonSerde.deserialize_event_dyn(&val_json).unwrap();
+        let new_str_box = JsonSerde.deserialize_event_dyn(&str_json).unwrap();
+        let new_a_box = JsonSerde.deserialize_event_dyn(&a_json).unwrap();
+        let new_b_box = JsonSerde.deserialize_event_dyn(&b_json).unwrap();
+
+        let new_event_cast: TestEventPayload = downcast_event(new_event_box).unwrap();
+        let new_same_cast: TestEventPayload = downcast_event(new_same_box).unwrap();
+        let new_val_cast: TestEventPayload = downcast_event(new_val_box).unwrap();
+        let new_str_cast: TestEventPayload = downcast_event(new_str_box).unwrap();
+        let new_a_cast: TestEventA = downcast_event(new_a_box).unwrap();
+        let new_b_cast: TestEventB = downcast_event(new_b_box).unwrap();
+
+        assert_eq!(event, new_event_cast);
+        assert_eq!(event_same, new_same_cast);
+        assert_eq!(event_diff_val, new_val_cast);
+        assert_eq!(event_diff_str, new_str_cast);
+        assert_eq!(new_a_cast, TestEventA);
+        assert_eq!(new_b_cast, TestEventB);
 
         let enum_new_a: TestEventEnum = JsonSerde.deserialize_event(&enum_a_json).unwrap();
         let enum_new_b: TestEventEnum = JsonSerde.deserialize_event(&enum_b_json).unwrap();
@@ -1132,7 +1153,7 @@ mod tests {
     #[cfg(all(feature = "event", feature = "serde", feature = "binary"))]
     #[test]
     fn event_binary() {
-        use crate::{register_event, BinarySerde, SerdeFormat};
+        use crate::{downcast_event, register_event, BinarySerde, SerdeFormat};
 
         let event = TestEventPayload {
             value: TEST_VAL,
@@ -1238,6 +1259,27 @@ mod tests {
         assert_eq!(event_diff_str, new_str);
         assert_eq!(TestEventA, new_a);
         assert_eq!(TestEventB, new_b);
+
+        let new_event_box = BinarySerde.deserialize_event_dyn(&event_binary).unwrap();
+        let new_same_box = BinarySerde.deserialize_event_dyn(&same_binary).unwrap();
+        let new_val_box = BinarySerde.deserialize_event_dyn(&val_binary).unwrap();
+        let new_str_box = BinarySerde.deserialize_event_dyn(&str_binary).unwrap();
+        let new_a_box = BinarySerde.deserialize_event_dyn(&a_binary).unwrap();
+        let new_b_box = BinarySerde.deserialize_event_dyn(&b_binary).unwrap();
+
+        let new_event_cast: TestEventPayload = downcast_event(new_event_box).unwrap();
+        let new_same_cast: TestEventPayload = downcast_event(new_same_box).unwrap();
+        let new_val_cast: TestEventPayload = downcast_event(new_val_box).unwrap();
+        let new_str_cast: TestEventPayload = downcast_event(new_str_box).unwrap();
+        let new_a_cast: TestEventA = downcast_event(new_a_box).unwrap();
+        let new_b_cast: TestEventB = downcast_event(new_b_box).unwrap();
+
+        assert_eq!(event, new_event_cast);
+        assert_eq!(event_same, new_same_cast);
+        assert_eq!(event_diff_val, new_val_cast);
+        assert_eq!(event_diff_str, new_str_cast);
+        assert_eq!(new_a_cast, TestEventA);
+        assert_eq!(new_b_cast, TestEventB);
 
         let enum_new_a: TestEventEnum = BinarySerde.deserialize_event(&enum_a_binary).unwrap();
         let enum_new_b: TestEventEnum = BinarySerde.deserialize_event(&enum_b_binary).unwrap();

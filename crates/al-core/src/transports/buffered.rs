@@ -171,6 +171,6 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         buffered.send(42).await.unwrap();
 
-        handle.await.unwrap(); 
+        handle.await.unwrap();
     }
 }
