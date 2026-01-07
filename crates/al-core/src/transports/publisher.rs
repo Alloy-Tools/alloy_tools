@@ -311,4 +311,35 @@ mod tests {
         // Recv avaliable `String` synchronously
         assert_eq!(subscribers[2].recv_avaliable_blocking().unwrap(), vec![3]);
     }
+
+    #[tokio::test]
+    async fn threaded() {
+        let publisher = Publisher::<u8>::new();
+        let queue = Arc::new(Queue::<u8>::new());
+        publisher.subscribe(queue.clone());
+        let handle = std::thread::spawn(move || {
+            let received = queue.recv_blocking().unwrap();
+            assert_eq!(received, 42);
+        });
+
+        // Wait to ensure the other thread is receiving the data
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        publisher.send_blocking(42).unwrap();
+
+        handle.join().unwrap();
+
+        let tokio_publisher = Publisher::<u8>::new();
+        let tokio_queue = Arc::new(Queue::<u8>::new());
+        tokio_publisher.subscribe(tokio_queue.clone());
+        let tokio_handle = tokio::spawn(async move {
+            let received = tokio_queue.recv().await.unwrap();
+            assert_eq!(received, 42);
+        });
+
+        // Wait to ensure the other thread is receiving the data
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        tokio_publisher.send_blocking(42).unwrap();
+
+        tokio_handle.await.unwrap();
+    }
 }

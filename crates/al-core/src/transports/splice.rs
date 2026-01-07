@@ -2,6 +2,50 @@ use std::{future::Future, marker::PhantomData, sync::Arc};
 
 use crate::{Link, Transport, TransportError, TransportItemRequirements};
 
+pub trait SpliceFn<F: TransportItemRequirements, T: TransportItemRequirements>:
+    Fn(F) -> Result<T, TransportError> + Send + Sync + 'static
+{
+}
+impl<
+        F: TransportItemRequirements,
+        T: TransportItemRequirements,
+        Func: Fn(F) -> Result<T, TransportError> + Send + Sync + 'static,
+    > SpliceFn<F, T> for Func
+{
+}
+
+pub trait AsyncSpliceFn<
+    F: TransportItemRequirements,
+    T: TransportItemRequirements,
+    Fut: SpliceFnFuture<F, T>,
+>: Fn(F) -> Fut + Send + Sync + 'static
+{
+}
+impl<
+        F: TransportItemRequirements,
+        T: TransportItemRequirements,
+        Func: Fn(F) -> Fut + Send + Sync + 'static,
+        Fut: SpliceFnFuture<F, T>,
+    > AsyncSpliceFn<F, T, Fut> for Func
+{
+}
+
+pub trait SpliceFnFuture<F: TransportItemRequirements, T: TransportItemRequirements>:
+    Future<Output = Result<T, TransportError>> + Send + Sync + 'static
+{
+}
+impl<
+        F: TransportItemRequirements,
+        T: TransportItemRequirements,
+        Fut: Future<Output = Result<T, TransportError>> + Send + Sync + 'static,
+    > SpliceFnFuture<F, T> for Fut
+{
+}
+
+/* ********************
+  Splice
+******************** */
+/// `Splice<F, T>` joins a producer of type `F` to a consumer of type `T`, transforming data from `F` to `T`
 pub struct Splice<F: TransportItemRequirements, T: TransportItemRequirements>(
     Arc<dyn Transport<F>>,
     Arc<dyn Transport<T>>,
@@ -28,16 +72,16 @@ impl<F: TransportItemRequirements, T: TransportItemRequirements> From<Splice<F, 
 
 impl<F: TransportItemRequirements, T: TransportItemRequirements> Splice<F, T> {
     /// Returns a new `Splice` joining `producer<F>` into `consumer<T>`
-    pub fn new<SpliceFn, AsyncSpliceFn, Fut>(
+    pub fn new<SpliceFnImpl, AsyncSpliceFnImpl, Fut>(
         producer: Arc<dyn Transport<F>>,
         consumer: Arc<dyn Transport<T>>,
-        splice_fn: Arc<SpliceFn>,
-        async_splice_fn: Arc<AsyncSpliceFn>,
-    ) -> Arc<Self>
+        splice_fn: Arc<SpliceFnImpl>,
+        async_splice_fn: Arc<AsyncSpliceFnImpl>,
+    ) -> Self
     where
-        SpliceFn: Fn(F) -> Result<T, TransportError> + Send + Sync + 'static,
-        AsyncSpliceFn: Fn(F) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Result<T, TransportError>> + Send + Sync + 'static,
+        SpliceFnImpl: SpliceFn<F, T>,
+        AsyncSpliceFnImpl: AsyncSpliceFn<F, T, Fut>,
+        Fut: SpliceFnFuture<F, T>,
     {
         let consumer_clone = consumer.clone();
         let batch_consumer_clone = consumer.clone();
@@ -87,7 +131,7 @@ impl<F: TransportItemRequirements, T: TransportItemRequirements> Splice<F, T> {
         let link = Link::new(producer, splice_transport);
 
         // setting the new `Link` as the producer in the `Splice`
-        Arc::new(Self(link.into(), consumer))
+        Self(link.into(), consumer)
     }
 
     #[allow(unused)]
@@ -365,7 +409,7 @@ mod tests {
 
     #[tokio::test]
     async fn send_recv() {
-        // `Splice::new` inserts a `SpliceTransport` between the pipelines, returning the `Splice` as the transport
+        // `Splice::from` inserts a `SpliceTransport` between the pipelines, returning the `Splice` as the transport
         let splice = Splice::new(
             Arc::new(Queue::<u8>::new()),
             Arc::new(Queue::<String>::new()),
@@ -405,5 +449,26 @@ mod tests {
             splice.consumer().recv_avaliable_blocking().unwrap(),
             vec!["u8: 3"]
         );
+    }
+
+    #[tokio::test]
+    async fn threaded() {
+        let splice = std::sync::Arc::new(Splice::new(
+            Queue::<u8>::new().into(),
+            Queue::<String>::new().into(),
+            Arc::new(|data| Ok(format!("u8: {:?}", data))),
+            Arc::new(|data| async move { Ok(format!("u8: {:?}", data)) }),
+        ));
+        let splice_clone = splice.clone();
+        let handle = tokio::spawn(async move {
+            let received = splice_clone.consumer().recv().await.unwrap();
+            assert_eq!(received, "u8: 42");
+        });
+
+        // Wait to ensure the other thread is receiving the data
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        splice.send(42).await.unwrap();
+
+        handle.await.unwrap();
     }
 }
