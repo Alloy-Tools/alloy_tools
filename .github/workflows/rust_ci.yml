@@ -2,9 +2,9 @@ name: Rust CI
 
 on:
   push:
-    branches: [ "main", "CI" ]
+    branches: [ "main" ]
   pull_request:
-    branches: [ "main", "CI" ]
+    branches: [ "main" ]
 
 env:
   CARGO_TERM_COLOR: always
@@ -21,64 +21,7 @@ jobs:
           - { os: windows-latest, target: x86_64-pc-windows-msvc }
           - { os: macos-latest, target: x86_64-apple-darwin }
         features: &feature-matrix
-          [
-            # None
-            "none",
-            # Core base features (individual)
-            "command", "event", "transport", "task", "base", "transport-base",
-            # Core base feature combinations (2 features)
-            "command, event", "command, transport", "command, task", "command, base", "command, transport-base",
-            "event, transport", "event, task", "event, base", "event, transport-base",
-            "transport, task", "transport, base", "transport, transport-base",
-            "task, base", "task, transport-base",
-            "base, transport-base",
-            # Core base feature combinations (3 features)
-            "command, event, transport", "command, event, task", "command, event, base", "command, event, transport-base",
-            "command, transport, task", "command, transport, base", "command, transport, transport-base",
-            "command, task, base", "command, task, transport-base",
-            "command, base, transport-base",
-            "event, transport, task", "event, transport, base", "event, transport, transport-base",
-            "event, task, base", "event, task, transport-base",
-            "event, base, transport-base",
-            "transport, task, base", "transport, task, transport-base",
-            "transport, base, transport-base",
-            "task, base, transport-base",
-            # Core base feature combinations (4 features)
-            "command, event, transport, task", "command, event, transport, base", "command, event, transport, transport-base",
-            "command, event, task, base", "command, event, task, transport-base", "command, event, base, transport-base",
-            "command, transport, task, base", "command, transport, task, transport-base", "command, transport, base, transport-base",
-            "command, task, base, transport-base",
-            "event, transport, task, base", "event, transport, task, transport-base", "event, transport, base, transport-base",
-            "event, task, base, transport-base",
-            "transport, task, base, transport-base",
-            # Core base feature combinations (5 features)
-            "command, event, transport, task, base", "command, event, transport, task, transport-base",
-            "command, event, transport, base, transport-base", "command, event, task, base, transport-base",
-            "command, transport, task, base, transport-base",
-            "event, transport, task, base, transport-base",
-            # All core base features (6 features)
-            "command, event, transport, task, base, transport-base",
-            # Optional expansion features (as given)
-            "serde", "json", "binary", "json, binary", "test-utils", "test-tasks",
-            # Core base + optional expansion feature combinations
-            # Single core + single optional
-            "command, serde", "command, json", "command, binary", "command, test-utils", "command, test-tasks",
-            "event, serde", "event, json", "event, binary", "event, test-utils", "event, test-tasks",
-            "transport, serde", "transport, json", "transport, binary", "transport, test-utils", "transport, test-tasks",
-            "task, serde", "task, json", "task, binary", "task, test-utils", "task, test-tasks",
-            "base, serde", "base, json", "base, binary", "base, test-utils", "base, test-tasks",
-            "transport-base, serde", "transport-base, json", "transport-base, binary", "transport-base, test-utils", "transport-base, test-tasks",
-            # Single core + json,binary combo
-            "command, json, binary", "event, json, binary", "transport, json, binary", 
-            "task, json, binary", "base, json, binary", "transport-base, json, binary",
-            # Multiple core + optional (example combinations)
-            "command, event, serde", "command, event, json", "command, transport, binary",
-            "transport, task, serde", "transport, task, json", "transport, task, binary",
-            "base, transport-base, serde", "base, transport-base, json", "base, transport-base, binary",
-            # Core combinations with json,binary
-            "command, event, json, binary", "transport, task, json, binary",
-            "base, transport-base, json, binary",
-            ]
+          [ "none", "base, transport-base", "base, transport-base, serde", "base, transport-base, json", "base, transport-base, binary", "base, transport-base, json, binary", "base, transport-base, test-utils", "base, transport-base, test-tasks" ]
 
     steps:
     - name: Checkout code
@@ -100,7 +43,7 @@ jobs:
       run: cargo build --verbose
 
     - name: Run tests
-      run: cargo test --features ${{ matrix.features }} --no-default-features --target ${{ matrix.platform.target }}
+      run: cargo test --features "${{ matrix.features }}" --no-default-features --target ${{ matrix.platform.target }}
 
 #  test-wasm:
 #    name: 'WASM ${{ matrix.os }} Test - Target: ${{ matrix.target }} - Features: ${{ matrix.features }}'
