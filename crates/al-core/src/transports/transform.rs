@@ -79,6 +79,9 @@ impl<T: TransportItemRequirements> std::fmt::Debug for TransformFn<T> {
     }
 }
 
+/* ********************
+  TransformBuilder
+******************** */
 /// Builder pattern for `Transform` types, allowing calls to be chained together
 #[derive(Debug, Clone)]
 pub struct TransformBuilder<T: TransportItemRequirements> {
@@ -107,13 +110,15 @@ impl<T: TransportItemRequirements> TransformBuilder<T> {
     }
 
     /// Set the `TransformBuilder` `send` to the passed functionality
-    pub fn with_send(self, send: impl Into<TransformFn<T>>) -> TransformBuilder<T> {
-        TransformBuilder::new(self.transport, send.into(), self.transform_recv)
+    pub fn with_send(mut self, send: impl Into<TransformFn<T>>) -> Self {
+        self.transform_send = send.into();
+        self
     }
 
     /// Set the `TransformBuilder` `recv` to the passed functionality
-    pub fn with_recv(self, recv: impl Into<TransformFn<T>>) -> TransformBuilder<T> {
-        TransformBuilder::new(self.transport, self.transform_send, recv.into())
+    pub fn with_recv(mut self, recv: impl Into<TransformFn<T>>) -> Self {
+        self.transform_recv = recv.into();
+        self
     }
 
     /// Build the `Transform` from the `TransformBuilder`
@@ -126,6 +131,9 @@ impl<T: TransportItemRequirements> TransformBuilder<T> {
     }
 }
 
+/* ********************
+  Transform
+******************** */
 /// A `Transform` wraps a `Transport` and applies transformations to the data being sent and received.
 #[derive(Debug, Clone)]
 pub struct Transform<T: TransportItemRequirements> {
@@ -440,5 +448,37 @@ mod tests {
             noop_transform.recv_avaliable_blocking().unwrap(),
             vec![z + 2]
         );
+    }
+
+    #[tokio::test]
+    async fn threaded() {
+        let transform = std::sync::Arc::new(Transform::from(
+            Queue::<u8>::new().into(),
+            |x| x + 1,
+            |x| x + 1,
+        ));
+        let transform_clone = transform.clone();
+        let handle = std::thread::spawn(move || {
+            let received = transform_clone.recv_blocking().unwrap();
+            assert_eq!(received, 42);
+        });
+
+        // Wait to ensure the other thread is receiving the data
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        transform.send_blocking(40).unwrap();
+
+        handle.join().unwrap();
+
+        let transform_clone = transform.clone();
+        let tokio_handle = tokio::spawn(async move {
+            let received = transform_clone.recv().await.unwrap();
+            assert_eq!(received, 42);
+        });
+
+        // Wait to ensure the other thread is receiving the data
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        transform.send(40).await.unwrap();
+
+        tokio_handle.await.unwrap();
     }
 }

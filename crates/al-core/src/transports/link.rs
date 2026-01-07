@@ -244,4 +244,23 @@ mod tests {
         // Recv avaliable `String` synchronously
         assert_eq!(l1.recv_avaliable_blocking().unwrap(), vec![3]);
     }
+
+    #[tokio::test]
+    async fn threaded() {
+        let link = std::sync::Arc::new(Link::new(
+            Queue::<u8>::new().into(),
+            Queue::<u8>::new().into(),
+        ));
+        let link_clone = link.clone();
+        let handle = tokio::spawn(async move {
+            let received = link_clone.recv().await.unwrap();
+            assert_eq!(received, 42);
+        });
+
+        // Wait to ensure the other thread is receiving the data
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        link.send(42).await.unwrap();
+
+        handle.await.unwrap();
+    }
 }
