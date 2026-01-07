@@ -38,8 +38,8 @@ pub use serde_utils::serde_format::SerdeFormat;
 #[cfg(feature = "event")]
 pub use {
     al_derive::event, al_derive::event_requirements, al_derive::EventMarker as DeriveEventMarker,
-    event::downcast as downcast_event, event::type_with_generics, event::Event,
-    markers::EventMarker, markers::EventRequirements, markers::SerdeFeature,
+    event::downcast as downcast_event, event::type_with_generics, event::DowncastEvent,
+    event::Event, markers::EventMarker, markers::EventRequirements, markers::SerdeFeature,
 };
 #[cfg(feature = "transport")]
 pub use {
@@ -219,10 +219,60 @@ mod tests {
         assert!(matches!(generic_str, Command::Event(_)));
     }
 
-    #[cfg(all(feature = "command", feature = "event"))]
-    /// Test downcasting commands back to their original event types
+    #[cfg(feature = "event")]
+    /// Test downcasting events back to their original types
     #[test]
-    fn verify_downcast() {
+    fn event_downcast() {
+        use crate::DowncastEvent;
+
+        let event_a: Box<dyn Event> = Box::new(TestEventA);
+        let event_b: Box<dyn Event> = Box::new(TestEventB::default());
+        let enum_a: Box<dyn Event> = Box::new(TestEventEnum::A);
+        let enum_b: Box<dyn Event> = Box::new(TestEventEnum::B(1));
+        let enum_c: Box<dyn Event> = Box::new(TestEventEnum::C(TEST_MSG.to_string()));
+        let payload: Box<dyn Event> = Box::new(TestEventPayload {
+            value: TEST_VAL,
+            message: TEST_MSG.to_string(),
+        });
+        let generic_val: Box<dyn Event> = Box::new(TestEventGeneric(TEST_VAL));
+        let generic_str: Box<dyn Event> = Box::new(TestEventGeneric(TEST_MSG.to_string()));
+
+        assert!(event_a.clone().downcast::<TestEventA>().is_ok());
+        assert!(event_a.downcast::<TestEventB>().is_err());
+        assert!(event_b.clone().downcast::<TestEventB>().is_ok());
+        assert!(event_b.downcast::<TestEventA>().is_err());
+        assert!(enum_a.clone().downcast::<TestEventEnum>().is_ok());
+        assert!(enum_a.downcast::<TestEventA>().is_err());
+        assert!(enum_b.clone().downcast::<TestEventEnum>().is_ok());
+        assert!(enum_b.downcast::<TestEventA>().is_err());
+        assert!(enum_c.clone().downcast::<TestEventEnum>().is_ok());
+        assert!(enum_c.downcast::<TestEventA>().is_err());
+        assert!(payload.clone().downcast::<TestEventPayload>().is_ok());
+        assert!(payload.downcast::<TestEventA>().is_err());
+        assert!(generic_val
+            .clone()
+            .downcast::<TestEventGeneric<u128>>()
+            .is_ok());
+        assert!(generic_val
+            .clone()
+            .downcast::<TestEventGeneric<String>>()
+            .is_err());
+        assert!(generic_val.downcast::<TestEventA>().is_err());
+        assert!(generic_str
+            .clone()
+            .downcast::<TestEventGeneric<String>>()
+            .is_ok());
+        assert!(generic_str
+            .clone()
+            .downcast::<TestEventGeneric<u128>>()
+            .is_err());
+        assert!(generic_str.downcast::<TestEventA>().is_err());
+    }
+
+    #[cfg(all(feature = "command", feature = "event"))]
+    /// Test downcasting commands back to their original types
+    #[test]
+    fn command_downcast() {
         let cmd = TestEventA.to_cmd();
         let enum_a_cmd = TestEventEnum::A.to_cmd();
         let enum_b_cmd = TestEventEnum::B(1).to_cmd();
@@ -235,31 +285,25 @@ mod tests {
         let generic_val = TestEventGeneric(TEST_VAL).to_cmd();
         let generic_str = TestEventGeneric(TEST_MSG.to_string()).to_cmd();
 
-        assert!(cmd.clone().downcast_event::<TestEventA>().is_ok());
+        assert!(cmd.downcast_event::<TestEventA>().is_ok());
         assert!(cmd.downcast_event::<TestEventB>().is_err());
         assert!(Command::Stop.downcast_event::<TestEventB>().is_err());
-        assert!(enum_a_cmd.clone().downcast_event::<TestEventEnum>().is_ok());
+        assert!(enum_a_cmd.downcast_event::<TestEventEnum>().is_ok());
         assert!(enum_a_cmd.downcast_event::<TestEventA>().is_err());
-        assert!(enum_b_cmd.clone().downcast_event::<TestEventEnum>().is_ok());
+        assert!(enum_b_cmd.downcast_event::<TestEventEnum>().is_ok());
         assert!(enum_b_cmd.downcast_event::<TestEventA>().is_err());
-        assert!(enum_c_cmd.clone().downcast_event::<TestEventEnum>().is_ok());
+        assert!(enum_c_cmd.downcast_event::<TestEventEnum>().is_ok());
         assert!(enum_c_cmd.downcast_event::<TestEventA>().is_err());
-        assert!(payload_cmd
-            .clone()
-            .downcast_event::<TestEventPayload>()
-            .is_ok());
+        assert!(payload_cmd.downcast_event::<TestEventPayload>().is_ok());
         assert!(payload_cmd.downcast_event::<TestEventA>().is_err());
         assert!(generic_val
-            .clone()
             .downcast_event::<TestEventGeneric<u128>>()
             .is_ok());
         assert!(generic_val
-            .clone()
             .downcast_event::<TestEventGeneric<String>>()
             .is_err());
         assert!(generic_val.downcast_event::<TestEventA>().is_err());
         assert!(generic_str
-            .clone()
             .downcast_event::<TestEventGeneric<String>>()
             .is_ok());
         assert!(generic_str
@@ -745,7 +789,7 @@ mod tests {
     #[cfg(all(feature = "event", feature = "serde", feature = "json"))]
     #[test]
     fn event_json() {
-        use crate::{downcast_event, register_event, JsonSerde, SerdeFormat};
+        use crate::{register_event, DowncastEvent, JsonSerde, SerdeFormat};
 
         let event = TestEventPayload {
             value: TEST_VAL,
@@ -859,12 +903,12 @@ mod tests {
         let new_a_box = JsonSerde.deserialize_event_dyn(&a_json).unwrap();
         let new_b_box = JsonSerde.deserialize_event_dyn(&b_json).unwrap();
 
-        let new_event_cast: TestEventPayload = downcast_event(new_event_box).unwrap();
-        let new_same_cast: TestEventPayload = downcast_event(new_same_box).unwrap();
-        let new_val_cast: TestEventPayload = downcast_event(new_val_box).unwrap();
-        let new_str_cast: TestEventPayload = downcast_event(new_str_box).unwrap();
-        let new_a_cast: TestEventA = downcast_event(new_a_box).unwrap();
-        let new_b_cast: TestEventB = downcast_event(new_b_box).unwrap();
+        let new_event_cast: TestEventPayload = new_event_box.downcast().unwrap();
+        let new_same_cast: TestEventPayload = new_same_box.downcast().unwrap();
+        let new_val_cast: TestEventPayload = new_val_box.downcast().unwrap();
+        let new_str_cast: TestEventPayload = new_str_box.downcast().unwrap();
+        let new_a_cast: TestEventA = new_a_box.downcast().unwrap();
+        let new_b_cast: TestEventB = new_b_box.downcast().unwrap();
 
         assert_eq!(event, new_event_cast);
         assert_eq!(event_same, new_same_cast);
@@ -1153,7 +1197,7 @@ mod tests {
     #[cfg(all(feature = "event", feature = "serde", feature = "binary"))]
     #[test]
     fn event_binary() {
-        use crate::{downcast_event, register_event, BinarySerde, SerdeFormat};
+        use crate::{register_event, BinarySerde, DowncastEvent, SerdeFormat};
 
         let event = TestEventPayload {
             value: TEST_VAL,
@@ -1266,13 +1310,12 @@ mod tests {
         let new_str_box = BinarySerde.deserialize_event_dyn(&str_binary).unwrap();
         let new_a_box = BinarySerde.deserialize_event_dyn(&a_binary).unwrap();
         let new_b_box = BinarySerde.deserialize_event_dyn(&b_binary).unwrap();
-
-        let new_event_cast: TestEventPayload = downcast_event(new_event_box).unwrap();
-        let new_same_cast: TestEventPayload = downcast_event(new_same_box).unwrap();
-        let new_val_cast: TestEventPayload = downcast_event(new_val_box).unwrap();
-        let new_str_cast: TestEventPayload = downcast_event(new_str_box).unwrap();
-        let new_a_cast: TestEventA = downcast_event(new_a_box).unwrap();
-        let new_b_cast: TestEventB = downcast_event(new_b_box).unwrap();
+        let new_event_cast: TestEventPayload = new_event_box.downcast().unwrap();
+        let new_same_cast: TestEventPayload = new_same_box.downcast().unwrap();
+        let new_val_cast: TestEventPayload = new_val_box.downcast().unwrap();
+        let new_str_cast: TestEventPayload = new_str_box.downcast().unwrap();
+        let new_a_cast: TestEventA = new_a_box.downcast().unwrap();
+        let new_b_cast: TestEventB = new_b_box.downcast().unwrap();
 
         assert_eq!(event, new_event_cast);
         assert_eq!(event_same, new_same_cast);

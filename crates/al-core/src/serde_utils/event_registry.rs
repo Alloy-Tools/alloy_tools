@@ -32,7 +32,6 @@ impl EventRegistry {
         E: crate::Event + crate::EventMarker + for<'de> serde::de::Deserialize<'de> + 'static,
     >(
         &self,
-        event: E,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let deserializer: EventDeserializer =
             Arc::new(move |de: &mut dyn erased_serde::Deserializer<'_>| {
@@ -42,8 +41,11 @@ impl EventRegistry {
 
         self.deserializers
             .write()
-            .map_err(|e| format!("Event registry write lock poisoned: {e}"))?
-            .insert(event.type_with_generics(), deserializer);
+            .map_err(|e| format!("Event serde registry write lock poisoned: {e}"))?
+            .insert(
+                <E as crate::EventMarker>::type_with_generics(),
+                deserializer,
+            );
         Ok(())
     }
 
@@ -55,7 +57,7 @@ impl EventRegistry {
         Ok(self
             .deserializers
             .read()
-            .map_err(|e| format!("Event registry read lock poisoned: {e}"))?
+            .map_err(|e| format!("Event serde registry read lock poisoned: {e}"))?
             .get(type_name.as_ref())
             .cloned())
     }
@@ -65,7 +67,7 @@ impl EventRegistry {
 #[macro_export]
 macro_rules! register_event {
     ($event:ty) => {{
-        if let Err(e) = $crate::EVENT_REGISTRY.register_event(<$event>::default()) {
+        if let Err(e) = $crate::EVENT_REGISTRY.register_event::<$event>() {
             panic!(
                 "Failed to register deserializer for event type {}: {}",
                 stringify!($event),
@@ -79,7 +81,7 @@ macro_rules! register_event {
 #[macro_export]
 macro_rules! register_event_with {
     ($registry:expr, $event:ty) => {{
-        if let Err(e) = $registry.register_event(<$event>::default()) {
+        if let Err(e) = $registry.register_event::<$event>() {
             panic!(
                 "Failed to register deserializer for event type {} in registry {}: {}",
                 stringify!($event),

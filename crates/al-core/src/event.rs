@@ -18,11 +18,29 @@ pub fn type_with_generics<T>(_: &T) -> String {
 
 /// Helper function to downcast an event to a specific type, returning None if the downcast fails
 pub fn downcast<T: Event + EventRequirements + 'static>(
-    event: Box<dyn Event>,
-) -> Result<T, Box<dyn Event>> {
+    event: &Box<dyn Event>,
+) -> Result<T, String> {
     match event.as_any().downcast_ref::<T>() {
         Some(t) => Ok(t.clone()),
-        None => Err(event),
+        //None => Err(event),
+        None => Err(format!(
+            "Failed to downcast `dyn Event` of type '{}' to type '{}'",
+            event.type_with_generics(),
+            tynm::type_name::<T>()
+        )),
+    }
+}
+
+pub trait DowncastEvent {
+    fn downcast<T: Event + EventRequirements + 'static>(
+        self: &Box<Self>,
+    ) -> Result<T, String>;
+}
+impl DowncastEvent for dyn Event {
+    fn downcast<T: Event + EventRequirements + 'static>(
+        self: &Box<Self>,
+    ) -> Result<T, String> {
+        downcast(self)
     }
 }
 
@@ -56,7 +74,7 @@ impl<T: EventMarker + EventRequirements + crate::SerdeFeature> Event for T {
     where
         Self: for<'de> serde::Deserialize<'de>,
     {
-        crate::EVENT_REGISTRY.register_event(self)
+        crate::EVENT_REGISTRY.register_event::<T>()
     }
 
     /// Returns a reference to self as a dyn Any
