@@ -28,6 +28,16 @@ impl<T> List<T> {
         Ok(())
     }
 
+    /// Extends the inner Vec<Arc<dyn Transport<T>>> with the provided transports
+    pub fn extend(&self, tansports: impl AsRef<[Arc<dyn Transport<T>>]>) -> Result<(), TransportError> {
+        self.transports.lock()?.extend_from_slice(tansports.as_ref());
+        Ok(())
+    }
+
+    pub fn len(&self) -> Result<usize, TransportError> {
+        Ok(self.transports.lock()?.len())
+    }
+
     /// Provides access to the inner Vec<Arc<dyn Transport<T>>> via a closure
     pub fn with<F, R>(&self, f: F) -> Result<R, TransportError>
     where
