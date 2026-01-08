@@ -1,0 +1,16 @@
+name: Main CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  call-shared-ci:
+    uses: ./.github/workflows/shared_ci.yml
+    with:
+      branch: main
