@@ -464,6 +464,11 @@ impl<T: TaskTypes, E: TaskTypes, S: TaskState<T, E>> Task<T, E, S> {
     pub fn get_last_result(&self) -> Option<Result<T, E>> {
         self.state.blocking_read().get_last_result()
     }
+
+    /// Returns the current thread ID of the `Task`'s spawned thread
+    pub fn thread_id() -> std::thread::ThreadId {
+        std::thread::current().id()
+    }
 }
 
 #[cfg(all(test, feature = "test-tasks"))]
