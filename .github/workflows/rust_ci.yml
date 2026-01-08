@@ -21,7 +21,7 @@ jobs:
           - { os: windows-latest, target: x86_64-pc-windows-msvc }
           - { os: macos-latest, target: x86_64-apple-darwin }
         features: &feature-matrix
-          [ "none", "base, transport-base", "base, transport-base, serde", "base, transport-base, json", "base, transport-base, binary", "base, transport-base, json, binary", "base, transport-base, test-utils", "base, transport-base, test-tasks" ]
+          [ "none", "base", "transport-base", "base, transport-base", "base, transport-base, serde", "base, transport-base, json", "base, transport-base, binary", "base, transport-base, json, binary", "base, transport-base, test-utils", "base, transport-base, test-tasks" ]
 
     steps:
     - name: Checkout code
