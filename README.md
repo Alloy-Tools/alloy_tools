@@ -1,9 +1,9 @@
 # 1. Alloy
-[![MIT License](https://img.shields.io/badge/License-MIT-blue?logo=readthedocs&logoColor=white)](https://github.com/Alloy-Tools/alloy_tools/blob/main/LICENSE-MIT) [![Apache 2.0 License](https://img.shields.io/badge/License-Apache_2.0-blue?logo=readthedocs&logoColor=white)](https://github.com/Alloy-Tools/alloy_tools/blob/main/LICENSE-APACHE_2.0) [![Rust CI](https://github.com/Alloy-Tools/alloy_tools/actions/workflows/rust_ci.yml/badge.svg)](https://github.com/Alloy-Tools/alloy_tools/actions/workflows/rust_ci.yml)
+[![MIT License](https://img.shields.io/badge/License-MIT-blue?logo=readthedocs&logoColor=white)](https://github.com/Alloy-Tools/alloy_tools/blob/main/LICENSE-MIT) [![Apache 2.0 License](https://img.shields.io/badge/License-Apache_2.0-blue?logo=readthedocs&logoColor=white)](https://github.com/Alloy-Tools/alloy_tools/blob/main/LICENSE-APACHE_2.0) [![Main CI](https://github.com/Alloy-Tools/alloy_tools/actions/workflows/main_ci.yml/badge.svg)](https://github.com/Alloy-Tools/alloy_tools/actions/workflows/main_ci.yml) [![Dev CI](https://github.com/Alloy-Tools/alloy_tools/actions/workflows/dev_ci.yml/badge.svg)](https://github.com/Alloy-Tools/alloy_tools/actions/workflows/dev_ci.yml)
 
 **Alloy** is a collection of modular, extendable, interoperable Rust libraries designed to work together seamlessly while remaining independently useful. Like an emergent system, the components combine to create something larger than the individual parts.
 ## 1.1 Why Alloy?
-Modern Rust applications often need to assemble components from different ecosystems. Alloy provides cohesive foundation where:
+Modern Rust applications often need to assemble components from different ecosystems. Alloy provides a cohesive foundation where:
 - **Components are designed to work together** from the ground up
 - **APIs are consistent** across different domains
 - **Incremental adoption** — use one crate or the entire library
@@ -31,10 +31,10 @@ With plans for:
 
 | Docs                                                                                                                                                 | Description                                    |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| [![al-core docs](https://img.shields.io/badge/al--core-grey?logo=readme)](https://github.com/Alloy-Tools/alloy_tools/tree/main/crates/al-core)       | Core utilities, traits, and foundational types |
-| [![al-crypto docs](https://img.shields.io/badge/al--crypto-grey?logo=readme)](https://github.com/Alloy-Tools/alloy_tools/tree/main/crates/al-crypto) | Cryptographic primitives and protocols         |
-| [![al-vault docs](https://img.shields.io/badge/al--vault-grey?logo=readme)](https://github.com/Alloy-Tools/alloy_tools/tree/main/crates/al-vault)    | Secure secret management and key storage       |
-| [![al-net docs](https://img.shields.io/badge/al--net-grey?logo=readme)](https://github.com/Alloy-Tools/alloy_tools/tree/main/crates/al-net)          | Secure network connections                     |
+| [![al-core docs](https://img.shields.io/badge/al--core-grey?logo=readme)](https://github.com/Alloy-Tools/alloy_tools/tree/main/crates/al-core/README.md)       | Core utilities, traits, and foundational types |
+| [![al-crypto docs](https://img.shields.io/badge/al--crypto-grey?logo=readme)](https://github.com/Alloy-Tools/alloy_tools/tree/main/crates/al-crypto/README.md) | Cryptographic primitives and protocols         |
+| [![al-vault docs](https://img.shields.io/badge/al--vault-grey?logo=readme)](https://github.com/Alloy-Tools/alloy_tools/tree/main/crates/al-vault/README.md)    | Secure secret management and key storage       |
+| [![al-net docs](https://img.shields.io/badge/al--net-grey?logo=readme)](https://github.com/Alloy-Tools/alloy_tools/tree/main/crates/al-net/README.md)          | Secure network connections                     |
 ## 2.2 Roadmap
 See [roadmap](https://github.com/Alloy-Tools/alloy_tools/blob/main/ROADMAP.md) for planned crates and features.
 # 3. Getting Started
@@ -90,7 +90,7 @@ All code is dual-licensed, at your option, under either of:
 - [Apache 2.0 License](https://github.com/Alloy-Tools/alloy_tools/blob/main/LICENSE-APACHE_2.0)
 - [MIT License](https://github.com/Alloy-Tools/alloy_tools/blob/main/LICENSE-MIT)
 # 6. Acknowledgments
-- [![tynm version 0.2](https://img.shields.io/badge/tynm-0.2-blue?logo=rust)](https://docs.rs/tynm/0.2/tynm/index.html) — Used to get simple types names that include
+- [![tynm version 0.2](https://img.shields.io/badge/tynm-0.2-blue?logo=rust)](https://docs.rs/tynm/0.2/tynm/index.html) — Used to get simple types names that include generics
 - [![serde version 1.0.219](https://img.shields.io/badge/serde-1.0.219-blue?logo=rust)](https://docs.rs/serde/1.0.219/serde/) — Used for serialization framework
 - [![erased-serde version 0.4.6](https://img.shields.io/badge/erased--serde-0.4.6-blue?logo=rust)](https://docs.rs/erased-serde/0.4.6/erased_serde/) — Used for type erased serialization
 - [![tokio version 1](https://img.shields.io/badge/tokio-1-blue?logo=rust)](https://docs.rs/tokio/latest/tokio/) — Used for threads and asynchronous runtime

@@ -11,12 +11,12 @@ The main objective is to make foundational crates—al-core and al-tui—that wi
 	- Secure network transmission: `al-net v1.0.0`
 ## 1.2 Crate Specific Plans
 
-| Crate       | Status | Planned Features                    |
-| ----------- | ------ | ----------------------------------- |
-| `al-core`   | v0.5.0 | Event registration macros           |
-| `al-crypto` | v0.0.1 | Cryptographic primitives            |
-| `al-vault`  | v0.0.1 | Secure persistent storage, CLI tool |
-| `al-net`    | v0.0.1 | Secure network transfer, CLI tool   |
-| `al-tui`    | v0.0.1 | Simple terminal user interface      |
+| Crate       | Status | Planned Features                          |
+| ----------- | ------ | ----------------------------------------- |
+| `al-core`   | v0.5.0 | Event registration macros                 |
+| `al-crypto` | v0.0.1 | Cryptographic primitives                  |
+| `al-vault`  | v0.0.1 | Secure RAM & persistent storage, CLI tool |
+| `al-net`    | v0.0.1 | Secure network transfer, CLI tool         |
+| `al-tui`    | v0.0.1 | Simple terminal user interface            |
 # 2. Completed Items
 - 
