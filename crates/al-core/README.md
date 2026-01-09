@@ -22,7 +22,7 @@ The central idea is to turn heterogenous data into homogeneous `Event` types tha
 ## 2.1 Definition
 Commands are simply predefined messages that can be passed through the system.
 
-In practice, commands are defined as a variant of the `Command` enum which holds built-in commands such as `Pulse`, `Stop`, and `Restart`. A full list of built-in commands can be found in section '[2.3 Build-In Commands](#2.3%20Built-In%20Commands)' below.
+In practice, commands are defined as a variant of the `Command` enum which holds built-in commands such as `Pulse`, `Stop`, and `Restart`. A full list of built-in commands can be found in section '[2.3 Build-In Commands](#23-built-in-commands)' below.
 
 To allow runtime extension within a system built on compile-time enum variants, an additional built-in `Event` command is provided that holds a `Box<dyn Event>`. The variant allows any `dyn Event` generated at runtime to be boxed and passed through the system.
 
@@ -143,7 +143,7 @@ impl SerdeFormat for CustomSerde {
 ## 5.1 Definition
 The `Transport<T>` trait represents something with the ability to move a type T, as in, calling `transport.send(t)` should result in the same `t`—albeit potentially modified with the `Transport<T>` internal logic—being attainable through `transport.recv()`.
 
-The built-in `Transport<T>` types are designed to recursively allow many `Transport<T>` types to be combined together into a single `Transport<T>` pipeline. This allows the transports comprising the internal pipeline to be abstracted behind the pipelines own outer `.send(t)` or `.recv()`. For references, look to the section '[5.3 Examples](#5.3%20Examples)' below.
+The built-in `Transport<T>` types are designed to recursively allow many `Transport<T>` types to be combined together into a single `Transport<T>` pipeline. This allows the transports comprising the internal pipeline to be abstracted behind the pipelines own outer `.send(t)` or `.recv()`. For references, look to the section '[5.3 Examples](#53-examples)' below.
 ## 5.2 Built-In Types
 ### 5.2.1 Queue
 The `Queue<T>` struct implements `Transport<T>` with access to its internal `VecDeque<T>` supporting a FIFO order.
