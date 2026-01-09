@@ -40,9 +40,9 @@ pub trait SerdeFormat:
 
     #[cfg(feature = "command")]
     /// Deserialize a command from the passed byte slice.
-    fn deserialize_command<'a>(
+    fn deserialize_command(
         &self,
-        data: &'a [u8],
+        data: &[u8],
     ) -> Result<crate::Command, Box<dyn std::error::Error>>;
 }
 
@@ -88,9 +88,9 @@ impl SerdeFormat for JsonSerde {
     }
 
     #[cfg(feature = "command")]
-    fn deserialize_command<'a>(
+    fn deserialize_command(
         &self,
-        data: &'a [u8],
+        data: &[u8],
     ) -> Result<crate::Command, Box<dyn std::error::Error>> {
         serde_json::from_slice(data).map_err(|e| e.into())
     }
@@ -138,9 +138,9 @@ impl SerdeFormat for BinarySerde {
     }
 
     #[cfg(feature = "command")]
-    fn deserialize_command<'a>(
+    fn deserialize_command(
         &self,
-        data: &'a [u8],
+        data: &[u8],
     ) -> Result<crate::Command, Box<dyn std::error::Error>> {
         bitcode::deserialize(data).map_err(|e| e.into())
     }

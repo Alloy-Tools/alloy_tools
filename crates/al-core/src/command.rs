@@ -2,8 +2,8 @@
 use crate::event::Event;
 
 /// A command that can be sent through the system to signal actions, including custom events.
-#[cfg_attr(feature = "event", crate::event_requirements)]
-#[cfg_attr(not(feature = "event"), derive(Default))]
+#[cfg_attr(feature = "event", crate::event_requirements(Default))]
+#[derive(Default)]
 pub enum Command {
     #[cfg(feature = "event")]
     Event(Box<dyn Event>),

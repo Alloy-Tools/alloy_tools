@@ -41,9 +41,10 @@ pub use {
     event::downcast as downcast_event, event::type_with_generics, event::DowncastEvent,
     event::Event, markers::EventMarker, markers::EventRequirements, markers::SerdeFeature,
 };
+pub use markers::NoOp;
 #[cfg(feature = "transport")]
 pub use {
-    markers::NoOp, markers::TransportItemRequirements, markers::TransportRequirements,
+    markers::TransportItemRequirements, markers::TransportRequirements,
     transport::Transport, transport::TransportError, transports::list::List,
     transports::publisher::Publisher, transports::queue::Queue,
     transports::transform::ApplyTransform, transports::transform::Transform,
