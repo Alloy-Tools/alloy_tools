@@ -10,3 +10,8 @@ doctest = false
 test = false
 
 [dependencies]
+al-crypto = { path = "../al-crypto" }
+secrets = { version = "1.2.0", features = ["use-libsodium-sys"] }
+zeroize = { version = "1.8.2", features = ["alloc", "zeroize_derive"] }
+serde = { version = "1.0.219", features = ["derive"] }
+bitcode = { version = "0.6.6", features = ["serde"] }
