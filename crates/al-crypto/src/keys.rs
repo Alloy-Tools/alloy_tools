@@ -144,7 +144,6 @@ mod tests {
         )
     }
 
-    #[cfg(feature = "full-test")]
     #[test]
     fn full_pdk() {
         let mut dest = [0u8; KEY_SIZE];

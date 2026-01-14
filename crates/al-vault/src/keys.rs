@@ -1,15 +1,13 @@
 use al_crypto::{decrypt, encrypt, CryptoError};
-
 use crate::{Ephemeral, FixedSecret, SecureContainer};
 
-const DEFAULT_KEY_LENGTH: usize = 32;
+pub const KEY_LENGTH: usize = 32;
 
 //TODO:
 //pub struct SystemKey<K: KeyType, const N: usize>(SystemSecret<FixedSecret<N, Ephemeral>>, PhantomData<K>);
 
-//TODO system should be able to encrypt Ephemeral secrets by accessing them with SystemControl
 /// Keys contain an `Ephemeral` `FixedSecret`
-pub struct Key<const N: usize = DEFAULT_KEY_LENGTH>(FixedSecret<N, Ephemeral>);
+pub struct Key<const N: usize = KEY_LENGTH>(FixedSecret<N, Ephemeral>);
 
 impl<const N: usize> From<FixedSecret<N, Ephemeral>> for Key<N> {
     fn from(secret: FixedSecret<N, Ephemeral>) -> Self {
@@ -37,13 +35,8 @@ impl<const N: usize> Key<N> {
         nonce: &[u8; al_crypto::NONCE_SIZE],
         associated_data: &[u8],
     ) -> Result<(), CryptoError> {
-        encrypt(
-            dest,
-            plaintext,
-            &*self.0.inner.borrow(),
-            nonce,
-            associated_data,
-        )
+        self.0
+            .with(|k| encrypt(dest, plaintext, k, nonce, associated_data))
     }
 
     pub fn decrypt(
@@ -53,13 +46,8 @@ impl<const N: usize> Key<N> {
         nonce: &[u8; al_crypto::NONCE_SIZE],
         associated_data: &[u8],
     ) -> Result<(), CryptoError> {
-        decrypt(
-            dest,
-            ciphertext,
-            &*self.0.inner.borrow(),
-            nonce,
-            associated_data,
-        )
+        self.0
+            .with(|k| decrypt(dest, ciphertext, k, nonce, associated_data))
     }
 }
 
