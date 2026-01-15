@@ -6,7 +6,6 @@ use hmac::{Mac, SimpleHmac};
 use rand::{rngs::OsRng, TryRngCore};
 use zeroize::Zeroize;
 
-pub const NONCE_SIZE: usize = 12;
 pub const TAG_SIZE: usize = 16;
 pub const KEY_SIZE: usize = 32;
 
@@ -34,10 +33,12 @@ impl From<hex::FromHexError> for CryptoError {
     }
 }
 
+/// Doesn't zeroize the passed `bytes`
 pub fn to_hex(bytes: &[u8], str: &mut [u8]) -> Result<(), CryptoError> {
     Ok(hex::encode_to_slice(bytes, str)?)
 }
 
+/// Doesn't zeroize the passed `str`
 pub fn from_hex(str: &[u8], bytes: &mut [u8]) -> Result<(), CryptoError> {
     Ok(hex::decode_to_slice(str, bytes)?)
 }
@@ -45,7 +46,20 @@ pub fn from_hex(str: &[u8], bytes: &mut [u8]) -> Result<(), CryptoError> {
 pub fn fill_random(dest: &mut [u8]) -> Result<(), CryptoError> {
     Ok(OsRng.try_fill_bytes(dest)?)
 }
+/// Doesn't zeroize the passed `password`, `salt`, or `expected_pdk`
+pub fn verify_password<const N: usize>(
+    password: &[u8],
+    salt: &[u8],
+    expected_pdk: &[u8; N],
+) -> Result<bool, CryptoError> {
+    let mut pdk = [0u8; N];
+    derive_pdk(&mut pdk, password, salt)?;
+    let result = &pdk == expected_pdk;
+    pdk.zeroize();
+    Ok(result)
+}
 
+/// Doesn't zeroize the passed `password` or `salt`
 pub fn derive_pdk<const N: usize>(
     dest: &mut [u8; N],
     password: &[u8],
@@ -59,6 +73,7 @@ pub fn derive_pdk<const N: usize>(
     Ok(argon2.hash_password_into(password, &salt, dest)?)
 }
 
+/// Doesn't zeroize the passed `key` or `context`
 pub fn derive_subkey<const N: usize>(
     dest: &mut [u8; N],
     key: &[u8],
@@ -68,7 +83,7 @@ pub fn derive_subkey<const N: usize>(
     mac.update(context.as_ref().as_bytes());
     let mut result = mac.finalize().into_bytes();
     dest.copy_from_slice(&result[..N]);
-    zeroize::Zeroize::zeroize(&mut result[..]);
+    result[..].zeroize();
     Ok(())
 }
 
@@ -91,7 +106,7 @@ pub fn encrypt(
             dest.zeroize();
             CryptoError::EncryptionError(e)
         })?;
-    dest[p_len..].copy_from_slice(&tag);
+    dest[p_len..p_len + TAG_SIZE].copy_from_slice(&tag);
     Ok(())
 }
 
@@ -102,12 +117,13 @@ pub fn decrypt(
     nonce: &[u8],
     associated_data: &[u8],
 ) -> Result<(), CryptoError> {
-    if dest.len() < ciphertext.len() - TAG_SIZE {
+    let p_len = ciphertext.len() - TAG_SIZE;
+    if dest.len() < p_len {
         return Err(CryptoError::DestToSmall);
     }
     let mut cipher = <ChaCha20Poly1305 as chacha20poly1305::KeyInit>::new_from_slice(key)?;
 
-    let (data, tag) = ciphertext.split_at(ciphertext.len() - TAG_SIZE);
+    let (data, tag) = ciphertext.split_at(p_len);
     dest.copy_from_slice(data);
 
     cipher
@@ -123,13 +139,12 @@ pub fn decrypt(
 mod tests {
     use zeroize::Zeroize;
 
-    use crate::{
-        keys::{decrypt, derive_pdk, derive_subkey, encrypt, to_hex, NONCE_SIZE},
-        KEY_SIZE,
-    };
+    use crate::{decrypt, derive_pdk, derive_subkey, encrypt, to_hex, KEY_SIZE, NONCE_SIZE};
 
     const TEST_PASSWORD: &str = "SecretPassword1";
     const TEST_SALT: &str = "1234567890123456";
+    const TEST_PASSWORD2: &str = "SecretPassword2";
+    const TEST_SALT2: &str = "6234567890123451";
     const SUBKEY_CONTEXT: &str = "subkey-testing";
 
     #[test]
@@ -145,32 +160,46 @@ mod tests {
     }
 
     #[test]
+    fn verify_password() {
+        let mut pdk = [0u8; KEY_SIZE];
+        derive_pdk(&mut pdk, TEST_PASSWORD.as_bytes(), TEST_SALT.as_bytes()).unwrap();
+        assert_eq!(
+            crate::verify_password(TEST_PASSWORD.as_bytes(), TEST_SALT.as_bytes(), &pdk).unwrap(),
+            true
+        );
+        assert_eq!(
+            crate::verify_password(TEST_PASSWORD2.as_bytes(), TEST_SALT.as_bytes(), &pdk).unwrap(),
+            false
+        );
+        assert_eq!(
+            crate::verify_password(TEST_PASSWORD.as_bytes(), TEST_SALT2.as_bytes(), &pdk).unwrap(),
+            false
+        );
+    }
+
+    #[test]
     fn full_pdk() {
         let mut dest = [0u8; KEY_SIZE];
         let mut hex = [0u8; 2 * KEY_SIZE];
-        let password = TEST_PASSWORD.as_bytes();
-        let salt = TEST_SALT.as_bytes();
-        let password2 = "SecretPassword2".as_bytes();
-        let salt2 = "6234567890123451".as_bytes();
-        derive_pdk(&mut dest, password, salt).unwrap();
+        derive_pdk(&mut dest, TEST_PASSWORD.as_bytes(), TEST_SALT.as_bytes()).unwrap();
         to_hex(&dest, &mut hex).unwrap();
         assert_eq!(
             str::from_utf8(&hex).unwrap(),
             "05546d4b0a40d2c5b686ac39ca3d104a4d7e1b7ee0352b0b470aaad1943e7fd0"
         );
-        derive_pdk(&mut dest, password2, salt).unwrap();
+        derive_pdk(&mut dest, TEST_PASSWORD2.as_bytes(), TEST_SALT.as_bytes()).unwrap();
         to_hex(&dest, &mut hex).unwrap();
         assert_eq!(
             str::from_utf8(&hex).unwrap(),
             "403ba84bea63d0771b86636f93f4eb2c1aca113595250ae71e3da4302a5a5ea3"
         );
-        derive_pdk(&mut dest, password, salt2).unwrap();
+        derive_pdk(&mut dest, TEST_PASSWORD.as_bytes(), TEST_SALT2.as_bytes()).unwrap();
         to_hex(&dest, &mut hex).unwrap();
         assert_eq!(
             str::from_utf8(&hex).unwrap(),
             "d9dd64e55fd6f5eef122e5d7eeace6155125b58510c7042ff0f993f3a6cb5f4e"
         );
-        derive_pdk(&mut dest, password2, salt2).unwrap();
+        derive_pdk(&mut dest, TEST_PASSWORD2.as_bytes(), TEST_SALT2.as_bytes()).unwrap();
         to_hex(&dest, &mut hex).unwrap();
         assert_eq!(
             str::from_utf8(&hex).unwrap(),

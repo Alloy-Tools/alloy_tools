@@ -3,7 +3,6 @@ pub trait SecureContainer<L: crate::AsSecurityLevel> {
     type OutputType;
     type ResultType<R>;
     fn tag(&self) -> &str;
-    fn audit_access(&self, operation: &str);
     //TODO: rename `new` & `take` to be more inline with actual function
     /// Will consume the data in `inner`, zeroing it before dropping
     fn new(inner: Self::InnerType, tag: impl Into<String>) -> Self::OutputType;
@@ -15,4 +14,19 @@ pub trait SecureContainer<L: crate::AsSecurityLevel> {
     fn security_level() -> crate::SecurityLevel {
         L::as_security_level()
     }
+
+    fn audit_access(&self, operation: &str) {
+        todo!()
+        //lazy static AuditLog: Vec<AuditEntry> using audit_log!() macro
+    }
+}
+
+pub trait EncryptedExt {
+    type EphemeralType;
+    fn to_ephemeral(self) -> Self::EphemeralType;
+}
+
+pub trait EphemeralExt {
+    /*type EncryptedType;
+    fn to_encrypted(self) -> Self::EncryptedType;*/
 }

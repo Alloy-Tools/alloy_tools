@@ -34,11 +34,6 @@ impl<T: Secureable, L: AsSecurityLevel> SecureContainer<L> for DynamicSecret<T, 
         &self.tag
     }
 
-    fn audit_access(&self, _operation: &str) {
-        todo!()
-        //lazy static AuditLog: Vec<AuditEntry> using audit_log!() macro
-    }
-
     fn new(mut inner: Self::InnerType, tag: impl Into<String>) -> Self::OutputType {
         Self::take(&mut inner, tag)
     }

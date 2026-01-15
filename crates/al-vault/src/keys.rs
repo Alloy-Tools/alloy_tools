@@ -1,13 +1,11 @@
-use al_crypto::{decrypt, encrypt, CryptoError};
+use al_crypto::{CryptoError, KEY_SIZE, decrypt, encrypt};
 use crate::{Ephemeral, FixedSecret, SecureContainer};
-
-pub const KEY_LENGTH: usize = 32;
 
 //TODO:
 //pub struct SystemKey<K: KeyType, const N: usize>(SystemSecret<FixedSecret<N, Ephemeral>>, PhantomData<K>);
 
 /// Keys contain an `Ephemeral` `FixedSecret`
-pub struct Key<const N: usize = KEY_LENGTH>(FixedSecret<N, Ephemeral>);
+pub struct Key<const N: usize = KEY_SIZE>(FixedSecret<N, Ephemeral>);
 
 impl<const N: usize> From<FixedSecret<N, Ephemeral>> for Key<N> {
     fn from(secret: FixedSecret<N, Ephemeral>) -> Self {

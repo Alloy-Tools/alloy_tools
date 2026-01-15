@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use crate::{AsSecurityLevel, SecureContainer, SecureRef};
+use crate::{AsSecurityLevel, Encrypted, EncryptedExt, Ephemeral, SecureContainer, SecureRef};
 use al_crypto::fill_random;
 use secrets::{Secret, SecretBox};
 
@@ -36,11 +36,6 @@ impl<const N: usize, L: AsSecurityLevel> SecureContainer<L> for FixedSecret<N, L
         &self.tag
     }
 
-    fn audit_access(&self, _operation: &str) {
-        todo!()
-        //lazy static AuditLog: Vec<AuditEntry> using audit_log!() macro
-    }
-
     fn new(mut inner: Self::InnerType, tag: impl Into<String>) -> Self::OutputType {
         Self::take(&mut inner, tag)
     }
@@ -65,5 +60,13 @@ impl<const N: usize, L: AsSecurityLevel> SecureContainer<L> for FixedSecret<N, L
         let result = f(secure_ref.get_mut());
         self.inner.borrow_mut().copy_from_slice(secure_ref.get());
         result
+    }
+}
+
+impl<const N: usize> EncryptedExt for FixedSecret<N, Encrypted> {
+    type EphemeralType = FixedSecret<N, Ephemeral>;
+
+    fn to_ephemeral(self) -> Self::EphemeralType {
+        FixedSecret::<N, Ephemeral>::new(*self.inner.borrow(), self.tag)
     }
 }

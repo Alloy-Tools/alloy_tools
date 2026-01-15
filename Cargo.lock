@@ -51,6 +51,7 @@ dependencies = [
  "hex",
  "hmac",
  "rand",
+ "serde",
  "zeroize",
 ]
 
