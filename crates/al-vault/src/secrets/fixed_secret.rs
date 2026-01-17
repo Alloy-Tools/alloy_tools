@@ -63,10 +63,10 @@ impl<const N: usize, L: AsSecurityLevel> SecureContainer<L> for FixedSecret<N, L
     }
 }
 
-impl<const N: usize> EncryptedExt for FixedSecret<N, Encrypted> {
+/*impl<const N: usize> EncryptedExt for FixedSecret<N, Encrypted> {
     type EphemeralType = FixedSecret<N, Ephemeral>;
 
     fn to_ephemeral(self) -> Self::EphemeralType {
         FixedSecret::<N, Ephemeral>::new(*self.inner.borrow(), self.tag)
     }
-}
+}*/

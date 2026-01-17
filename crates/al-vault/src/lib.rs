@@ -1,11 +1,13 @@
+mod audit;
 mod container;
-mod keys;
+mod crypto;
 mod secrets;
 
 pub use container::{
     secure_container::{EncryptedExt, EphemeralExt, SecureContainer},
     security_level::{AsSecurityLevel, Encrypted, Ephemeral, SecurityLevel},
 };
+pub use crypto::{keys::Key, nonce::Nonce};
 pub use secrets::{
     dynamic_secret::DynamicSecret,
     fixed_secret::FixedSecret,
@@ -16,5 +18,7 @@ pub use secrets::{
 mod tests {
 
     #[test]
-    fn todo() {}
+    fn todo() {
+        todo!()
+    }
 }

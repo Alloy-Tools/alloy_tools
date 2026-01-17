@@ -51,7 +51,7 @@ impl<const N: usize> Key<N> {
 
 #[cfg(test)]
 mod tests {
-    use crate::keys::Key;
+    use crate::Key;
     use al_crypto::{from_hex, to_hex, KEY_SIZE, NONCE_SIZE, TAG_SIZE};
     use secrets::{traits::AsContiguousBytes, SecretVec};
 

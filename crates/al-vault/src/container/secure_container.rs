@@ -15,7 +15,7 @@ pub trait SecureContainer<L: crate::AsSecurityLevel> {
         L::as_security_level()
     }
 
-    fn audit_access(&self, operation: &str) {
+    fn audit_access(&self, _operation: &str) {
         todo!()
         //lazy static AuditLog: Vec<AuditEntry> using audit_log!() macro
     }

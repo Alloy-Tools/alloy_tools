@@ -43,6 +43,7 @@ pub fn from_hex(str: &[u8], bytes: &mut [u8]) -> Result<(), CryptoError> {
     Ok(hex::decode_to_slice(str, bytes)?)
 }
 
+/// Fills the `dest` byte array with random bytes
 pub fn fill_random(dest: &mut [u8]) -> Result<(), CryptoError> {
     Ok(OsRng.try_fill_bytes(dest)?)
 }
@@ -87,6 +88,7 @@ pub fn derive_subkey<const N: usize>(
     Ok(())
 }
 
+/// Encrypts the `plaintext` byte slice into the `dest` byte slice using the `key`, `nonce`, and `associated_data` slices
 pub fn encrypt(
     dest: &mut [u8],
     plaintext: &[u8],
@@ -110,6 +112,7 @@ pub fn encrypt(
     Ok(())
 }
 
+/// Decrypts the `ciphertext` byte slice into the `dest` byte slice using the `key`, `nonce`, and `associated_data` slices
 pub fn decrypt(
     dest: &mut [u8],
     ciphertext: &[u8],
