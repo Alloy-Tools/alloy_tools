@@ -1,5 +1,5 @@
-use al_crypto::{CryptoError, KEY_SIZE, decrypt, encrypt};
-use crate::{Ephemeral, FixedSecret, SecureContainer};
+use crate::{Ephemeral, FixedSecret, SecureAccess};
+use al_crypto::{decrypt, encrypt, CryptoError, KEY_SIZE};
 
 //TODO:
 //pub struct SystemKey<K: KeyType, const N: usize>(SystemSecret<FixedSecret<N, Ephemeral>>, PhantomData<K>);

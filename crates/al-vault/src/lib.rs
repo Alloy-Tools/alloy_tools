@@ -4,7 +4,9 @@ mod crypto;
 mod secrets;
 
 pub use container::{
-    secure_container::{EncryptedExt, EphemeralExt, SecureContainer},
+    secure_container::{
+        EncryptedExt, EphemeralExt, SecureAccess, SecureContainer, ToSecureContainer,
+    },
     security_level::{AsSecurityLevel, Encrypted, Ephemeral, SecurityLevel},
 };
 pub use crypto::{keys::Key, nonce::Nonce};

@@ -1,13 +1,16 @@
 use std::marker::PhantomData;
 
-use crate::{AsSecurityLevel, Encrypted, EncryptedExt, Ephemeral, SecureContainer, SecureRef};
+use crate::{
+    container::secure_container::{SecureAccess, ToSecureContainer},
+    AsSecurityLevel, Ephemeral, SecureContainer, SecureRef,
+};
 use al_crypto::fill_random;
 use secrets::{Secret, SecretBox};
 
 /// For raw, fixed-size byte arrays.
 /// This is the most efficient and secure for keys, tokens, etc. when the size is known at compile time.
 /// It uses `secrets::SecretBox<T>` directly.
-pub struct FixedSecret<const N: usize, L: AsSecurityLevel> {
+pub struct FixedSecret<const N: usize, L: AsSecurityLevel = Ephemeral> {
     inner: SecretBox<[u8; N]>,
     tag: String,
     _phantom: PhantomData<L>,
@@ -25,22 +28,14 @@ impl<const N: usize, L: AsSecurityLevel> FixedSecret<N, L> {
             _phantom: PhantomData,
         }
     }
-}
 
-impl<const N: usize, L: AsSecurityLevel> SecureContainer<L> for FixedSecret<N, L> {
-    type InnerType = [u8; N];
-    type OutputType = FixedSecret<N, L>;
-    type ResultType<R> = R;
-
-    fn tag(&self) -> &str {
-        &self.tag
-    }
-
-    fn new(mut inner: Self::InnerType, tag: impl Into<String>) -> Self::OutputType {
+    /// Will consume the data in `inner`, zeroing it before dropping
+    pub fn new(mut inner: [u8; N], tag: impl Into<String>) -> Self {
         Self::take(&mut inner, tag)
     }
 
-    fn take(inner: &mut Self::InnerType, tag: impl Into<String>) -> Self::OutputType {
+    /// Will zero out the data in `inner` after taking it
+    pub fn take(inner: &mut [u8; N], tag: impl Into<String>) -> Self {
         Self {
             // `SecretBox::from` will attempt to zero out the data in `inner` after taking it
             inner: SecretBox::from(inner),
@@ -48,6 +43,38 @@ impl<const N: usize, L: AsSecurityLevel> SecureContainer<L> for FixedSecret<N, L
             _phantom: PhantomData,
         }
     }
+}
+
+impl<const N: usize, L: AsSecurityLevel> SecureContainer for FixedSecret<N, L> {
+    type SecretType = Self;
+    type InnerType = [u8; N];
+    type SecurityLevel = L;
+
+    fn tag(&self) -> &str {
+        &self.tag
+    }
+
+    fn access(&self) -> &Self::SecretType {
+        self
+    }
+}
+
+impl<'a, const N: usize, L: AsSecurityLevel> From<&'a FixedSecret<N, L>>
+    for &'a dyn SecureContainer<
+        SecretType = FixedSecret<N, L>,
+        InnerType = [u8; N],
+        SecurityLevel = L,
+    >
+{
+    fn from(value: &'a FixedSecret<N, L>) -> Self {
+        value
+    }
+}
+
+impl<const N: usize, L: AsSecurityLevel> ToSecureContainer for FixedSecret<N, L> {}
+
+impl<const N: usize, L: AsSecurityLevel> SecureAccess for FixedSecret<N, L> {
+    type ResultType<R> = R;
 
     fn with<R>(&self, f: impl FnOnce(&Self::InnerType) -> R) -> Self::ResultType<R> {
         self.audit_access("access");
@@ -70,3 +97,14 @@ impl<const N: usize, L: AsSecurityLevel> SecureContainer<L> for FixedSecret<N, L
         FixedSecret::<N, Ephemeral>::new(*self.inner.borrow(), self.tag)
     }
 }*/
+
+#[cfg(test)]
+mod tests {
+    use crate::{FixedSecret, SecureContainer, container::secure_container::ToSecureContainer};
+
+    #[test]
+    fn secure_container() {
+        let secret = FixedSecret::<32>::random("Test Secret");
+        let container = secret.to_box();
+    }
+}

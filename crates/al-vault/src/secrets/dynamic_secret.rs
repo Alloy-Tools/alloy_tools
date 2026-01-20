@@ -1,11 +1,14 @@
-use crate::{AsSecurityLevel, SecureContainer, SecureRef, Secureable};
+use crate::{
+    container::secure_container::{SecureAccess, ToSecureContainer},
+    AsSecurityLevel, Ephemeral, SecureContainer, SecureRef, Secureable,
+};
 use al_crypto::fill_random;
 use secrets::SecretVec;
 use std::marker::PhantomData;
 
 /// For complex, serializable types (String, Vec, structs).
 /// Stores them as a `secrets::SecretVec<u8>` of their serialized form.
-pub struct DynamicSecret<T: Secureable, L: AsSecurityLevel> {
+pub struct DynamicSecret<T: Secureable, L: AsSecurityLevel = Ephemeral> {
     inner: SecretVec<u8>,
     tag: String,
     _phantom: PhantomData<(T, L)>,
@@ -23,22 +26,14 @@ impl<T: Secureable, L: AsSecurityLevel> DynamicSecret<T, L> {
             _phantom: PhantomData,
         }
     }
-}
 
-impl<T: Secureable, L: AsSecurityLevel> SecureContainer<L> for DynamicSecret<T, L> {
-    type InnerType = T;
-    type OutputType = Result<Self, bitcode::Error>;
-    type ResultType<R> = Result<R, bitcode::Error>;
-
-    fn tag(&self) -> &str {
-        &self.tag
-    }
-
-    fn new(mut inner: Self::InnerType, tag: impl Into<String>) -> Self::OutputType {
+    /// Will consume the data in `inner`, zeroing it before dropping
+    pub fn new(mut inner: T, tag: impl Into<String>) -> Result<Self, bitcode::Error> {
         Self::take(&mut inner, tag)
     }
 
-    fn take(inner: &mut Self::InnerType, tag: impl Into<String>) -> Self::OutputType {
+    /// Will zero out the data in `inner` after taking it
+    pub fn take(inner: &mut T, tag: impl Into<String>) -> Result<Self, bitcode::Error> {
         let mut bytes = inner.to_bytes()?;
         inner.zeroize();
         Ok(Self {
@@ -47,6 +42,26 @@ impl<T: Secureable, L: AsSecurityLevel> SecureContainer<L> for DynamicSecret<T, 
             _phantom: PhantomData,
         })
     }
+}
+
+impl<T: Secureable, L: AsSecurityLevel> SecureContainer for DynamicSecret<T, L> {
+    type SecretType = Self;
+    type InnerType = T;
+    type SecurityLevel = L;
+
+    fn tag(&self) -> &str {
+        &self.tag
+    }
+
+    fn access(&self) -> &Self::SecretType {
+        self
+    }
+}
+
+impl<T: Secureable, L: AsSecurityLevel> ToSecureContainer for DynamicSecret<T, L> {}
+
+impl<T: Secureable, L: AsSecurityLevel> SecureAccess for DynamicSecret<T, L> {
+    type ResultType<R> = Result<R, bitcode::Error>;
 
     fn with<R>(&self, f: impl FnOnce(&Self::InnerType) -> R) -> Self::ResultType<R> {
         self.audit_access("access");
