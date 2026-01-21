@@ -1,8 +1,7 @@
 use std::marker::PhantomData;
 
 use crate::{
-    container::secure_container::{SecureAccess, ToSecureContainer},
-    AsSecurityLevel, Ephemeral, SecureContainer, SecureRef,
+    AsSecurityLevel, Ephemeral, SecureContainer, SecureRef, container::secure_container::SecureAccess
 };
 use al_crypto::fill_random;
 use secrets::{Secret, SecretBox};
@@ -46,43 +45,29 @@ impl<const N: usize, L: AsSecurityLevel> FixedSecret<N, L> {
 }
 
 impl<const N: usize, L: AsSecurityLevel> SecureContainer for FixedSecret<N, L> {
-    type SecretType = Self;
     type InnerType = [u8; N];
     type SecurityLevel = L;
 
     fn tag(&self) -> &str {
         &self.tag
     }
-
-    fn access(&self) -> &Self::SecretType {
-        self
-    }
 }
-
-impl<'a, const N: usize, L: AsSecurityLevel> From<&'a FixedSecret<N, L>>
-    for &'a dyn SecureContainer<
-        SecretType = FixedSecret<N, L>,
-        InnerType = [u8; N],
-        SecurityLevel = L,
-    >
-{
-    fn from(value: &'a FixedSecret<N, L>) -> Self {
-        value
-    }
-}
-
-impl<const N: usize, L: AsSecurityLevel> ToSecureContainer for FixedSecret<N, L> {}
 
 impl<const N: usize, L: AsSecurityLevel> SecureAccess for FixedSecret<N, L> {
     type ResultType<R> = R;
 
     fn with<R>(&self, f: impl FnOnce(&Self::InnerType) -> R) -> Self::ResultType<R> {
-        self.audit_access("access");
+        //TODO: handle io error possibility?
+        let _ = self.audit_access("access");
         f(SecureRef::new(*self.inner.borrow()).get())
     }
 
-    fn with_mut<R>(&mut self, f: impl FnOnce(&mut Self::InnerType) -> R) -> Self::ResultType<R> {
-        self.audit_access("mutable access");
+    fn with_mut<R>(
+        &mut self,
+        f: impl FnOnce(&mut Self::InnerType) -> R,
+    ) -> Self::ResultType<R> {
+        //TODO: handle io error possibility?
+        let _ = self.audit_access("mutable access");
         let mut secure_ref = SecureRef::new(*self.inner.borrow());
         let result = f(secure_ref.get_mut());
         self.inner.borrow_mut().copy_from_slice(secure_ref.get());
@@ -100,11 +85,12 @@ impl<const N: usize, L: AsSecurityLevel> SecureAccess for FixedSecret<N, L> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{FixedSecret, SecureContainer, container::secure_container::ToSecureContainer};
+    use crate::{container::secure_container::ToSecureContainer, FixedSecret};
 
     #[test]
     fn secure_container() {
         let secret = FixedSecret::<32>::random("Test Secret");
-        let container = secret.to_box();
+        let _container = secret.as_container();
+        let _container = secret.to_box();
     }
 }

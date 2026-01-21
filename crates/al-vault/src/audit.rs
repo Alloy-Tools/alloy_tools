@@ -1,12 +1,37 @@
-use std::{collections::VecDeque, fs::File, future::Future, pin::Pin, sync::Arc};
+use std::{
+    collections::VecDeque,
+    env,
+    fs::File,
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tokio::sync::Notify;
-use xutex::AsyncMutex;
+use xutex::{AsyncMutex, Mutex};
+
+use crate::async_executor::{AsyncExecutor, JoinError, JoinHandle};
+
+pub const AUDIT_LOG_CAPACITY: usize = 1000;
+pub static AUDIT_LOG: once_cell::sync::Lazy<Arc<AuditLog>> =
+    once_cell::sync::Lazy::new(|| Arc::new(AuditLog::new(AUDIT_LOG_CAPACITY)));
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AuditError {
     AuditBuffersFull,
     FlushingLogFull,
     IOError(String),
+    JoinError(String),
+}
+
+impl From<std::io::Error> for AuditError {
+    fn from(value: std::io::Error) -> Self {
+        AuditError::IOError(value.to_string())
+    }
+}
+
+impl From<JoinError> for AuditError {
+    fn from(value: JoinError) -> Self {
+        AuditError::JoinError(value.0)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -16,11 +41,24 @@ pub struct AuditEntry {
     pub secret_tag: String,
 }
 
+impl AuditEntry {
+    pub fn new(operation: impl Into<String>, tag: impl Into<String>) -> Self {
+        AuditEntry {
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis(),
+            operation: operation.into(),
+            secret_tag: tag.into(),
+        }
+    }
+}
+
 pub struct AuditLog {
-    entries: AsyncMutex<VecDeque<AuditEntry>>,
+    entries: Mutex<VecDeque<AuditEntry>>,
     flushing: Arc<AsyncMutex<VecDeque<AuditEntry>>>,
-    join_handle:
-        Arc<AsyncMutex<Option<Box<dyn JoinHandle<Output = Result<(), ()>> + Send + 'static>>>>,
+    join_handle: Arc<AsyncMutex<Option<Box<dyn JoinHandle<Output = Result<(), AuditError>>>>>>,
+    //join_handle: Arc<AsyncMutex<Option<<E as AsyncExecutor>::JoinHandle<Result<(), AuditError>>>>>,
     stop_flush: Arc<AsyncMutex<bool>>,
     notifier: Arc<Notify>,
     capacity: usize,
@@ -31,7 +69,7 @@ pub struct AuditLog {
 impl AuditLog {
     pub fn new(capacity: usize) -> Self {
         Self {
-            entries: AsyncMutex::new(VecDeque::with_capacity(capacity)),
+            entries: Mutex::new(VecDeque::with_capacity(capacity)),
             flushing: Arc::new(AsyncMutex::new(VecDeque::with_capacity(capacity))),
             join_handle: Arc::new(AsyncMutex::new(None)),
             stop_flush: Arc::new(AsyncMutex::new(false)),
@@ -42,25 +80,25 @@ impl AuditLog {
         }
     }
 
-    pub async fn add_entry(&self, entry: AuditEntry) -> Result<(), AuditError> {
+    pub fn log_entry(&self, entry: AuditEntry) -> Result<(), AuditError> {
         if {
-            let mut entries = self.entries.lock().await;
+            let mut entries = self.entries.lock();
             entries.push_back(entry);
             entries.len() >= self.threshold
         } {
-            if let Err(_) = self.flush().await {
+            if let Err(_) = self.flush() {
                 Err(AuditError::AuditBuffersFull)?
             }
         }
         Ok(())
     }
 
-    pub async fn flush(&self) -> Result<(), AuditError> {
-        let mut flushing = self.flushing.lock().await;
+    pub fn flush(&self) -> Result<(), AuditError> {
+        let mut flushing = self.flushing.as_sync().lock();
         match self.capacity - flushing.len() {
             0 => Err(AuditError::FlushingLogFull)?,
             cap => {
-                let mut entries = self.entries.lock().await;
+                let mut entries = self.entries.lock();
                 let len = entries.len();
                 // Try and take the target, or at most the avaliable entries, or at most the avaliable space
                 flushing.extend(entries.drain(..self.target.min(len).min(cap)));
@@ -70,17 +108,22 @@ impl AuditLog {
         Ok(())
     }
 
-    pub async fn start_file_flush<E: AsyncExecutor>(&mut self, executor: E) {
+    pub async fn start_file_flush(
+        &self,
+        executor: &dyn AsyncExecutor<Output = Result<(), AuditError>>,
+    ) {
         *self.stop_flush.lock().await = false;
         let mut handle = self.join_handle.lock().await;
-        if let Some(_) = *handle {
+        if handle.is_some() {
             return;
         }
         let buffer = self.flushing.clone();
         let notifier = self.notifier.clone();
         let stop_flush = self.stop_flush.clone();
 
-        *handle = Some(executor.spawn_with_handle(async move {
+        *handle = Some(executor.spawn_with_handle(Box::pin(async move {
+            let path = env::current_dir()?;
+            println!("current dir: {}", path.display());
             //TODO: open the file
             loop {
                 buffer.lock().await.drain(..).for_each(|entry| {
@@ -93,53 +136,31 @@ impl AuditLog {
 
                 notifier.notified().await;
             }
-        }));
+        })));
     }
 
-    pub async fn stop_file_flush(&self) {
+    pub async fn stop_file_flush(&self) -> Result<(), AuditError> {
         *self.stop_flush.lock().await = true;
-        if let Some(handle) = self.join_handle.lock().await.as_deref() {
-            handle.join().await;
+        if let Some(handle) = self.join_handle.lock().await.take() {
+            handle.join().await?
+        } else {
+            Ok(())
         }
     }
 
     pub async fn abort_file_flush(&self) {
-        if let Some(handle) = self.join_handle.lock().await.as_deref() {
+        if let Some(handle) = self.join_handle.lock().await.take() {
             handle.abort();
         }
     }
 }
 
-pub trait AsyncExecutor {
-    fn spawn(&self, future: impl Future<Output = ()> + Send + 'static);
-    fn spawn_with_handle<F: Future<Output = T> + Send + 'static, T: Send + 'static>(
-        &self,
-        future: F,
-    ) -> Box<dyn JoinHandle<Output = T> + Send + 'static>;
-}
+#[cfg(test)]
+mod tests {
+    use crate::{async_executor::TokioExecutor, AUDIT_LOG};
 
-pub trait JoinHandle: Send + 'static {
-    type Output: Send + 'static;
-
-    /// Wait for task to complete
-    fn join(&self) -> Pin<Box<dyn Future<Output = Self::Output> + Send>>;
-    /// Cancel the task
-    fn abort(&self);
-}
-
-//TODO: My `al-core::Task` should impl the `AsyncExecutor` as a `tokio` wrapper
-
-/*
-// Implement for tokio::runtime::Handle
-impl AsyncExecutor for tokio::runtime::Handle {
-    fn block_on<F: std::future::Future>(&self, future: F) -> F::Output {
-        self.block_on(future)
+    #[tokio::test]
+    async fn todo() {
+        AUDIT_LOG.start_file_flush(&TokioExecutor::new()).await
     }
 }
-
-// Implement for tokio::runtime::Runtime
-impl AsyncExecutor for tokio::runtime::Runtime {
-    fn block_on<F: std::future::Future>(&self, future: F) -> F::Output {
-        self.block_on(future)
-    }
-}*/

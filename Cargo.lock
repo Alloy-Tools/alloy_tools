@@ -87,6 +87,7 @@ version = "0.1.0"
 dependencies = [
  "al-crypto",
  "bitcode",
+ "once_cell",
  "secrets",
  "serde",
  "tokio",

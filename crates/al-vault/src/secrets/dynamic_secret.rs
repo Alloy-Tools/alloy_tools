@@ -1,6 +1,6 @@
 use crate::{
-    container::secure_container::{SecureAccess, ToSecureContainer},
-    AsSecurityLevel, Ephemeral, SecureContainer, SecureRef, Secureable,
+    container::secure_container::SecureAccess, AsSecurityLevel, Ephemeral, SecureContainer,
+    SecureRef, Secureable,
 };
 use al_crypto::fill_random;
 use secrets::SecretVec;
@@ -45,31 +45,26 @@ impl<T: Secureable, L: AsSecurityLevel> DynamicSecret<T, L> {
 }
 
 impl<T: Secureable, L: AsSecurityLevel> SecureContainer for DynamicSecret<T, L> {
-    type SecretType = Self;
     type InnerType = T;
     type SecurityLevel = L;
 
     fn tag(&self) -> &str {
         &self.tag
     }
-
-    fn access(&self) -> &Self::SecretType {
-        self
-    }
 }
-
-impl<T: Secureable, L: AsSecurityLevel> ToSecureContainer for DynamicSecret<T, L> {}
 
 impl<T: Secureable, L: AsSecurityLevel> SecureAccess for DynamicSecret<T, L> {
     type ResultType<R> = Result<R, bitcode::Error>;
 
     fn with<R>(&self, f: impl FnOnce(&Self::InnerType) -> R) -> Self::ResultType<R> {
-        self.audit_access("access");
+        //TODO: handle io error possibility?
+        let _ = self.audit_access("access");
         Ok(f(SecureRef::to_type(&self.inner.borrow())?.get()))
     }
 
     fn with_mut<R>(&mut self, f: impl FnOnce(&mut Self::InnerType) -> R) -> Self::ResultType<R> {
-        self.audit_access("mutable access");
+        //TODO: handle io error possibility?
+        let _ = self.audit_access("mutable access");
         let mut secure_ref = SecureRef::to_type(&self.inner.borrow())?;
         let result = f(secure_ref.get_mut());
 
