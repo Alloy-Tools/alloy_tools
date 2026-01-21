@@ -15,8 +15,15 @@ pub trait SecureAccess: SecureContainer {
     fn with<R>(&self, f: impl FnOnce(&Self::InnerType) -> R) -> Self::ResultType<R>;
     fn with_mut<R>(&mut self, f: impl FnOnce(&mut Self::InnerType) -> R) -> Self::ResultType<R>;
 
+    #[cfg(not(test))]
     fn audit_access(&self, operation: &str) -> Result<(), crate::AuditError> {
         crate::AUDIT_LOG.log_entry(crate::AuditEntry::new(operation, self.tag()))
+    }
+
+    #[cfg(test)]
+    fn audit_access(&self, operation: &str) -> Result<(), crate::AuditError> {
+        println!("{}", crate::AuditEntry::new(operation, self.tag()));
+        Ok(())
     }
 }
 

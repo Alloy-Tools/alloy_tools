@@ -1,10 +1,11 @@
+mod async_executor;
 mod audit;
 mod container;
 mod crypto;
-mod async_executor;
 mod secrets;
 
-
+#[cfg(feature = "tokio")]
+pub use async_executor::{TokioExecutor, TokioJoinHandle};
 pub use audit::{AuditEntry, AuditError, AuditLog, AUDIT_LOG, AUDIT_LOG_CAPACITY};
 pub use container::{
     secure_container::{
@@ -18,12 +19,3 @@ pub use secrets::{
     fixed_secret::FixedSecret,
     secure_ref::{SecureRef, Secureable},
 };
-
-#[cfg(test)]
-mod tests {
-
-    #[test]
-    fn todo() {
-        todo!()
-    }
-}

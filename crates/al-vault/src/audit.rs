@@ -1,9 +1,11 @@
+use chrono::{DateTime, Local};
 use std::{
     collections::VecDeque,
     env,
-    fs::File,
+    fs::{self, OpenOptions},
+    io::Write,
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::Notify;
 use xutex::{AsyncMutex, Mutex};
@@ -41,6 +43,18 @@ pub struct AuditEntry {
     pub secret_tag: String,
 }
 
+impl std::fmt::Display for AuditEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{:?}, {}, {}",
+            DateTime::<Local>::from(UNIX_EPOCH + Duration::from_millis(self.timestamp as u64)),
+            self.secret_tag,
+            self.operation
+        )
+    }
+}
+
 impl AuditEntry {
     pub fn new(operation: impl Into<String>, tag: impl Into<String>) -> Self {
         AuditEntry {
@@ -58,7 +72,6 @@ pub struct AuditLog {
     entries: Mutex<VecDeque<AuditEntry>>,
     flushing: Arc<AsyncMutex<VecDeque<AuditEntry>>>,
     join_handle: Arc<AsyncMutex<Option<Box<dyn JoinHandle<Output = Result<(), AuditError>>>>>>,
-    //join_handle: Arc<AsyncMutex<Option<<E as AsyncExecutor>::JoinHandle<Result<(), AuditError>>>>>,
     stop_flush: Arc<AsyncMutex<bool>>,
     notifier: Arc<Notify>,
     capacity: usize,
@@ -122,12 +135,17 @@ impl AuditLog {
         let stop_flush = self.stop_flush.clone();
 
         *handle = Some(executor.spawn_with_handle(Box::pin(async move {
-            let path = env::current_dir()?;
-            println!("current dir: {}", path.display());
-            //TODO: open the file
+            let mut path = env::current_dir()?;
+            path.push("log");
+            // ensure the folder exists
+            fs::create_dir_all(path.clone())?;
+
+            path.push("output.txt");
+            let mut file = OpenOptions::new().append(true).create(true).open(path)?;
             loop {
                 buffer.lock().await.drain(..).for_each(|entry| {
-                    //TODO: write as line to file
+                    //TODO: handle the result and possible error
+                    let _result = file.write(format!("{}\n", entry).as_bytes());
                 });
 
                 if *stop_flush.lock().await {
@@ -139,8 +157,13 @@ impl AuditLog {
         })));
     }
 
-    pub async fn stop_file_flush(&self) -> Result<(), AuditError> {
+    pub async fn cancel_file_flush(&self) {
         *self.stop_flush.lock().await = true;
+        self.notifier.notify_one();
+    }
+
+    pub async fn stop_file_flush(&self) -> Result<(), AuditError> {
+        self.cancel_file_flush().await;
         if let Some(handle) = self.join_handle.lock().await.take() {
             handle.join().await?
         } else {
@@ -160,7 +183,12 @@ mod tests {
     use crate::{async_executor::TokioExecutor, AUDIT_LOG};
 
     #[tokio::test]
-    async fn todo() {
-        AUDIT_LOG.start_file_flush(&TokioExecutor::new()).await
+    async fn flush_to_file() {
+        AUDIT_LOG
+            .log_entry(crate::AuditEntry::new("operation", "tag"))
+            .unwrap();
+        AUDIT_LOG.flush().unwrap();
+        AUDIT_LOG.start_file_flush(&TokioExecutor::new()).await;
+        AUDIT_LOG.stop_file_flush().await.unwrap();
     }
 }
