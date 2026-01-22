@@ -26,7 +26,7 @@ impl<const N: usize> Key<N> {
         FixedSecret::<N, Ephemeral>::random(tag).into()
     }
 
-    pub fn encrypt(
+    pub async fn encrypt(
         &self,
         dest: &mut [u8],
         plaintext: &[u8],
@@ -34,7 +34,8 @@ impl<const N: usize> Key<N> {
         associated_data: &[u8],
     ) -> Result<(), CryptoError> {
         self.0
-            .with(|k| encrypt(dest, plaintext, k, nonce, associated_data))
+            .with_async(|k| encrypt(dest, plaintext, k, nonce, associated_data))
+            .await
     }
 
     pub fn decrypt(
@@ -57,8 +58,8 @@ mod tests {
 
     const TEST_KEY: &str = "4dfc93bf2e50d3f1256fb0550f8d560bee787e80fb4efe3a7c74d9e62ff25755";
 
-    #[test]
-    fn encrypt_decrypt() {
+    #[tokio::test]
+    async fn encrypt_decrypt() {
         let mut key = [0u8; KEY_SIZE];
         from_hex(TEST_KEY.as_bytes(), &mut key).unwrap();
         let dek: Key<32> = Key::from_array(key, "test dek");
@@ -87,6 +88,7 @@ mod tests {
                 &[1u8; NONCE_SIZE],
                 "Key|Test-Enc-Dec".as_bytes(),
             )
+            .await
             .unwrap();
         }
 

@@ -1,14 +1,16 @@
-use std::{future::Future, marker::PhantomData, pin::Pin};
+use std::{future::Future, pin::Pin};
+//TODO: Move file to `al-core` for reusability
 
 pub struct JoinError(pub String);
 
-pub trait AsyncExecutor {
-    type Output: Send + 'static;
+pub trait AsyncExecutor: Send + Sync {
     fn spawn(&self, future: Pin<Box<dyn Future<Output = ()> + Send>>);
-    fn spawn_with_handle(
+    fn spawn_with_handle<T: Send + 'static, F: Future<Output = T> + Send + 'static>(
         &self,
-        future: Pin<Box<dyn Future<Output = Self::Output> + Send>>,
-    ) -> Box<dyn JoinHandle<Output = Self::Output>>;
+        future: F,
+    ) -> Box<dyn JoinHandle<Output = T>>;
+
+    fn block_on<T: Send + 'static, F: Future<Output = T> + Send>(&self, future: F) -> T;
 }
 
 pub trait JoinHandle: Send + 'static {
@@ -23,28 +25,25 @@ pub trait JoinHandle: Send + 'static {
 }
 
 #[cfg(feature = "tokio")]
-pub struct TokioExecutor<T>(PhantomData<T>);
-impl<T> TokioExecutor<T> {
-    pub fn new() -> Self {
-        Self(PhantomData)
-    }
-}
+pub struct TokioExecutor;
 #[cfg(feature = "tokio")]
 pub struct TokioJoinHandle<T>(tokio::task::JoinHandle<T>);
 
 #[cfg(feature = "tokio")]
-impl<T: Send + 'static> AsyncExecutor for TokioExecutor<T> {
-    type Output = T;
-
+impl AsyncExecutor for TokioExecutor {
     fn spawn(&self, future: Pin<Box<dyn Future<Output = ()> + Send>>) {
         tokio::spawn(future);
     }
 
-    fn spawn_with_handle(
+    fn spawn_with_handle<T: Send + 'static, F: Future<Output = T> + Send + 'static>(
         &self,
-        future: Pin<Box<dyn Future<Output = Self::Output> + Send>>,
-    ) -> Box<dyn JoinHandle<Output = Self::Output>> {
+        future: F,
+    ) -> Box<dyn JoinHandle<Output = T>> {
         Box::new(TokioJoinHandle(tokio::spawn(future)))
+    }
+
+    fn block_on<T: Send + 'static, F: Future<Output = T> + Send>(&self, future: F) -> T {
+        tokio::runtime::Handle::current().block_on(future)
     }
 }
 

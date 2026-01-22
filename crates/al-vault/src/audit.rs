@@ -38,30 +38,42 @@ impl From<JoinError> for AuditError {
 
 #[derive(Debug, Clone)]
 pub struct AuditEntry {
-    pub timestamp: u128, // milliseconds since epoch
-    pub operation: String,
-    pub secret_tag: String,
+    timestamp: u128, // milliseconds since epoch
+    thread_id: String,
+    access_count: u64,
+    operation: String,
+    secret_tag: String,
+    //TODO: maybe add backtrace: Option<String> and caller_info: Option<String>
 }
 
 impl std::fmt::Display for AuditEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{:?}, {}, {}",
+            "{:?}, tag: {}, times accessed: {}, operation: {}, thread id: {}",
             DateTime::<Local>::from(UNIX_EPOCH + Duration::from_millis(self.timestamp as u64)),
             self.secret_tag,
-            self.operation
+            self.access_count,
+            self.operation,
+            self.thread_id,
         )
     }
 }
 
 impl AuditEntry {
-    pub fn new(operation: impl Into<String>, tag: impl Into<String>) -> Self {
+    pub fn new(access_count: u64, operation: impl Into<String>, tag: impl Into<String>) -> Self {
+        let id = format!("{:?}", std::thread::current().id());
         AuditEntry {
             timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_millis(),
+            thread_id: id
+                .strip_prefix("ThreadId(")
+                .and_then(|s| s.strip_suffix(')'))
+                .unwrap_or(&id)
+                .to_string(),
+            access_count,
             operation: operation.into(),
             secret_tag: tag.into(),
         }
@@ -121,10 +133,7 @@ impl AuditLog {
         Ok(())
     }
 
-    pub async fn start_file_flush(
-        &self,
-        executor: &dyn AsyncExecutor<Output = Result<(), AuditError>>,
-    ) {
+    pub async fn start_file_flush<E: AsyncExecutor + Send + Sync + 'static>(&self, executor: &E) {
         *self.stop_flush.lock().await = false;
         let mut handle = self.join_handle.lock().await;
         if handle.is_some() {
@@ -185,10 +194,13 @@ mod tests {
     #[tokio::test]
     async fn flush_to_file() {
         AUDIT_LOG
-            .log_entry(crate::AuditEntry::new("operation", "tag"))
+            .log_entry(crate::AuditEntry::new(1, "operation", "tag"))
+            .unwrap();
+        AUDIT_LOG
+            .log_entry(crate::AuditEntry::new(2, "operation", "tag"))
             .unwrap();
         AUDIT_LOG.flush().unwrap();
-        AUDIT_LOG.start_file_flush(&TokioExecutor::new()).await;
+        AUDIT_LOG.start_file_flush(&TokioExecutor).await;
         AUDIT_LOG.stop_file_flush().await.unwrap();
     }
 }
