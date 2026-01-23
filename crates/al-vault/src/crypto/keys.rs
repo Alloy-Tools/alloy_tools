@@ -1,4 +1,4 @@
-use crate::{Ephemeral, FixedSecret, SecureAccess};
+use crate::{AsyncSecureAccess, Ephemeral, FixedSecret, SecureAccess};
 use al_crypto::{decrypt, encrypt, CryptoError, KEY_SIZE};
 
 //TODO:

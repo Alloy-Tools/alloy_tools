@@ -1,6 +1,5 @@
 use crate::{
-    container::secure_container::SecureAccess, AsSecurityLevel, Ephemeral, SecureContainer,
-    SecureRef, Secureable,
+    AsSecurityLevel, Ephemeral, SecureContainer, SecureRef, Secureable, container::secure_container::{AsyncSecureAccess, SecureAccess}
 };
 use al_crypto::fill_random;
 use secrets::SecretVec;
@@ -80,19 +79,6 @@ impl<T: Secureable, L: AsSecurityLevel> SecureAccess for DynamicSecret<T, L> {
         ))
     }
 
-    async fn with_async<R>(&self, f: impl FnOnce(&Self::InnerType) -> R) -> Self::ResultType<R> {
-        //TODO: handle io error possibility?
-        let _ = self.audit_access(
-            self.access_count
-                .fetch_add(1, Ordering::SeqCst)
-                .saturating_add(1),
-            "access",
-        );
-        Ok(f(
-            SecureRef::to_type(&self.inner.lock().await.borrow())?.get()
-        ))
-    }
-
     fn with_mut<R>(&mut self, f: impl FnOnce(&mut Self::InnerType) -> R) -> Self::ResultType<R> {
         //TODO: handle io error possibility?
         let _ = self.audit_access(
@@ -116,6 +102,23 @@ impl<T: Secureable, L: AsSecurityLevel> SecureAccess for DynamicSecret<T, L> {
         }
 
         Ok(result)
+    }
+}
+
+impl<T: Secureable, L: AsSecurityLevel> AsyncSecureAccess for DynamicSecret<T, L> {
+    type ResultType<R> = Result<R, bitcode::Error>;
+
+    async fn with_async<R>(&self, f: impl FnOnce(&Self::InnerType) -> R) -> Self::ResultType<R> {
+        //TODO: handle io error possibility?
+        let _ = self.audit_access(
+            self.access_count
+                .fetch_add(1, Ordering::SeqCst)
+                .saturating_add(1),
+            "access",
+        );
+        Ok(f(
+            SecureRef::to_type(&self.inner.lock().await.borrow())?.get()
+        ))
     }
 
     async fn with_mut_async<R>(

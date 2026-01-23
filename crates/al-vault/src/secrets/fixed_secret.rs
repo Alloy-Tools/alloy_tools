@@ -4,8 +4,8 @@ use std::{
 };
 
 use crate::{
-    container::secure_container::SecureAccess, AsSecurityLevel, Ephemeral, SecureContainer,
-    SecureRef,
+    container::secure_container::{AsyncSecureAccess, SecureAccess},
+    AsSecurityLevel, Ephemeral, SecureContainer, SecureRef,
 };
 use al_crypto::fill_random;
 use secrets::{Secret, SecretBox};
@@ -79,17 +79,6 @@ impl<const N: usize, L: AsSecurityLevel> SecureAccess for FixedSecret<N, L> {
         f(SecureRef::new(*self.inner.lock_sync().borrow()).get())
     }
 
-    async fn with_async<R>(&self, f: impl FnOnce(&Self::InnerType) -> R) -> Self::ResultType<R> {
-        //TODO: handle io error possibility?
-        let _ = self.audit_access(
-            self.access_count
-                .fetch_add(1, Ordering::SeqCst)
-                .saturating_add(1),
-            "access",
-        );
-        f(SecureRef::new(*self.inner.lock().await.borrow()).get())
-    }
-
     fn with_mut<R>(&mut self, f: impl FnOnce(&mut Self::InnerType) -> R) -> Self::ResultType<R> {
         //TODO: handle io error possibility?
         let _ = self.audit_access(
@@ -103,6 +92,21 @@ impl<const N: usize, L: AsSecurityLevel> SecureAccess for FixedSecret<N, L> {
         let result = f(secure_ref.get_mut());
         guard.borrow_mut().copy_from_slice(secure_ref.get());
         result
+    }
+}
+
+impl<const N: usize, L: AsSecurityLevel> AsyncSecureAccess for FixedSecret<N, L> {
+    type ResultType<R> = R;
+
+    async fn with_async<R>(&self, f: impl FnOnce(&Self::InnerType) -> R) -> Self::ResultType<R> {
+        //TODO: handle io error possibility?
+        let _ = self.audit_access(
+            self.access_count
+                .fetch_add(1, Ordering::SeqCst)
+                .saturating_add(1),
+            "access",
+        );
+        f(SecureRef::new(*self.inner.lock().await.borrow()).get())
     }
 
     async fn with_mut_async<R>(
