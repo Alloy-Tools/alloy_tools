@@ -7,9 +7,7 @@ mod secrets;
 pub use async_executor::{TokioExecutor, TokioJoinHandle};
 pub use audit::{AuditEntry, AuditError, AuditLog, AUDIT_LOG, AUDIT_LOG_CAPACITY};
 pub use container::{
-    secure_container::{
-        EncryptedExt, EphemeralExt, SecureAccess, SecureContainer, ToSecureContainer,
-    },
+    secure_container::{SecureAccess, SecureContainer},
     security_level::{AsSecurityLevel, Ephemeral, Persistent, SecurityLevel},
 };
 pub use secrets::{
@@ -97,7 +95,10 @@ mod tests {
 
         // ========== Authenticated Data ==========
         // encrypt data and get packet
-        let ciphertext = plaintext.clone().encrypt_authenticated(&dek, TEST_ASSOCIATED_DATA).unwrap();
+        let ciphertext = plaintext
+            .clone()
+            .encrypt_authenticated(&dek, TEST_ASSOCIATED_DATA)
+            .unwrap();
         let packet = ciphertext.as_packet().unwrap();
         {
             let mut msg_hex = vec![0u8; 2 * packet.len()];
@@ -107,7 +108,9 @@ mod tests {
                 "2098c75bbe19ac57edb3dcd061f5969414c5d8157c2c6318a2527ac50228546573740000000000000002"
             );
             // encrypt again for second nonce
-            let second_ciphertext = plaintext.encrypt_authenticated(&dek, TEST_ASSOCIATED_DATA).unwrap();
+            let second_ciphertext = plaintext
+                .encrypt_authenticated(&dek, TEST_ASSOCIATED_DATA)
+                .unwrap();
             let packet = second_ciphertext.as_packet().unwrap();
             to_hex(&packet, &mut msg_hex).unwrap();
             assert_eq!(

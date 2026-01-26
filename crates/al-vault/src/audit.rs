@@ -189,8 +189,10 @@ impl AuditLog {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "tokio")]
     use crate::{async_executor::TokioExecutor, AUDIT_LOG};
 
+    #[cfg(feature = "tokio")]
     #[tokio::test]
     async fn flush_to_file() {
         AUDIT_LOG

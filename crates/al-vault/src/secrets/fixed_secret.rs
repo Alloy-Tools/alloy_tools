@@ -118,23 +118,3 @@ impl<const N: usize, L: AsSecurityLevel> SecureAccess for FixedSecret<N, L> {
         result
     }
 }
-
-/*impl<const N: usize> EncryptedExt for FixedSecret<N, Encrypted> {
-    type EphemeralType = FixedSecret<N, Ephemeral>;
-
-    fn to_ephemeral(self) -> Self::EphemeralType {
-        FixedSecret::<N, Ephemeral>::new(*self.inner.borrow(), self.tag)
-    }
-}*/
-
-#[cfg(test)]
-mod tests {
-    use crate::{container::secure_container::ToSecureContainer, FixedSecret};
-
-    #[test]
-    fn secure_container() {
-        let secret = FixedSecret::<32>::random("Test Secret");
-        let _container = secret.as_container();
-        let _container = secret.to_box();
-    }
-}

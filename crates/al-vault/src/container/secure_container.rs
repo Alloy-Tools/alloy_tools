@@ -32,33 +32,14 @@ pub trait SecureAccess: SecureContainer {
     }
 }
 
-pub trait ToSecureContainer: SecureContainer {
-    fn as_container(
-        &self,
-    ) -> &dyn SecureContainer<InnerType = Self::InnerType, SecurityLevel = Self::SecurityLevel>
-    where
-        Self: Sized,
-    {
-        self
-    }
-
-    fn to_box(
-        self,
-    ) -> Box<dyn SecureContainer<InnerType = Self::InnerType, SecurityLevel = Self::SecurityLevel>>
-    where
-        Self: Sized + 'static,
-    {
-        Box::new(self)
-    }
-}
-impl<T: SecureContainer> ToSecureContainer for T {}
-
+/* TODO: handle enryption for encryptable types or downgrading to ephemeral
 pub trait EncryptedExt {
     type EphemeralType;
     fn to_ephemeral(self) -> Self::EphemeralType;
-}
+}*/
 
+/* TODO: would the ephemeral types have any extra functions?
 pub trait EphemeralExt {
-    /*type EncryptedType;
-    fn to_encrypted(self) -> Self::EncryptedType;*/
-}
+    type EncryptedType;
+    fn to_encrypted(self) -> Self::EncryptedType;
+}*/

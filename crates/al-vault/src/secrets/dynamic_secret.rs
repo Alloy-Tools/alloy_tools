@@ -128,7 +128,7 @@ impl<T: Secureable, L: AsSecurityLevel> SecureAccess for DynamicSecret<T, L> {
         let secure_bytes = secure_ref.to_bytes()?;
         let new_len = secure_bytes.get().len();
 
-        //TODO: test more with inner.len(), could maybe do if inner.len() >= len and only reallocate when needed?
+        //TODO: test more with inner.len() (or maybe self.len()?), could maybe do if inner.len() >= len and only reallocate when needed?
         if self.inner.len() == new_len {
             self.inner.borrow_mut().copy_from_slice(secure_bytes.get());
         } else {
