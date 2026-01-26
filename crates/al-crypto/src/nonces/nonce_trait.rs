@@ -3,7 +3,7 @@ use crate::{
     NonceTimestamp, NonceType, RandomTimeStamp,
 };
 
-pub trait NonceTrait: super::sealed::Sealed {
+pub trait NonceTrait: super::sealed::Sealed + Clone + PartialEq + Eq {
     type Graininess: Granularity;
     /// Return the `NonceType` of the `Nonce`
     fn nonce_type() -> NonceType;

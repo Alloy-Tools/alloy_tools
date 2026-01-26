@@ -1,7 +1,7 @@
 mod sealed {
     pub trait Sealed {}
 }
-pub trait AsSecurityLevel: sealed::Sealed {
+pub trait AsSecurityLevel: sealed::Sealed + 'static {
     fn as_security_level() -> SecurityLevel;
 }
 #[derive(Debug, Clone, Copy)]
@@ -13,9 +13,9 @@ impl AsSecurityLevel for Ephemeral {
     }
 }
 #[derive(Debug, Clone, Copy)]
-pub struct Encrypted;
-impl sealed::Sealed for Encrypted {}
-impl AsSecurityLevel for Encrypted {
+pub struct Persistent;
+impl sealed::Sealed for Persistent {}
+impl AsSecurityLevel for Persistent {
     fn as_security_level() -> SecurityLevel {
         SecurityLevel::Encrypted
     }

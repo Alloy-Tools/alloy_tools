@@ -1,5 +1,7 @@
 use crate::{AsSecurityLevel, FixedSecret, SecureContainer};
 
+//TODO: pub struct SystemKey<K: KeyType, const N: usize>(SystemSecret<FixedSecret<N, Ephemeral>>, PhantomData<K>);
+
 //TODO system should be able to encrypt `Ephemeral` secrets by accessing them with `SystemPrivilege`
 
 mod sealed {

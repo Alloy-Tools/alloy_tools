@@ -9,7 +9,7 @@ mod sealed {
 
 pub const LIFETIME_THRESHOLD: u32 = 4_000_000_000;
 
-pub trait Granularity: sealed::Sealed {
+pub trait Granularity: sealed::Sealed + Clone + PartialEq + Eq {
     const LIFETIME: Duration;
 
     /// Returns the `Granularity` type

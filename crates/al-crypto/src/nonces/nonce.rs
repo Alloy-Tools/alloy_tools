@@ -19,7 +19,7 @@ pub enum NonceError {
     FillRandomError,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Nonce<T: NonceTrait> {
     bytes: [u8; NONCE_SIZE],
     created_at: u64,

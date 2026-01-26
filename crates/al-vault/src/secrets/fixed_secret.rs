@@ -4,31 +4,52 @@ use std::{
 };
 
 use crate::{
-    container::secure_container::{AsyncSecureAccess, SecureAccess},
-    AsSecurityLevel, Ephemeral, SecureContainer, SecureRef,
+    container::secure_container::SecureAccess, AsSecurityLevel, Ephemeral, SecureContainer,
+    SecureRef,
 };
 use al_crypto::fill_random;
 use secrets::{Secret, SecretBox};
-use xutex::AsyncMutex;
 
 /// For raw, fixed-size byte arrays.
 /// This is the most efficient and secure for keys, tokens, etc. when the size is known at compile time.
 /// It uses `secrets::SecretBox<T>` directly.
+#[derive(Debug)]
 pub struct FixedSecret<const N: usize, L: AsSecurityLevel = Ephemeral> {
-    inner: AsyncMutex<SecretBox<[u8; N]>>,
+    inner: SecretBox<[u8; N]>,
     tag: String,
     access_count: AtomicU64,
     _phantom: PhantomData<L>,
 }
 
+impl<const N: usize, L: AsSecurityLevel> Clone for FixedSecret<N, L> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            tag: self.tag.clone(),
+            access_count: AtomicU64::new(self.access_count()),
+            _phantom: self._phantom.clone(),
+        }
+    }
+}
+
+impl<const N: usize, L: AsSecurityLevel> Eq for FixedSecret<N, L> {}
+impl<const N: usize, L: AsSecurityLevel> PartialEq for FixedSecret<N, L> {
+    fn eq(&self, other: &Self) -> bool {
+        self.inner == other.inner
+            && self.tag == other.tag
+            && self.access_count() == other.access_count()
+            && self._phantom == other._phantom
+    }
+}
+
 impl<const N: usize, L: AsSecurityLevel> FixedSecret<N, L> {
     pub fn random(tag: impl Into<String>) -> Self {
         Self {
-            inner: AsyncMutex::new(SecretBox::<[u8; N]>::new(|s| {
+            inner: SecretBox::<[u8; N]>::new(|s| {
                 if let Err(_) = fill_random(s) {
                     Secret::<[u8; N]>::random(|bytes| s.copy_from_slice(&*bytes))
                 }
-            })),
+            }),
             tag: tag.into(),
             access_count: AtomicU64::new(0),
             _phantom: PhantomData,
@@ -44,7 +65,7 @@ impl<const N: usize, L: AsSecurityLevel> FixedSecret<N, L> {
     pub fn take(inner: &mut [u8; N], tag: impl Into<String>) -> Self {
         Self {
             // `SecretBox::from` will attempt to zero out the data in `inner` after taking it
-            inner: AsyncMutex::new(SecretBox::from(inner)),
+            inner: SecretBox::from(inner),
             tag: tag.into(),
             access_count: AtomicU64::new(0),
             _phantom: PhantomData,
@@ -63,6 +84,10 @@ impl<const N: usize, L: AsSecurityLevel> SecureContainer for FixedSecret<N, L> {
     fn access_count(&self) -> u64 {
         self.access_count.load(Ordering::SeqCst)
     }
+
+    fn len(&self) -> usize {
+        N
+    }
 }
 
 impl<const N: usize, L: AsSecurityLevel> SecureAccess for FixedSecret<N, L> {
@@ -76,7 +101,7 @@ impl<const N: usize, L: AsSecurityLevel> SecureAccess for FixedSecret<N, L> {
                 .saturating_add(1),
             "access",
         );
-        f(SecureRef::new(*self.inner.lock_sync().borrow()).get())
+        f(SecureRef::new(*self.inner.borrow()).get())
     }
 
     fn with_mut<R>(&mut self, f: impl FnOnce(&mut Self::InnerType) -> R) -> Self::ResultType<R> {
@@ -87,43 +112,9 @@ impl<const N: usize, L: AsSecurityLevel> SecureAccess for FixedSecret<N, L> {
                 .saturating_add(1),
             "mutable access",
         );
-        let mut guard = self.inner.lock_sync();
-        let mut secure_ref = SecureRef::new(*guard.borrow());
+        let mut secure_ref = SecureRef::new(*self.inner.borrow());
         let result = f(secure_ref.get_mut());
-        guard.borrow_mut().copy_from_slice(secure_ref.get());
-        result
-    }
-}
-
-impl<const N: usize, L: AsSecurityLevel> AsyncSecureAccess for FixedSecret<N, L> {
-    type ResultType<R> = R;
-
-    async fn with_async<R>(&self, f: impl FnOnce(&Self::InnerType) -> R) -> Self::ResultType<R> {
-        //TODO: handle io error possibility?
-        let _ = self.audit_access(
-            self.access_count
-                .fetch_add(1, Ordering::SeqCst)
-                .saturating_add(1),
-            "access",
-        );
-        f(SecureRef::new(*self.inner.lock().await.borrow()).get())
-    }
-
-    async fn with_mut_async<R>(
-        &mut self,
-        f: impl FnOnce(&mut Self::InnerType) -> R,
-    ) -> Self::ResultType<R> {
-        //TODO: handle io error possibility?
-        let _ = self.audit_access(
-            self.access_count
-                .fetch_add(1, Ordering::SeqCst)
-                .saturating_add(1),
-            "mutable access",
-        );
-        let mut guard = self.inner.lock().await;
-        let mut secure_ref = SecureRef::new(*guard.borrow());
-        let result = f(secure_ref.get_mut());
-        guard.borrow_mut().copy_from_slice(secure_ref.get());
+        self.inner.borrow_mut().copy_from_slice(secure_ref.get());
         result
     }
 }
