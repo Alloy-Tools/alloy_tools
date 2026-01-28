@@ -1,7 +1,7 @@
 use crate::SecretError;
 
 pub trait Secureable:
-    serde::Serialize + for<'de> serde::Deserialize<'de> + zeroize::Zeroize + 'static
+    serde::Serialize + for<'de> serde::Deserialize<'de> + zeroize::Zeroize + Clone + 'static
 {
     fn to_bytes(&self) -> Result<Vec<u8>, SecretError> {
         Ok(bitcode::serialize(self)?)
@@ -10,7 +10,7 @@ pub trait Secureable:
         Ok(bitcode::deserialize(bytes)?)
     }
 }
-impl<T: serde::Serialize + for<'de> serde::Deserialize<'de> + zeroize::Zeroize + 'static> Secureable
+impl<T: serde::Serialize + for<'de> serde::Deserialize<'de> + zeroize::Zeroize + Clone + 'static> Secureable
     for T
 {
 }

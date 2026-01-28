@@ -92,6 +92,10 @@ impl<T: NonceTrait + NonceCounter<T>> Nonce<T> {
     pub fn counter_num(&self) -> T::CounterType {
         T::get_counter_num(&self.bytes)
     }
+
+    pub fn set_counter(&mut self, counter: T::CounterType) {
+        T::set_counter(&mut self.bytes, counter);
+    }
 }
 
 impl<T: NonceTrait + NonceTimestamp<T>> Nonce<T> {
@@ -116,12 +120,17 @@ impl<T: NonceTrait + NonceTimestamp<T>> Nonce<T> {
 }
 
 impl<T: NonceTrait> Nonce<T> {
-    /// Returns the current microseconds since the UNIX_EPOCH as u64, covering ~584 thousand years.
+    /// Returns the current microseconds since the `UNIX_EPOCH` as u64, covering ~584 thousand years.
     fn created_now() -> u64 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_micros() as u64
+    }
+
+    /// Returns the microseconds since the `UNIX_EPOCH` as u64, representing the time the nonce was created
+    pub fn created_at(&self) -> u64 {
+        self.created_at
     }
 
     /// Returns the epoch as the sum of the UNIX EPOXH and the passed microseconds

@@ -8,6 +8,7 @@ pub trait NonceCounter<N: crate::NonceTrait>: super::sealed::Sealed {
     fn get_counter(bytes: &[u8; NONCE_SIZE]) -> &[u8];
     /// Returns the counter potion of the byte slice as an unsigned integer
     fn get_counter_num(bytes: &[u8; NONCE_SIZE]) -> Self::CounterType;
+    fn set_counter(bytes: &mut [u8; NONCE_SIZE], counter: Self::CounterType);
 }
 
 impl NonceCounter<Monotonic> for Monotonic {
@@ -24,6 +25,10 @@ impl NonceCounter<Monotonic> for Monotonic {
     fn counter_expired(bytes: &[u8; NONCE_SIZE]) -> bool {
         Self::get_counter_num(bytes) > Self::CounterType::MAX / 2
     }
+
+    fn set_counter(bytes: &mut [u8; NONCE_SIZE], counter: Self::CounterType) {
+        bytes[4..12].copy_from_slice(&counter.to_be_bytes());
+    }
 }
 
 impl<G: crate::Granularity> NonceCounter<MonotonicTimeStamp<G>> for MonotonicTimeStamp<G> {
@@ -39,5 +44,9 @@ impl<G: crate::Granularity> NonceCounter<MonotonicTimeStamp<G>> for MonotonicTim
 
     fn counter_expired(bytes: &[u8; NONCE_SIZE]) -> bool {
         Self::get_counter_num(bytes) > Self::CounterType::MAX / 2
+    }
+
+    fn set_counter(bytes: &mut [u8; NONCE_SIZE], counter: Self::CounterType) {
+        bytes[8..12].copy_from_slice(&counter.to_be_bytes());
     }
 }

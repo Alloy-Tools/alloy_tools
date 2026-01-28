@@ -7,6 +7,14 @@ edition.workspace = true
 
 [lib]
 doctest = false
-test = false
 
 [dependencies]
+al-crypto = { path = "../al-crypto" }
+al-vault = { path = "../al-vault" }
+# might need serde feature
+x25519-dalek = "2.0.1"
+tokio = { version = "1", features = ["sync"] }
+zeroize = { version = "1.8.2", features = ["alloc"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros"] }

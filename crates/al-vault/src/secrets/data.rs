@@ -1,4 +1,5 @@
 use al_crypto::{NonceTrait, NONCE_SIZE, TAG_SIZE};
+use zeroize::Zeroize;
 
 use crate::{DynamicSecret, Key, SecretError, SecureAccess, SecureContainer};
 
@@ -8,7 +9,7 @@ pub trait CryptoState {
 }
 pub trait ProtectedState {
     fn nonce(&self) -> &[u8; NONCE_SIZE];
-    fn from_nonce(nonce: Vec<u8>) -> Result<Self, SecretError>
+    fn from_nonce(nonce: &[u8]) -> Result<Self, SecretError>
     where
         Self: Sized;
 }
@@ -41,8 +42,11 @@ impl ProtectedState for Encrypted {
         &self.0
     }
 
-    fn from_nonce(nonce: Vec<u8>) -> Result<Self, SecretError> {
-        Ok(Self(nonce.try_into()?))
+    fn from_nonce(nonce: &[u8]) -> Result<Self, SecretError> {
+        let mut bytes = [0u8; NONCE_SIZE];
+        let len = NONCE_SIZE.min(nonce.len());
+        bytes[..len].copy_from_slice(&nonce[..len]);
+        Ok(Self(bytes))
     }
 }
 impl CryptoState for Authenticated {
@@ -56,8 +60,11 @@ impl ProtectedState for Authenticated {
         &self.0
     }
 
-    fn from_nonce(nonce: Vec<u8>) -> Result<Self, SecretError> {
-        Ok(Self(nonce.try_into()?, Vec::new()))
+    fn from_nonce(nonce: &[u8]) -> Result<Self, SecretError> {
+        let mut bytes = [0u8; NONCE_SIZE];
+        let len = NONCE_SIZE.min(nonce.len());
+        bytes[..len].copy_from_slice(&nonce[..len]);
+        Ok(Self(bytes, Vec::new()))
     }
 }
 
@@ -76,9 +83,7 @@ impl<S: CryptoState> Data<S> {
     }
 
     pub fn as_bytes(&self) -> Result<Vec<u8>, SecretError> {
-        let mut vec = vec![0; self.len()];
-        self.inner.with(|bytes| vec.copy_from_slice(bytes))?;
-        Ok(vec)
+        self.inner.copy()
     }
 }
 
@@ -95,10 +100,13 @@ impl<S: CryptoState + ProtectedState> Data<S> {
         Ok(vec)
     }
 
-    pub fn from_packet(mut packet: Vec<u8>, tag: impl AsRef<str>) -> Result<Self, SecretError> {
-        let state = S::from_nonce(packet.split_off(packet.len() - NONCE_SIZE))?;
+    /// Returns a `Data` struct, zeroing the passed packet data
+    pub fn from_packet(packet: &mut [u8], tag: impl AsRef<str>) -> Result<Self, SecretError> {
+        let data = packet[..packet.len() - NONCE_SIZE].to_vec();
+        let state = S::from_nonce(&packet[packet.len() - NONCE_SIZE..])?;
+        packet.zeroize();
         Ok(Self {
-            inner: DynamicSecret::new(packet, S::to_string() + tag.as_ref())?,
+            inner: DynamicSecret::new(data, S::to_string() + tag.as_ref())?,
             state,
         })
     }
@@ -108,6 +116,15 @@ impl Data<Plain> {
     pub fn new(data: Vec<u8>, tag: impl AsRef<str>) -> Result<Self, SecretError> {
         Ok(Self {
             inner: DynamicSecret::new(data, Plain::to_string() + tag.as_ref())?,
+            state: Plain,
+        })
+    }
+
+    pub fn from_slice(data: &mut [u8], tag: impl AsRef<str>) -> Result<Self, SecretError> {
+        let inner = DynamicSecret::new(data.to_vec(), Plain::to_string() + tag.as_ref())?;
+        data.zeroize();
+        Ok(Self {
+            inner,
             state: Plain,
         })
     }

@@ -92,6 +92,18 @@ impl<const N: usize, L: AsSecurityLevel> SecureContainer for FixedSecret<N, L> {
 
 impl<const N: usize, L: AsSecurityLevel> SecureAccess for FixedSecret<N, L> {
     type ResultType<R> = R;
+    type CopyResultType = Self::InnerType;
+
+    fn copy(&self) -> Self::CopyResultType {
+        //TODO: handle io error possibility?
+        let _ = self.audit_access(
+            self.access_count
+                .fetch_add(1, Ordering::SeqCst)
+                .saturating_add(1),
+            "copy",
+        );
+        *self.inner.borrow()
+    }
 
     fn with<R>(&self, f: impl FnOnce(&Self::InnerType) -> R) -> Self::ResultType<R> {
         //TODO: handle io error possibility?

@@ -54,6 +54,16 @@ impl<T: NonceTrait, const N: usize> Key<T, N> {
         Self(key, RwLock::new(nonce))
     }
 
+    pub fn tag(&self) -> &str {
+        crate::SecureContainer::tag(&self.0)
+    }
+
+    /// Returns a reference to the `RwLock<Nonce>`
+    pub fn nonce(&self) -> &RwLock<Nonce<T>> {
+        &self.1
+    }
+
+    /// Encrypts the `plaintext` into `dest` using `associated_data`, writes the used nonce into `nonce`.
     pub fn encrypt(
         &self,
         dest: &mut [u8],
@@ -70,6 +80,20 @@ impl<T: NonceTrait, const N: usize> Key<T, N> {
             .with(|k| encrypt(dest, plaintext, k, nonce, associated_data))?)
     }
 
+    /// Encrypts the `plaintext` into `dest` using `associated_data` and `nonce`
+    pub fn encrypt_with(
+        &self,
+        dest: &mut [u8],
+        plaintext: &[u8],
+        nonce: &[u8; al_crypto::NONCE_SIZE],
+        associated_data: &[u8],
+    ) -> Result<(), SecretError> {
+        Ok(self
+            .0
+            .with(|k| encrypt(dest, plaintext, k, nonce, associated_data))?)
+    }
+
+    /// Decrypts the `ciphertext` into `dest` using `associated_data` and `nonce`
     pub fn decrypt(
         &self,
         dest: &mut [u8],

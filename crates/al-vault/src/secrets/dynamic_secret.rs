@@ -99,9 +99,22 @@ impl<T: Secureable, L: AsSecurityLevel> SecureContainer for DynamicSecret<T, L> 
     }
 }
 
-//TODO: I should add an explicit data copy that audits with "copy"
 impl<T: Secureable, L: AsSecurityLevel> SecureAccess for DynamicSecret<T, L> {
     type ResultType<R> = Result<R, SecretError>;
+    type CopyResultType = Result<Self::InnerType, SecretError>;
+
+    fn copy(&self) -> Self::CopyResultType {
+        //TODO: handle io error possibility?
+        let _ = self.audit_access(
+            self.access_count
+                .fetch_add(1, Ordering::SeqCst)
+                .saturating_add(1),
+            "copy",
+        );
+        Ok(SecureRef::<Self::InnerType>::to_type(&self.inner.borrow())?
+            .get()
+            .clone())
+    }
 
     fn with<R>(&self, f: impl FnOnce(&Self::InnerType) -> R) -> Self::ResultType<R> {
         //TODO: handle io error possibility?

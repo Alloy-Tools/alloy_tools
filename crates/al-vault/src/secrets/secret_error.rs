@@ -1,6 +1,6 @@
 use al_crypto::{CryptoError, NonceError};
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SecretError {
     SerializationError(String),
     CryptoError(CryptoError),

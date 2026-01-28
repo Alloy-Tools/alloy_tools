@@ -60,7 +60,7 @@ mod tests {
 
         // encrypt data and get packet
         let ciphertext = plaintext.clone().encrypt(&dek).unwrap();
-        let packet = ciphertext.as_packet().unwrap();
+        let mut packet = ciphertext.as_packet().unwrap();
         {
             let mut msg_hex = vec![0u8; 2 * packet.len()];
             to_hex(&packet, &mut msg_hex).unwrap();
@@ -79,7 +79,7 @@ mod tests {
         }
 
         // decrypt back to plaintext like it was recieved from network
-        let data = Data::from_packet(packet, "Network Secret").unwrap();
+        let data = Data::from_packet(packet.as_mut_slice(), "Network Secret").unwrap();
         let decrypted = data.decrypt(&dek).unwrap();
 
         // verify data is the same
@@ -99,7 +99,7 @@ mod tests {
             .clone()
             .encrypt_authenticated(&dek, TEST_ASSOCIATED_DATA)
             .unwrap();
-        let packet = ciphertext.as_packet().unwrap();
+        let mut packet = ciphertext.as_packet().unwrap();
         {
             let mut msg_hex = vec![0u8; 2 * packet.len()];
             to_hex(&packet, &mut msg_hex).unwrap();
@@ -120,7 +120,7 @@ mod tests {
         }
 
         // decrypt back to plaintext like it was recieved from network
-        let data = Data::from_packet(packet, "Network Secret").unwrap();
+        let data = Data::from_packet(packet.as_mut_slice(), "Network Secret").unwrap();
         let decrypted = data.decrypt_verified(&dek, TEST_ASSOCIATED_DATA).unwrap();
 
         // verify data is the same
