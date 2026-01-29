@@ -22,6 +22,10 @@ impl SymmetricState {
         }
     }
 
+    pub fn has_key(&self) -> bool {
+        self.cipher_state.has_key()
+    }
+
     pub fn mix_key(&mut self, input_key_material: &[u8]) -> Result<(), NoiseError> {
         self.ck.with_mut(|ck| {
             let mut keys = [[0u8; KEY_SIZE]; 2];

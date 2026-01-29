@@ -5,6 +5,7 @@ use zeroize::Zeroize;
 
 pub const TAG_SIZE: usize = 16;
 pub const KEY_SIZE: usize = 32;
+pub const DHLEN: usize = 32;
 
 impl From<argon2::Error> for CryptoError {
     fn from(error: argon2::Error) -> Self {

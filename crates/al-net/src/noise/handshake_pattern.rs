@@ -87,7 +87,7 @@ impl HandshakePattern {
         local: &Option<KeyPair>,
     ) -> Result<(), NoiseError> {
         match local {
-            Some(local) => symmetric_state.mix_hash(local.public()),
+            Some(local) => symmetric_state.mix_hash(local.public().as_bytes()),
             None => Err(NoiseError::LocalStaticMissing)?,
         }
         Ok(())

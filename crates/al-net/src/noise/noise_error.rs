@@ -9,8 +9,15 @@ pub enum NoiseError {
     NonceError(NonceError),
     SecretError(SecretError),
     HandshakeComplete,
+    RemoteEphemeralExists,
+    RemoteStaticExists,
+    RemoteEphemeralMissing,
     RemoteStaticMissing,
+    LocalEphemeralExists,
+    LocalEphemeralMissing,
     LocalStaticMissing,
+    BothKeysMissing,
+    InvalidKeyLength,
 }
 
 impl From<CipherStateReturn> for NoiseError {

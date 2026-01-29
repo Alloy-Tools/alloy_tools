@@ -53,6 +53,7 @@ dependencies = [
  "hmac",
  "rand",
  "serde",
+ "x25519-dalek",
  "zeroize",
 ]
 
