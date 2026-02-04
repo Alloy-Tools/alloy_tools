@@ -1,4 +1,4 @@
-use al_crypto::{Monotonic, TAG_SIZE};
+use al_crypto::{NonceTrait, TAG_SIZE};
 use al_vault::{Data, Key, SecretError};
 use zeroize::Zeroize;
 
@@ -17,9 +17,10 @@ impl From<SecretError> for CipherStateReturn {
     }
 }
 
-pub struct CipherState(Option<Key<Monotonic, KEY_SIZE>>);
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CipherState<N: NonceTrait>(Option<Key<N, KEY_SIZE>>);
 
-impl CipherState {
+impl<N: NonceTrait> CipherState<N> {
     pub fn new() -> Self {
         Self(None)
     }
@@ -29,27 +30,13 @@ impl CipherState {
         &mut self,
         key: [u8; KEY_SIZE],
         tag: impl Into<String>,
-        context: &[u8; 4],
+        nonce: al_crypto::Nonce<N>,
     ) {
-        self.0 = Some(Key::from_array(
-            key,
-            tag,
-            al_crypto::Nonce::<Monotonic>::new(context, 0),
-        ))
+        self.0 = Some(Key::from_array(key, tag, nonce))
     }
 
     pub fn has_key(&self) -> bool {
         self.0.is_some()
-    }
-
-    pub fn set_nonce(&self, nonce: u64) {
-        if let Some(key) = &self.0 {
-            let mut key_nonce = match key.nonce().write() {
-                Ok(n) => n,
-                Err(poisoned) => poisoned.into_inner(),
-            };
-            key_nonce.set_counter(nonce);
-        }
     }
 
     pub fn encrypt_with_ad(
@@ -85,7 +72,7 @@ impl CipherState {
                 Err(poisoned) => poisoned.into_inner(),
             }
             .to_next()
-            .map_err(|e| CipherStateReturn::SecretError(SecretError::from(e)))?;
+            .map_err(|e| CipherStateReturn::SecretError(e.into()))?;
             Ok(data.as_bytes()?)
         } else {
             Ok(ciphertext_packet.to_vec())
@@ -93,7 +80,7 @@ impl CipherState {
     }
 
     /// Rekeys with Noise specification: k = ENCRYPT(k, maxnonce, zerolen, zeros).
-    /// Will return `NonceError:CounterExpired` if `nonce > u64::MAX / 2`, signalling the need for new ephemeral keys.
+    /// Will return `NonceError:CounterExpired` if `nonce > nonce_max / 2`, signaling the need for new ephemeral keys.
     pub fn rekey(&mut self) -> Result<(), NoiseError> {
         let new_key = match &self.0 {
             Some(key) => {
@@ -106,9 +93,8 @@ impl CipherState {
                     Err(al_crypto::NonceError::CounterExpired)?
                 }
 
-                // Save current nonce and set to u64::MAX
-                let curr_nonce = nonce_guard.counter_num();
-                nonce_guard.set_counter(u64::MAX);
+                // Save current nonce and set to nonce max
+                let curr_nonce = nonce_guard.set_max();
 
                 // Encrypt with max nonce, avoiding nonce checks
                 let mut new_key_bytes = [0u8; KEY_SIZE + TAG_SIZE];
@@ -120,7 +106,7 @@ impl CipherState {
                 );
 
                 // Set the nonce back and return if encryption was an Err
-                nonce_guard.set_counter(curr_nonce);
+                nonce_guard.revert_max(curr_nonce);
                 result?;
 
                 // Copy the key_bytes and nonce for key creation
@@ -131,13 +117,10 @@ impl CipherState {
                 nonce_bytes.copy_from_slice(nonce_guard.as_bytes());
 
                 // Return the new key
-                Key::<Monotonic, KEY_SIZE>::from_array(
+                Key::<N, KEY_SIZE>::from_array(
                     trunc_key,
                     key.tag(),
-                    al_crypto::Nonce::<Monotonic>::from_bytes(
-                        nonce_bytes,
-                        nonce_guard.created_at(),
-                    ),
+                    al_crypto::Nonce::<N>::from_bytes(nonce_bytes, nonce_guard.created_at()),
                 )
             }
             None => return Ok(()),

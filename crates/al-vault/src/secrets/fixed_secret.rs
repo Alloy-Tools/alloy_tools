@@ -130,3 +130,12 @@ impl<const N: usize, L: AsSecurityLevel> SecureAccess for FixedSecret<N, L> {
         result
     }
 }
+
+/// SAFETY: FixedSecret is safe to share between threads because:
+/// 1. Interior mutability is mediated through SecureAccess trait methods
+///    that enforce Rust's borrow checker rules (exclusive access for mutations)
+/// 2. The underlying SecretBox protects memory with mlock/mprotect
+/// 3. Access counting uses atomic operations for thread safety
+/// 4. All public access is through safe borrowed references
+unsafe impl<const N: usize, L: AsSecurityLevel> Send for FixedSecret<N, L> {}
+unsafe impl<const N: usize, L: AsSecurityLevel> Sync for FixedSecret<N, L> {}

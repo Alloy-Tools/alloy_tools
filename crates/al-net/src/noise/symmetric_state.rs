@@ -1,19 +1,21 @@
 use crate::{
     CipherState, HandshakePattern, NoiseError, DOUBLE_KEY_SIZE, HASHLEN, KEY_SIZE, TRIPLE_KEY_SIZE,
 };
-use al_crypto::{hash, HkdfBlake2s};
+use al_crypto::{hash, HkdfBlake2s, NonceTrait};
 use al_vault::{FixedSecret, SecureAccess};
 use zeroize::Zeroize;
 
-pub type SplitResult = (CipherState, CipherState, [u8; HASHLEN]);
+#[allow(type_alias_bounds)]
+pub type SplitResult<N: NonceTrait> = (CipherState<N>, CipherState<N>, [u8; HASHLEN]);
 
-pub struct SymmetricState {
-    cipher_state: CipherState,
-    ck: FixedSecret<HASHLEN>,
-    h: FixedSecret<HASHLEN>,
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SymmetricState<N: NonceTrait> {
+    pub(super) cipher_state: CipherState<N>,
+    pub(super) ck: FixedSecret<HASHLEN>,
+    pub(super) h: FixedSecret<HASHLEN>,
 }
 
-impl SymmetricState {
+impl<N: NonceTrait> SymmetricState<N> {
     pub fn initialize_symmetric(pattern: HandshakePattern) -> Self {
         Self {
             cipher_state: CipherState::new(),
@@ -31,8 +33,14 @@ impl SymmetricState {
             let mut keys = [[0u8; KEY_SIZE]; 2];
             HkdfBlake2s::derive_keys::<2, DOUBLE_KEY_SIZE>(&mut keys, ck, input_key_material, &[])?;
             ck.copy_from_slice(&keys[0]);
-            self.cipher_state
-                .initialize_key(keys[1], "Cipherstate Key", b"CKEY");
+            self.cipher_state.initialize_key(
+                keys[1],
+                "Cipherstate Key",
+                N::new(b"CKEY").map_err(|e| {
+                    keys.zeroize();
+                    e
+                })?,
+            );
             keys.zeroize();
             Ok(())
         })
@@ -52,8 +60,14 @@ impl SymmetricState {
             HkdfBlake2s::derive_keys::<3, TRIPLE_KEY_SIZE>(&mut keys, ck, input_key_material, &[])?;
             ck.copy_from_slice(&keys[0]);
             temp_h.copy_from_slice(&keys[1]);
-            self.cipher_state
-                .initialize_key(keys[2], "Cipherstate Key", b"CKEY");
+            self.cipher_state.initialize_key(
+                keys[2],
+                "Cipherstate Key",
+                N::new(b"CKEY").map_err(|e| {
+                    keys.zeroize();
+                    e
+                })?,
+            );
             keys.zeroize();
             Ok::<(), NoiseError>(())
         })?;
@@ -86,7 +100,7 @@ impl SymmetricState {
         Ok(plaintext)
     }
 
-    pub fn split(&self) -> Result<SplitResult, NoiseError> {
+    pub fn split<T: al_crypto::NonceTrait>(&self) -> Result<SplitResult<T>, NoiseError> {
         self.ck.with(|ck| {
             let mut keys = [[0u8; KEY_SIZE]; 2];
             HkdfBlake2s::derive_keys::<2, DOUBLE_KEY_SIZE>(&mut keys, ck, &[], &[])?;
@@ -95,9 +109,23 @@ impl SymmetricState {
 
             let mut key = [0u8; KEY_SIZE];
             key.copy_from_slice(&keys[0]);
-            c1.initialize_key(key, "Noise Send Key", b"SKEY");
+            c1.initialize_key(
+                key,
+                "Noise Send Key",
+                T::new(b"IKEY").map_err(|e| {
+                    keys.zeroize();
+                    e
+                })?,
+            );
             key.copy_from_slice(&keys[1]);
-            c2.initialize_key(key, "Noise Recv Key", b"RKEY");
+            c2.initialize_key(
+                key,
+                "Noise Recv Key",
+                T::new(b"RKEY").map_err(|e| {
+                    keys.zeroize();
+                    e
+                })?,
+            );
             keys.zeroize();
 
             Ok((c1, c2, self.get_handshake_hash()))

@@ -89,11 +89,11 @@ impl<T: NonceTrait + NonceCounter<T>> Nonce<T> {
     }
 
     /// Retuns the `Nonce` counter byte portion as an unsigned integer
-    pub fn counter_num(&self) -> T::CounterType {
+    pub fn counter_num(&self) -> <T as NonceCounter<T>>::CounterType {
         T::get_counter_num(&self.bytes)
     }
 
-    pub fn set_counter(&mut self, counter: T::CounterType) {
+    pub fn set_counter(&mut self, counter: <T as NonceCounter<T>>::CounterType) {
         T::set_counter(&mut self.bytes, counter);
     }
 }
@@ -190,6 +190,16 @@ impl<T: NonceTrait> Nonce<T> {
     /// Returns `Ok(())` if not needed or an `Err(NonceExpiry)` with the reason for expiring
     pub fn needs_rotation(&self) -> Result<(), NonceError> {
         T::needs_rotation(self)
+    }
+
+    /// Helper funciton to ensure Noise protocol can set its nonce to MAX.
+    pub fn set_max(&mut self) -> [u8; 8] {
+        T::set_max(self)
+    }
+
+    /// Helper function to ensure Noise protocol can revert its nonce from MAX.
+    pub fn revert_max(&mut self, bytes: [u8; 8]) {
+        T::revert_max(self, bytes)
     }
 }
 

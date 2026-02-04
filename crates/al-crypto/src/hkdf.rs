@@ -6,7 +6,7 @@ use zeroize::Zeroize;
 
 /// Generic HKDF following RFC 5869.
 /// H: Hash function (eg. Blake2s256).
-/// K: Key size (eg. 32 for 256-bit keys).
+/// N: Key size (eg. 32 for 256-bit keys).
 pub struct Hkdf<H: Mac + KeyInit, const N: usize>(PhantomData<H>);
 
 impl<H: Mac + KeyInit, const N: usize> Hkdf<H, N> {

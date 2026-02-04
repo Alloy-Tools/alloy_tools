@@ -97,9 +97,9 @@ pub fn encrypt(
     dest[..p_len].copy_from_slice(plaintext);
     let tag = cipher
         .encrypt_in_place_detached(nonce.into(), associated_data, &mut dest[..p_len])
-        .map_err(|e| {
+        .map_err(|_| {
             dest.zeroize();
-            CryptoError::EncryptionError(e)
+            CryptoError::EncryptionError
         })?;
     dest[p_len..p_len + TAG_SIZE].copy_from_slice(&tag);
     Ok(())
@@ -124,9 +124,9 @@ pub fn decrypt(
 
     cipher
         .decrypt_in_place_detached(nonce.into(), associated_data, dest, tag.into())
-        .map_err(|e| {
+        .map_err(|_| {
             dest.zeroize();
-            CryptoError::DecryptionError(e)
+            CryptoError::DecryptionError
         })?;
     Ok(())
 }

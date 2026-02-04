@@ -13,7 +13,6 @@ pub enum NoiseError {
     RemoteStaticExists,
     RemoteEphemeralMissing,
     RemoteStaticMissing,
-    LocalEphemeralExists,
     LocalEphemeralMissing,
     LocalStaticMissing,
     BothKeysMissing,

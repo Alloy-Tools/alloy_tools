@@ -1,5 +1,4 @@
 use std::sync::RwLock;
-
 use crate::{Ephemeral, FixedSecret, SecretError, SecureAccess};
 use al_crypto::{decrypt, encrypt, Nonce, NonceTrait, KEY_SIZE};
 

@@ -1,6 +1,6 @@
+use crate::{NoiseError, DHLEN};
 use al_vault::{FixedSecret, SecureAccess};
 use zeroize::Zeroize;
-use crate::{DHLEN, NoiseError};
 
 /// Holds the private key bytes in protected memory
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -37,9 +37,8 @@ impl KeyPair {
     }
 
     pub fn diffie_hellman(&self, remote_public: [u8; DHLEN]) -> [u8; DHLEN] {
-        self.0.with(|private| {
-            al_crypto::diffie_hellman(*private, remote_public)
-        })
+        self.0
+            .with(|private| al_crypto::diffie_hellman(*private, remote_public))
     }
 }
 
@@ -52,7 +51,9 @@ impl PublicKey {
     }
 
     pub fn from_bytes(public: &[u8]) -> Result<Self, NoiseError> {
-        Ok(Self(x25519_dalek::PublicKey::from(<[u8; DHLEN]>::try_from(public).map_err(|_| NoiseError::InvalidKeyLength)?)))
+        Ok(Self(x25519_dalek::PublicKey::from(
+            <[u8; DHLEN]>::try_from(public).map_err(|_| NoiseError::InvalidKeyLength)?,
+        )))
     }
 
     pub fn to_bytes(&self) -> [u8; DHLEN] {

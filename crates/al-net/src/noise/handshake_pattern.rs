@@ -1,7 +1,8 @@
+use al_crypto::NonceTrait;
+
 use crate::{KeyPair, NoiseError, PublicKey, SymmetricState, HASHLEN};
 
-//TODO: decide all handshake patterns
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Default)]
 pub enum HandshakePattern {
     /// No Authentication, no static keys (anonymous)
     #[default]
@@ -43,9 +44,9 @@ impl HandshakePattern {
 
     /// Mixes any known static public keys as a pre-message.
     /// If both initiator and responder have pre-messages, the initiator's public keys are hashed first.
-    pub fn mix_premessages(
+    pub fn mix_premessages<N: NonceTrait>(
         &self,
-        symmetric_state: &mut SymmetricState,
+        symmetric_state: &mut SymmetricState<N>,
         initiator: bool,
         s: &Option<KeyPair>,
         _e: &Option<KeyPair>,
@@ -81,9 +82,9 @@ impl HandshakePattern {
         Ok(())
     }
 
-    fn mix_local(
+    fn mix_local<N: NonceTrait>(
         &self,
-        symmetric_state: &mut SymmetricState,
+        symmetric_state: &mut SymmetricState<N>,
         local: &Option<KeyPair>,
     ) -> Result<(), NoiseError> {
         match local {
@@ -93,9 +94,9 @@ impl HandshakePattern {
         Ok(())
     }
 
-    fn mix_remote(
+    fn mix_remote<N: NonceTrait>(
         &self,
-        symmetric_state: &mut SymmetricState,
+        symmetric_state: &mut SymmetricState<N>,
         remote: &Option<PublicKey>,
     ) -> Result<(), NoiseError> {
         match remote {
@@ -188,7 +189,7 @@ impl HandshakePattern {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum HandshakeToken {
     /// Ephemeral key
     E,

@@ -36,13 +36,14 @@ pub trait Transport<T: TransportItemRequirements>: TransportRequirements {
     ) -> Pin<Box<dyn Future<Output = Result<Option<T>, TransportError>> + Send + Sync + '_>>;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TransportError {
     Custom(String),
     LockPoisoned(String),
     Transport(String),
     UnSupported(String),
     NoData,
+    SerdeError(String),
 }
 
 impl<T> From<PoisonError<T>> for TransportError {

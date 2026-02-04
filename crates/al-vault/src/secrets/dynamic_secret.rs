@@ -151,3 +151,14 @@ impl<T: Secureable, L: AsSecurityLevel> SecureAccess for DynamicSecret<T, L> {
         Ok(result)
     }
 }
+
+/// SAFETY: DynamicSecret is safe to share between threads because:
+/// 1. Interior mutability is mediated through SecureAccess trait methods
+///    that enforce Rust's borrow checker rules (exclusive access for mutations)
+/// 2. The underlying SecretVec protects memory with mlock/mprotect
+/// 3. Access counting uses atomic operations for thread safety
+/// 4. All public access is through safe borrowed references
+/// 5. T must be Send + Sync because it's serialized into the SecretVec
+///    and deserialized by concurrent threads
+unsafe impl<T: Secureable, L: AsSecurityLevel> Send for DynamicSecret<T, L> {}
+unsafe impl<T: Secureable, L: AsSecurityLevel> Sync for DynamicSecret<T, L> {}
