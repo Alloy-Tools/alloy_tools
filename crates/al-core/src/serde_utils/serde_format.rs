@@ -11,39 +11,31 @@ impl<T> SerdeWrapper<T> {
 pub trait SerdeFormat:
     Send + Sync + Clone + Default + PartialEq + std::any::Any + std::fmt::Debug + std::hash::Hash
 {
+    type Error;
+
+    fn error_to_string(&self, error: Self::Error) -> String;
+
     #[cfg(feature = "event")]
     /// Serialize the passed event into a vector of bytes.
-    fn serialize_event(
-        &self,
-        event: &dyn crate::Event,
-    ) -> Result<Vec<u8>, Box<dyn std::error::Error>>;
+    fn serialize_event(&self, event: &dyn crate::Event) -> Result<Vec<u8>, Self::Error>;
 
     #[cfg(feature = "event")]
     /// Deserialize an event as type T from the passed byte slice.
-    fn deserialize_event<T>(&self, data: &[u8]) -> Result<T, Box<dyn std::error::Error>>
+    fn deserialize_event<T>(&self, data: &[u8]) -> Result<T, Self::Error>
     where
         T: crate::Event + crate::EventRequirements + for<'de> serde::Deserialize<'de>;
 
     #[cfg(feature = "event")]
     /// Deserialize an event as a `Box<dyn Event>` from the passed byte slice.
-    fn deserialize_event_dyn(
-        &self,
-        data: &[u8],
-    ) -> Result<Box<dyn crate::Event>, Box<dyn std::error::Error>>;
+    fn deserialize_event_dyn(&self, data: &[u8]) -> Result<Box<dyn crate::Event>, Self::Error>;
 
     #[cfg(feature = "command")]
     /// Serialize the passed command into a vector of bytes.
-    fn serialize_command(
-        &self,
-        command: &crate::Command,
-    ) -> Result<Vec<u8>, Box<dyn std::error::Error>>;
+    fn serialize_command(&self, command: &crate::Command) -> Result<Vec<u8>, Self::Error>;
 
     #[cfg(feature = "command")]
     /// Deserialize a command from the passed byte slice.
-    fn deserialize_command(
-        &self,
-        data: &[u8],
-    ) -> Result<crate::Command, Box<dyn std::error::Error>>;
+    fn deserialize_command(&self, data: &[u8]) -> Result<crate::Command, Self::Error>;
 }
 
 /// A JSON-based implementation of the SerdeFormat trait using serde_json.
@@ -53,46 +45,38 @@ pub struct JsonSerde;
 
 #[cfg(feature = "json")]
 impl SerdeFormat for JsonSerde {
-    #[cfg(feature = "event")]
-    fn serialize_event(
-        &self,
-        event: &dyn crate::Event,
-    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        serde_json::to_vec(&event).map_err(|e| e.into())
+    type Error = serde_json::Error;
+
+    fn error_to_string(&self, error: Self::Error) -> String {
+        error.to_string()
     }
 
     #[cfg(feature = "event")]
-    fn deserialize_event<T>(&self, data: &[u8]) -> Result<T, Box<dyn std::error::Error>>
+    fn serialize_event(&self, event: &dyn crate::Event) -> Result<Vec<u8>, Self::Error> {
+        serde_json::to_vec(&event)
+    }
+
+    #[cfg(feature = "event")]
+    fn deserialize_event<T>(&self, data: &[u8]) -> Result<T, Self::Error>
     where
         T: crate::Event + crate::EventRequirements + for<'de> serde::Deserialize<'de> + 'static,
     {
-        serde_json::from_slice::<SerdeWrapper<T>>(data)
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?
-            .as_result()
+        serde_json::from_slice::<SerdeWrapper<T>>(data)?.as_result()
     }
 
     #[cfg(feature = "event")]
-    fn deserialize_event_dyn(
-        &self,
-        data: &[u8],
-    ) -> Result<Box<dyn crate::Event>, Box<dyn std::error::Error>> {
-        serde_json::from_slice(data).map_err(|e| e.into())
+    fn deserialize_event_dyn(&self, data: &[u8]) -> Result<Box<dyn crate::Event>, Self::Error> {
+        serde_json::from_slice(data)
     }
 
     #[cfg(feature = "command")]
-    fn serialize_command(
-        &self,
-        command: &crate::Command,
-    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        serde_json::to_vec(command).map_err(|e| e.into())
+    fn serialize_command(&self, command: &crate::Command) -> Result<Vec<u8>, Self::Error> {
+        serde_json::to_vec(command)
     }
 
     #[cfg(feature = "command")]
-    fn deserialize_command(
-        &self,
-        data: &[u8],
-    ) -> Result<crate::Command, Box<dyn std::error::Error>> {
-        serde_json::from_slice(data).map_err(|e| e.into())
+    fn deserialize_command(&self, data: &[u8]) -> Result<crate::Command, Self::Error> {
+        serde_json::from_slice(data)
     }
 }
 
@@ -103,45 +87,37 @@ pub struct BinarySerde;
 
 #[cfg(feature = "binary")]
 impl SerdeFormat for BinarySerde {
-    #[cfg(feature = "event")]
-    fn serialize_event(
-        &self,
-        event: &dyn crate::Event,
-    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        bitcode::serialize(&event).map_err(|e| e.into())
+    type Error = bitcode::Error;
+
+    fn error_to_string(&self, error: Self::Error) -> String {
+        error.to_string()
     }
 
     #[cfg(feature = "event")]
-    fn deserialize_event<T>(&self, data: &[u8]) -> Result<T, Box<dyn std::error::Error>>
+    fn serialize_event(&self, event: &dyn crate::Event) -> Result<Vec<u8>, Self::Error> {
+        bitcode::serialize(&event)
+    }
+
+    #[cfg(feature = "event")]
+    fn deserialize_event<T>(&self, data: &[u8]) -> Result<T, Self::Error>
     where
         T: crate::Event + crate::EventRequirements + for<'de> serde::Deserialize<'de>,
     {
-        bitcode::deserialize::<SerdeWrapper<T>>(data)
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?
-            .as_result()
+        bitcode::deserialize::<SerdeWrapper<T>>(data)?.as_result()
     }
 
     #[cfg(feature = "event")]
-    fn deserialize_event_dyn(
-        &self,
-        data: &[u8],
-    ) -> Result<Box<dyn crate::Event>, Box<dyn std::error::Error>> {
-        bitcode::deserialize(data).map_err(|e| e.into())
+    fn deserialize_event_dyn(&self, data: &[u8]) -> Result<Box<dyn crate::Event>, Self::Error> {
+        bitcode::deserialize(data)
     }
 
     #[cfg(feature = "command")]
-    fn serialize_command(
-        &self,
-        command: &crate::Command,
-    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-        bitcode::serialize(command).map_err(|e| e.into())
+    fn serialize_command(&self, command: &crate::Command) -> Result<Vec<u8>, Self::Error> {
+        bitcode::serialize(command)
     }
 
     #[cfg(feature = "command")]
-    fn deserialize_command(
-        &self,
-        data: &[u8],
-    ) -> Result<crate::Command, Box<dyn std::error::Error>> {
-        bitcode::deserialize(data).map_err(|e| e.into())
+    fn deserialize_command(&self, data: &[u8]) -> Result<crate::Command, Self::Error> {
+        bitcode::deserialize(data)
     }
 }

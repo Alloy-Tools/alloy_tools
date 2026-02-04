@@ -3,37 +3,45 @@ use std::fmt::Debug;
 #[cfg(feature = "event")]
 use std::{any::Any, hash::Hash};
 
-#[cfg(feature = "event")]
 /// Sealed marker traits ensure all required traits are impl'd while users can only impl their desired mark
 mod sealed {
+    #[cfg(feature = "event")]
     pub trait EventMarker: super::EventRequirements {}
 
     /// Used to mark other code that have required traits as valid for serde features
     /// If no serde feature, this is a dummy trait
-    #[cfg(not(feature = "serde"))]
+    #[cfg(all(feature = "event", not(feature = "serde")))]
     pub trait SerdeFeature {}
     /// If no serde feature, all EventMarker types implement this dummy trait
-    #[cfg(not(feature = "serde"))]
+    #[cfg(all(feature = "event", not(feature = "serde")))]
     impl<T: EventMarker> SerdeFeature for T {}
 
     /// If serde feature is enabled, this requires erased_serde Serialize
-    #[cfg(feature = "serde")]
+    #[cfg(all(feature = "event", feature = "serde"))]
     pub trait SerdeFeature: erased_serde::Serialize {}
     /// If serde feature is enabled, all EventMarker types that also implement serde::Serialize implement this trait
-    #[cfg(feature = "serde")]
-    impl<
-            T: EventMarker
-                + serde::Serialize
-                + for<'de> serde::Deserialize<'de>
-                + for<'de> serde::de::Deserialize<'de>,
-        > SerdeFeature for T
-    {
-    }
+    #[cfg(all(feature = "event", feature = "serde"))]
+    impl<T: serde::Serialize + for<'de> serde::Deserialize<'de>> SerdeFeature for T {}
+
+    #[cfg(all(feature = "transport", not(feature = "serde")))]
+    pub trait TransportSerde {}
+    #[cfg(all(feature = "transport", not(feature = "serde")))]
+    impl<T> TransportSerde for T {}
+
+    #[cfg(all(feature = "transport", feature = "serde"))]
+    pub trait TransportSerde: serde::Serialize + for<'de> serde::Deserialize<'de> {}
+    #[cfg(all(feature = "transport", feature = "serde"))]
+    impl<T: serde::Serialize + for<'de> serde::Deserialize<'de>> TransportSerde for T {}
 }
 #[cfg(feature = "event")]
 pub trait SerdeFeature: sealed::SerdeFeature {}
 #[cfg(feature = "event")]
 impl<T: sealed::SerdeFeature> SerdeFeature for T {}
+
+#[cfg(feature = "transport")]
+pub trait TransportSerde: sealed::TransportSerde {}
+#[cfg(feature = "transport")]
+impl<T: sealed::TransportSerde> TransportSerde for T {}
 
 #[cfg(feature = "event")]
 /// Required traits for an event type to be used in the event system
@@ -76,9 +84,9 @@ impl<T: 'static + Send + Sync + Debug + Any> TransportRequirements for T {
 
 #[cfg(feature = "transport")]
 /// Trait marking an item as valid for passing through a `Transport`
-pub trait TransportItemRequirements: TransportRequirements + Clone {}
+pub trait TransportItemRequirements: TransportRequirements + Clone + TransportSerde {}
 #[cfg(feature = "transport")]
-impl<T: TransportRequirements + Clone> TransportItemRequirements for T {}
+impl<T: TransportRequirements + Clone + TransportSerde> TransportItemRequirements for T {}
 
 /// Zero sized type used for type state pattern, transform transports specifically
 #[derive(Debug, Clone)]

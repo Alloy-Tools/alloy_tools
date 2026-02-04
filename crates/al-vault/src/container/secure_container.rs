@@ -13,6 +13,9 @@ pub trait SecureContainer {
 
 pub trait SecureAccess: SecureContainer {
     type ResultType<R>;
+    type CopyResultType;
+
+    fn copy(&self) -> Self::CopyResultType;
 
     fn with<R>(&self, f: impl FnOnce(&Self::InnerType) -> R) -> Self::ResultType<R>;
     fn with_mut<R>(&mut self, f: impl FnOnce(&mut Self::InnerType) -> R) -> Self::ResultType<R>;

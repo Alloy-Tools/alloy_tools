@@ -92,6 +92,18 @@ impl<const N: usize, L: AsSecurityLevel> SecureContainer for FixedSecret<N, L> {
 
 impl<const N: usize, L: AsSecurityLevel> SecureAccess for FixedSecret<N, L> {
     type ResultType<R> = R;
+    type CopyResultType = Self::InnerType;
+
+    fn copy(&self) -> Self::CopyResultType {
+        //TODO: handle io error possibility?
+        let _ = self.audit_access(
+            self.access_count
+                .fetch_add(1, Ordering::SeqCst)
+                .saturating_add(1),
+            "copy",
+        );
+        *self.inner.borrow()
+    }
 
     fn with<R>(&self, f: impl FnOnce(&Self::InnerType) -> R) -> Self::ResultType<R> {
         //TODO: handle io error possibility?
@@ -118,3 +130,12 @@ impl<const N: usize, L: AsSecurityLevel> SecureAccess for FixedSecret<N, L> {
         result
     }
 }
+
+/// SAFETY: FixedSecret is safe to share between threads because:
+/// 1. Interior mutability is mediated through SecureAccess trait methods
+///    that enforce Rust's borrow checker rules (exclusive access for mutations)
+/// 2. The underlying SecretBox protects memory with mlock/mprotect
+/// 3. Access counting uses atomic operations for thread safety
+/// 4. All public access is through safe borrowed references
+unsafe impl<const N: usize, L: AsSecurityLevel> Send for FixedSecret<N, L> {}
+unsafe impl<const N: usize, L: AsSecurityLevel> Sync for FixedSecret<N, L> {}

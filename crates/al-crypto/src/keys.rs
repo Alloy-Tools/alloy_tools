@@ -1,13 +1,11 @@
 use crate::CryptoError;
-use argon2::Argon2;
-use blake2::Blake2s256;
 use chacha20poly1305::{aead::AeadMutInPlace, ChaCha20Poly1305};
-use hmac::{Mac, SimpleHmac};
 use rand::{rngs::OsRng, TryRngCore};
 use zeroize::Zeroize;
 
 pub const TAG_SIZE: usize = 16;
 pub const KEY_SIZE: usize = 32;
+pub const DHLEN: usize = 32;
 
 impl From<argon2::Error> for CryptoError {
     fn from(error: argon2::Error) -> Self {
@@ -15,8 +13,8 @@ impl From<argon2::Error> for CryptoError {
     }
 }
 
-impl From<blake2::digest::InvalidLength> for CryptoError {
-    fn from(_: blake2::digest::InvalidLength) -> Self {
+impl From<digest::InvalidLength> for CryptoError {
+    fn from(_: digest::InvalidLength) -> Self {
         CryptoError::InvalidKeyLength
     }
 }
@@ -66,7 +64,7 @@ pub fn derive_pdk<const N: usize>(
     password: &[u8],
     salt: &[u8],
 ) -> Result<(), CryptoError> {
-    let argon2 = Argon2::new(
+    let argon2 = argon2::Argon2::new(
         argon2::Algorithm::Argon2id,
         argon2::Version::V0x13,
         argon2::Params::new(65536, 3, 1, Some(N))?,
@@ -80,12 +78,7 @@ pub fn derive_subkey<const N: usize>(
     key: &[u8],
     context: impl AsRef<str>,
 ) -> Result<(), CryptoError> {
-    let mut mac = SimpleHmac::<Blake2s256>::new_from_slice(key)?;
-    mac.update(context.as_ref().as_bytes());
-    let mut result = mac.finalize().into_bytes();
-    dest.copy_from_slice(&result[..N]);
-    result[..].zeroize();
-    Ok(())
+    crate::HkdfBlake2s::<N>::derive(dest, &[], key, context.as_ref().as_bytes())
 }
 
 /// Encrypts the `plaintext` byte slice into the `dest` byte slice using the `key`, `nonce`, and `associated_data` slices
@@ -98,15 +91,15 @@ pub fn encrypt(
 ) -> Result<(), CryptoError> {
     let p_len = plaintext.len();
     if dest.len() < p_len + TAG_SIZE {
-        return Err(CryptoError::DestToSmall);
+        return Err(CryptoError::DestTooSmall);
     }
-    let mut cipher = <ChaCha20Poly1305 as chacha20poly1305::KeyInit>::new_from_slice(key)?;
+    let mut cipher = <ChaCha20Poly1305 as digest::KeyInit>::new_from_slice(key)?;
     dest[..p_len].copy_from_slice(plaintext);
     let tag = cipher
         .encrypt_in_place_detached(nonce.into(), associated_data, &mut dest[..p_len])
-        .map_err(|e| {
+        .map_err(|_| {
             dest.zeroize();
-            CryptoError::EncryptionError(e)
+            CryptoError::EncryptionError
         })?;
     dest[p_len..p_len + TAG_SIZE].copy_from_slice(&tag);
     Ok(())
@@ -122,18 +115,18 @@ pub fn decrypt(
 ) -> Result<(), CryptoError> {
     let p_len = ciphertext.len() - TAG_SIZE;
     if dest.len() < p_len {
-        return Err(CryptoError::DestToSmall);
+        return Err(CryptoError::DestTooSmall);
     }
-    let mut cipher = <ChaCha20Poly1305 as chacha20poly1305::KeyInit>::new_from_slice(key)?;
+    let mut cipher = <ChaCha20Poly1305 as digest::KeyInit>::new_from_slice(key)?;
 
     let (data, tag) = ciphertext.split_at(p_len);
     dest.copy_from_slice(data);
 
     cipher
         .decrypt_in_place_detached(nonce.into(), associated_data, dest, tag.into())
-        .map_err(|e| {
+        .map_err(|_| {
             dest.zeroize();
-            CryptoError::DecryptionError(e)
+            CryptoError::DecryptionError
         })?;
     Ok(())
 }
@@ -221,14 +214,14 @@ mod tests {
         to_hex(&dest, &mut hex).unwrap();
         assert_eq!(
             str::from_utf8(&hex).unwrap(),
-            "c9dae20c4c81978621940ca6663adcd90da1678e2185afd2e9e0e0900d0b3e89"
+            "ee3c7f556497600463e1744e0300460cd91f9c2fec3eb664da59ac50e855c130"
         );
         let mut new_dest = [0u8; KEY_SIZE];
         derive_subkey(&mut new_dest, &dest, SUBKEY_CONTEXT).unwrap();
         to_hex(&new_dest, &mut hex).unwrap();
         assert_eq!(
             str::from_utf8(&hex).unwrap(),
-            "ab2f2446b748406b6daaf7cb2f8b4123de1824a309d7487e37f192ca285401e3"
+            "56e489124201e4f6bfb9b4e12bf1eaed032367bb86f157afb897821d42a39945"
         )
     }
 

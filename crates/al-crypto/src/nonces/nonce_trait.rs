@@ -3,8 +3,12 @@ use crate::{
     NonceTimestamp, NonceType, RandomTimeStamp,
 };
 
-pub trait NonceTrait: super::sealed::Sealed + Clone + PartialEq + Eq {
+pub trait NonceTrait:
+    super::sealed::Sealed + Copy + Clone + std::fmt::Debug + PartialEq + Eq + Send + Sync + 'static
+{
     type Graininess: Granularity;
+    /// Returns a new nonce
+    fn new(context: &[u8; 4]) -> Result<Nonce<Self>, NonceError>;
     /// Return the `NonceType` of the `Nonce`
     fn nonce_type() -> NonceType;
     /// Returns `Ok(())` if not needed or an `Err(NonceExpiry)` with the reason for expiring
@@ -15,10 +19,25 @@ pub trait NonceTrait: super::sealed::Sealed + Clone + PartialEq + Eq {
     fn to_next(nonce: &mut Nonce<Self>) -> Result<(), NonceError>
     where
         Self: Sized;
+    /// Returns the current counter and sets bytes[4..12] to max. Used by the Noise protocol for rekeying.
+    fn set_max(nonce: &mut Nonce<Self>) -> [u8; 8] {
+        let mut bytes = [0u8; 8];
+        bytes.copy_from_slice(&nonce.as_bytes()[4..]);
+        nonce.as_bytes_mut()[4..].copy_from_slice(&[255u8; 8]);
+        bytes
+    }
+    /// Sets the nonce counter if using a counter. Used by the Noise protocol for rekeying.
+    fn revert_max(nonce: &mut Nonce<Self>, bytes: [u8; 8]) {
+        nonce.as_bytes_mut()[4..].copy_from_slice(&bytes)
+    }
 }
 
 impl NonceTrait for Monotonic {
     type Graininess = crate::Seconds;
+
+    fn new(context: &[u8; 4]) -> Result<Nonce<Self>, NonceError> {
+        Ok(Nonce::<Monotonic>::new(context, 0))
+    }
 
     fn nonce_type() -> NonceType {
         NonceType::Monotonic
@@ -45,6 +64,10 @@ impl NonceTrait for Monotonic {
 
 impl<G: Granularity> NonceTrait for MonotonicTimeStamp<G> {
     type Graininess = G;
+
+    fn new(context: &[u8; 4]) -> Result<Nonce<Self>, NonceError> {
+        Ok(Nonce::<MonotonicTimeStamp<G>>::new(context, 0))
+    }
 
     fn nonce_type() -> NonceType {
         NonceType::MonotonicTimeStamp
@@ -78,6 +101,10 @@ impl<G: Granularity> NonceTrait for MonotonicTimeStamp<G> {
 
 impl<G: Granularity> NonceTrait for RandomTimeStamp<G> {
     type Graininess = G;
+
+    fn new(context: &[u8; 4]) -> Result<Nonce<Self>, NonceError> {
+        Nonce::<RandomTimeStamp<G>>::new(context)
+    }
 
     fn nonce_type() -> NonceType {
         NonceType::RandomTimeStamp
