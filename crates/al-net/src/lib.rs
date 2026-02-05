@@ -1,8 +1,8 @@
 /*
     - [x] Make a connection initiator that takes a handshake pattern
-    - [] Will take an address, handle the handshake, and return the ephemeral session key and transport
+    - [x] Will take an address, handle the handshake, and return the ephemeral session key and transport
     - [] Be able to send `Data<S: ProtectedState>`, or recv it and proccess it.
-    - [] The data can now be any `Vec<u8>` (anything) encrypted. Send and handle `al-core` commands.
+    - [x] The data can now be any `Vec<u8>` (anything) encrypted. Send and handle `al-core` commands.
     - [] Setup simple TCP VOIP with `al-core` events.
 */
 

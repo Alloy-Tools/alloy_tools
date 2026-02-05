@@ -156,8 +156,8 @@ impl<N: NonceTrait> Tcp<N> {
         prologue: Vec<u8>,
         local_static: Option<KeyPair>,
         remote_static: Option<PublicKey>,
-        f: F,
         token: Arc<RwLock<bool>>,
+        f: F,
     ) -> Result<(), TcpError> {
         let listener = Self::create_listener(addr).await?;
 
@@ -682,6 +682,7 @@ mod tests {
                 TEST_PROLOGUE.as_bytes().to_vec(),
                 None,
                 None,
+                token_clone,
                 |tcp| {
                     let dispatcher = dispatcher_clone.clone();
                     let connection_manager_clone = connection_manager.clone();
@@ -701,7 +702,6 @@ mod tests {
                         }
                     });
                 },
-                token_clone,
             )
             .await
         });
