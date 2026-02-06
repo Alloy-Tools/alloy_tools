@@ -16,7 +16,7 @@ use std::{sync::Arc, time::Duration};
 
 pub struct Tcp<N: NonceTrait> {
     stream: Arc<Mutex<TcpStream>>,
-    buffer: Mutex<[u8; MAX_MSG_BYTE_LEN]>,
+    buffer: Mutex<Box<[u8; MAX_MSG_BYTE_LEN]>>,
     noise: HandshakeState<N>,
     split: Option<(
         Arc<RwLock<CipherState<N>>>, // Initiator sends with first
@@ -75,7 +75,7 @@ impl<N: NonceTrait> Tcp<N> {
 
         let mut tcp = Self {
             stream: Arc::new(Mutex::new(stream)),
-            buffer: Mutex::new([0u8; MAX_MSG_BYTE_LEN]),
+            buffer: Mutex::new(Box::new([0u8; MAX_MSG_BYTE_LEN])),
             noise,
             split: None,
             timeout,
@@ -101,7 +101,7 @@ impl<N: NonceTrait> Tcp<N> {
 
         let mut tcp = Self {
             stream: Arc::new(Mutex::new(stream)),
-            buffer: Mutex::new([0u8; MAX_MSG_BYTE_LEN]),
+            buffer: Mutex::new(Box::new([0u8; MAX_MSG_BYTE_LEN])),
             noise,
             split: None,
             timeout,
@@ -220,7 +220,7 @@ impl<N: NonceTrait> Tcp<N> {
     async fn write_message(&mut self, payload: &mut [u8]) -> Result<(), TcpError> {
         let mut buffer = self.buffer.lock().await;
         // Write noise message to buffer
-        let len = match self.noise.write_message(payload, &mut *buffer) {
+        let len = match self.noise.write_message(payload, &mut **buffer) {
             Ok(HandshakeResult::InProgress(len)) => len,
             Ok(HandshakeResult::Complete {
                 init,
@@ -731,7 +731,9 @@ mod tests {
         // Recv echo back from server
         let cmd: al_core::Command = tcp.recv().await.unwrap();
         assert_eq!(al_core::Command::Pulse, cmd);
-        dispatcher.dispatch(conn_id, connection_manager.clone(), cmd).await;
+        dispatcher
+            .dispatch(conn_id, connection_manager.clone(), cmd)
+            .await;
 
         // Send event as command to server
         tcp.send(TestEventA(0).to_cmd()).await.unwrap();
@@ -739,7 +741,9 @@ mod tests {
         // Recv echo back from server
         let cmd: al_core::Command = tcp.recv().await.unwrap();
         assert_eq!(TestEventA(0), cmd.downcast_event().unwrap());
-        dispatcher.dispatch(conn_id, connection_manager.clone(), cmd).await;
+        dispatcher
+            .dispatch(conn_id, connection_manager.clone(), cmd)
+            .await;
 
         // Send event as command to server
         tcp.send(TestEventA(5).to_cmd()).await.unwrap();
@@ -747,7 +751,9 @@ mod tests {
         // Recv echo back from server
         let cmd: al_core::Command = tcp.recv().await.unwrap();
         assert_eq!(TestEventA(5), cmd.downcast_event().unwrap());
-        dispatcher.dispatch(conn_id, connection_manager.clone(), cmd).await;
+        dispatcher
+            .dispatch(conn_id, connection_manager.clone(), cmd)
+            .await;
 
         // Send event as command to server
         tcp.send(TestEventB(10).to_cmd()).await.unwrap();
@@ -755,7 +761,9 @@ mod tests {
         // Recv echo back from server
         let cmd: al_core::Command = tcp.recv().await.unwrap();
         assert_eq!(TestEventB(10), cmd.downcast_event().unwrap());
-        dispatcher.dispatch(conn_id, connection_manager.clone(), cmd).await;
+        dispatcher
+            .dispatch(conn_id, connection_manager.clone(), cmd)
+            .await;
 
         // Send event as command to server
         tcp.send(TestEventB(15).to_cmd()).await.unwrap();
@@ -763,7 +771,9 @@ mod tests {
         // Recv echo back from server
         let cmd: al_core::Command = tcp.recv().await.unwrap();
         assert_eq!(TestEventB(15), cmd.downcast_event().unwrap());
-        dispatcher.dispatch(conn_id, connection_manager.clone(), cmd).await;
+        dispatcher
+            .dispatch(conn_id, connection_manager.clone(), cmd)
+            .await;
 
         // Stop server and await handle
         *token.write().await = true;

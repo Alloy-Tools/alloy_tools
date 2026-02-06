@@ -98,12 +98,20 @@ pub async fn send_recv<N: NonceTrait>(
     cmd: Command,
 ) {
     // Send command to server
-    tcp.send(cmd).await.unwrap();
+    if let Err(e) = tcp.send(cmd).await {
+        eprintln!("Send error: {:?}", e);
+        return;
+    }
 
     // Recv back from server
-    dispatcher
-        .dispatch(conn_id, connection_manager, tcp.recv().await.unwrap())
-        .await;
+    match tcp.recv().await {
+        Ok(response) => {
+            dispatcher
+                .dispatch(conn_id, connection_manager, response)
+                .await
+        }
+        Err(e) => eprintln!("Recv error: {:?}", e),
+    }
 }
 
 #[tokio::main]
@@ -162,6 +170,8 @@ async fn main() {
                         let conn_id = connection_manager_clone.insert(tcp.clone()).await;
 
                         loop {
+                            tokio::task::yield_now().await;
+
                             match tcp.recv().await {
                                 Ok(cmd) => {
                                     dispatcher_clone
