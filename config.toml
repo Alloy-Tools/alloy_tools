@@ -1,0 +1,6 @@
+[network]
+address = "0.0.0.0"
+port = 7878
+
+[noise]
+server = true

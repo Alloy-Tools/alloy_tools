@@ -1,13 +1,17 @@
+use tokio::sync::RwLock;
+
 use crate::{
     AsTaskState, ExtendedTaskState, Task, Transport, TransportError, TransportItemRequirements,
 };
 use std::sync::Arc;
 
 type LinkTask<T> = Arc<
-    Task<
-        (),
-        TransportError,
-        ExtendedTaskState<(), TransportError, (Arc<dyn Transport<T>>, Arc<dyn Transport<T>>)>,
+    RwLock<
+        Task<
+            (),
+            TransportError,
+            ExtendedTaskState<(), TransportError, (Arc<dyn Transport<T>>, Arc<dyn Transport<T>>)>,
+        >,
     >,
 >;
 
@@ -42,7 +46,7 @@ impl<T: TransportItemRequirements> Link<T> {
         Self {
             producer: producer.clone(),
             consumer: consumer.clone(),
-            link_task: Arc::new(Task::infinite(
+            link_task: Arc::new(RwLock::new(Task::infinite(
                 |_, state| {
                     let state = state.clone();
                     async move {
@@ -57,7 +61,7 @@ impl<T: TransportItemRequirements> Link<T> {
                     }
                 },
                 (producer, consumer).as_task_state(),
-            )),
+            ))),
         }
     }
 

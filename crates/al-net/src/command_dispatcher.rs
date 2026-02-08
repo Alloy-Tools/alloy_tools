@@ -8,10 +8,11 @@ use crate::ConnectionManager;
 type FutureOutput = ();
 
 /// Type for event handlers
-type EventHandler<N> = Arc<
+type EventHandler<N, T> = Arc<
     dyn Fn(
             u64,
             Arc<ConnectionManager<N>>,
+            T,
             Box<dyn Event>,
         ) -> Pin<Box<dyn Future<Output = FutureOutput> + Send>>
         + Send
@@ -19,10 +20,11 @@ type EventHandler<N> = Arc<
 >;
 
 /// Type for command handlers
-type CommandHandler<N> = Arc<
+type CommandHandler<N, T> = Arc<
     dyn Fn(
             u64,
             Arc<ConnectionManager<N>>,
+            T,
             Command,
         ) -> Pin<Box<dyn Future<Output = FutureOutput> + Send>>
         + Send
@@ -30,16 +32,18 @@ type CommandHandler<N> = Arc<
 >;
 
 #[derive(Clone, Default)]
-pub struct CommandDispatcher<N: NonceTrait> {
-    event_handlers: Arc<RwLock<HashMap<String, Vec<EventHandler<N>>>>>,
-    command_handlers: Arc<RwLock<Vec<CommandHandler<N>>>>,
+pub struct CommandDispatcher<N: NonceTrait, T: Send + Sync + Clone + 'static> {
+    event_handlers: Arc<RwLock<HashMap<String, Vec<EventHandler<N, T>>>>>,
+    command_handlers: Arc<RwLock<Vec<CommandHandler<N, T>>>>,
+    state: T,
 }
 
-impl<N: NonceTrait> CommandDispatcher<N> {
-    pub fn new() -> Self {
+impl<N: NonceTrait, T: Send + Sync + Clone + 'static> CommandDispatcher<N, T> {
+    pub fn new(state: T) -> Self {
         Self {
             event_handlers: Arc::new(RwLock::new(HashMap::new())),
             command_handlers: Arc::new(RwLock::new(Vec::new())),
+            state,
         }
     }
 
@@ -47,6 +51,7 @@ impl<N: NonceTrait> CommandDispatcher<N> {
         Self {
             event_handlers: Arc::new(RwLock::new(self.event_handlers.read().await.clone())),
             command_handlers: Arc::new(RwLock::new(self.command_handlers.read().await.clone())),
+            state: self.state.clone(),
         }
     }
 
@@ -57,17 +62,21 @@ impl<N: NonceTrait> CommandDispatcher<N> {
         F: Future<Output = FutureOutput> + Send + Sync + 'static,
     >(
         &mut self,
-        handler: impl Fn(u64, Arc<ConnectionManager<N>>, E) -> F + Send + Sync + 'static,
+        handler: impl Fn(u64, Arc<ConnectionManager<N>>, T, E) -> F
+            + Send
+            + Sync
+            + 'static,
     ) {
         let handler = Arc::new(handler);
-        let wrapped_handler: EventHandler<N> = Arc::new(move |conn_id, connections, event| {
-            let handler = handler.clone();
-            Box::pin(async move {
-                if let Ok(typed_event) = event.downcast::<E>() {
-                    handler(conn_id, connections, typed_event).await;
-                }
-            })
-        });
+        let wrapped_handler: EventHandler<N, T> =
+            Arc::new(move |conn_id, connections, state, event| {
+                let handler = handler.clone();
+                Box::pin(async move {
+                    if let Ok(typed_event) = event.downcast::<E>() {
+                        handler(conn_id, connections, state, typed_event).await;
+                    }
+                })
+            });
 
         self.event_handlers
             .write()
@@ -80,15 +89,19 @@ impl<N: NonceTrait> CommandDispatcher<N> {
     /// Register a handler for all commands
     pub async fn register_command<F: Future<Output = FutureOutput> + Send + Sync + 'static>(
         &mut self,
-        handler: impl Fn(u64, Arc<ConnectionManager<N>>, Command) -> F + Send + Sync + 'static,
+        handler: impl Fn(u64, Arc<ConnectionManager<N>>, T, Command) -> F
+            + Send
+            + Sync
+            + 'static,
     ) {
         let handler = Arc::new(handler);
-        let wrapped_handler: CommandHandler<N> = Arc::new(move |conn_id, connections, command| {
-            let handler = handler.clone();
-            Box::pin(async move {
-                handler(conn_id, connections, command).await;
-            })
-        });
+        let wrapped_handler: CommandHandler<N, T> =
+            Arc::new(move |conn_id, connections, state, command| {
+                let handler = handler.clone();
+                Box::pin(async move {
+                    handler(conn_id, connections, state, command).await;
+                })
+            });
 
         self.command_handlers.write().await.push(wrapped_handler);
     }
@@ -102,7 +115,7 @@ impl<N: NonceTrait> CommandDispatcher<N> {
     ) {
         // Call all command handlers first
         for handler in &*self.command_handlers.read().await {
-            handler(conn_id, connections.clone(), command.clone()).await;
+            handler(conn_id, connections.clone(), self.state.clone(), command.clone()).await;
         }
 
         // If it's an event, also route to event-specific handlers
@@ -125,7 +138,7 @@ impl<N: NonceTrait> CommandDispatcher<N> {
             .get(&event.type_with_generics())
         {
             for handler in handlers {
-                handler(conn_id, connections.clone(), event.clone()).await;
+                handler(conn_id, connections.clone(), self.state.clone(), event.clone()).await;
             }
         }
     }
