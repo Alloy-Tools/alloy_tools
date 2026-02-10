@@ -1,4 +1,7 @@
-use crate::{SliceDebug, Transport, TransportError, TransportItemRequirements};
+use crate::{
+    StableVec, SliceDebug, Transport, TransportError,
+    TransportItemRequirements,
+};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -54,10 +57,10 @@ impl<T: TransportItemRequirements, R: Transport<T>, S: AsRef<str>> From<(Arc<R>,
   Publisher
 ******************** */
 pub struct Publisher<T> {
-    subscribers: Mutex<Vec<Arc<dyn Transport<T>>>>,
+    subscribers: Mutex<StableVec<Arc<dyn Transport<T>>>>,
     subscriber_channels: Mutex<HashMap<String, usize>>,
     filters: Mutex<Vec<Arc<dyn FilterFn<T>>>>,
-    channels: Mutex<Vec<Arc<Mutex<Vec<Arc<dyn Transport<T>>>>>>>,
+    channels: Mutex<Vec<Arc<Mutex<StableVec<Arc<dyn Transport<T>>>>>>>,
 }
 
 impl<T> std::fmt::Debug for Publisher<T> {
@@ -97,7 +100,7 @@ impl<T: TransportItemRequirements> From<crate::List<T>> for Publisher<T> {
 impl<T: TransportItemRequirements> Publisher<T> {
     pub fn new() -> Self {
         Self {
-            subscribers: Mutex::new(Vec::new()),
+            subscribers: Mutex::new(StableVec::new()),
             subscriber_channels: Mutex::new(HashMap::new()),
             filters: Mutex::new(Vec::new()),
             channels: Mutex::new(Vec::new()),
@@ -107,12 +110,12 @@ impl<T: TransportItemRequirements> Publisher<T> {
     pub fn subscribe(
         &self,
         transport: impl Into<SubscribeFormat<T>>,
-    ) -> Result<(), TransportError> {
+    ) -> Result<usize, TransportError> {
         match transport.into() {
             SubscribeFormat::All(transport) => match self.subscribers.lock() {
                 Ok(mut guard) => {
-                    guard.push(transport);
-                    Ok(())
+                    let id = guard.insert(transport);
+                    Ok(id)
                 }
                 Err(e) => {
                     return Err(TransportError::Transport(format!(
@@ -139,7 +142,10 @@ impl<T: TransportItemRequirements> Publisher<T> {
                 match self.channels.lock() {
                     Ok(guard) => match guard.get(channel_index) {
                         Some(channel_transports_mutex) => match channel_transports_mutex.lock() {
-                            Ok(mut channel_transports) => channel_transports.push(transport),
+                            Ok(mut channel_transports) => {
+                                let id = channel_transports.insert(transport);
+                                Ok(id)
+                            }
                             Err(e) => {
                                 return Err(TransportError::Transport(format!(
                                     "Error acquiring channel transports lock: {}",
@@ -160,8 +166,72 @@ impl<T: TransportItemRequirements> Publisher<T> {
                             e.to_string()
                         )))
                     }
+                }
+            }
+        }
+    }
+
+    pub fn unsubscribe(
+        &self,
+        transport: impl Into<SubscribeFormat<T>>,
+        id: usize,
+    ) -> Result<(), TransportError> {
+        match transport.into() {
+            SubscribeFormat::All(_) => match self.subscribers.lock() {
+                Ok(mut guard) => {
+                    guard.remove(id);
+                    Ok(())
+                }
+                Err(e) => {
+                    return Err(TransportError::Transport(format!(
+                        "Error acquiring subscribers lock: {}",
+                        e.to_string()
+                    )))
+                }
+            },
+            SubscribeFormat::Channel(_, channel) => {
+                let channel_index = match self.subscriber_channels.lock() {
+                    Ok(guard) => guard.get(&channel).cloned().ok_or_else(|| {
+                        TransportError::Transport(format!(
+                            "Channel '{}' not found in publisher",
+                            channel
+                        ))
+                    })?,
+                    Err(e) => {
+                        return Err(TransportError::Transport(format!(
+                            "Error acquiring subscriber_channels lock: {}",
+                            e.to_string()
+                        )))
+                    }
                 };
-                Ok(())
+                match self.channels.lock() {
+                    Ok(guard) => match guard.get(channel_index) {
+                        Some(channel_transports_mutex) => match channel_transports_mutex.lock() {
+                            Ok(mut channel_transports) => {
+                                channel_transports.remove(id);
+                                Ok(())
+                            }
+                            Err(e) => {
+                                return Err(TransportError::Transport(format!(
+                                    "Error acquiring channel transports lock: {}",
+                                    e.to_string()
+                                )))
+                            }
+                        },
+                        None => {
+                            return Err(TransportError::Transport(format!(
+                                "Channel index '{}' not found in publisher",
+                                channel_index
+                            )))
+                        }
+                    },
+                    Err(e) => {
+                        return Err(TransportError::Transport(format!(
+                            "Error acquiring channels lock: {}",
+                            e.to_string()
+                        )))
+                    }
+                }
             }
         }
     }
@@ -176,7 +246,7 @@ impl<T: TransportItemRequirements> Publisher<T> {
             Ok(mut channels) => match self.filters.lock() {
                 Ok(mut filters) => match self.subscriber_channels.lock() {
                     Ok(mut subscriber_channels) => {
-                        channels.push(Arc::new(Mutex::new(Vec::new())));
+                        channels.push(Arc::new(Mutex::new(StableVec::new())));
                         filters.push(filter);
                         index = channels.len() - 1;
                         subscriber_channels.insert(name.as_ref().to_string(), index);

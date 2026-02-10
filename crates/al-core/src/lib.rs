@@ -7,6 +7,7 @@ mod event;
 mod markers;
 #[cfg(feature = "serde")]
 mod serde_utils;
+mod stable_vec;
 #[cfg(feature = "task")]
 mod task;
 #[cfg(feature = "task")]
@@ -15,12 +16,14 @@ mod task_utils;
 mod transport;
 #[cfg(feature = "transport")]
 mod transports;
+
 use std::marker::PhantomData;
 
 #[cfg(feature = "command")]
 pub use command::Command;
 #[cfg(all(feature = "event", feature = "serde"))]
 pub use event::EVENT_REGISTRY;
+pub use markers::NoOp;
 #[cfg(all(
     any(feature = "event", feature = "command"),
     feature = "serde",
@@ -35,20 +38,12 @@ pub use serde_utils::serde_format::BinarySerde;
 pub use serde_utils::serde_format::JsonSerde;
 #[cfg(all(any(feature = "event", feature = "command"), feature = "serde"))]
 pub use serde_utils::serde_format::SerdeFormat;
+pub use stable_vec::StableVec;
 #[cfg(feature = "event")]
 pub use {
     al_derive::event, al_derive::event_requirements, al_derive::EventMarker as DeriveEventMarker,
     event::downcast as downcast_event, event::type_with_generics, event::DowncastEvent,
     event::Event, markers::EventMarker, markers::EventRequirements, markers::SerdeFeature,
-};
-pub use markers::NoOp;
-#[cfg(feature = "transport")]
-pub use {
-    markers::TransportItemRequirements, markers::TransportRequirements,
-    transport::Transport, transport::TransportError, transports::list::List,
-    transports::publisher::Publisher, transports::queue::Queue,
-    transports::transform::ApplyTransform, transports::transform::Transform,
-    transports::transform::TransformFn,
 };
 #[cfg(feature = "task")]
 pub use {
@@ -57,6 +52,13 @@ pub use {
     task_utils::task_elements::TaskMode, task_utils::task_state::AsTaskState,
     task_utils::task_state::BaseTaskState, task_utils::task_state::ExtendedTaskState,
     task_utils::task_state::TaskState,
+};
+#[cfg(feature = "transport")]
+pub use {
+    markers::TransportItemRequirements, markers::TransportRequirements, transport::Transport,
+    transport::TransportError, transports::list::List, transports::publisher::Publisher,
+    transports::queue::Queue, transports::transform::ApplyTransform,
+    transports::transform::Transform, transports::transform::TransformFn,
 };
 #[cfg(all(feature = "transport", feature = "task"))]
 pub use {transports::buffered::Buffered, transports::link::Link, transports::splice::Splice};

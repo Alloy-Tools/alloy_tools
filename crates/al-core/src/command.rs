@@ -20,6 +20,7 @@ impl Command {
         matches!(self, Command::Event(_))
     }
 
+    //TODO: Rework doc comment
     /// Attempts to downcast the contained event to the specified event type, returning `None` if the command is not an event or if the downcast fails
     pub fn downcast_event<T: Event + crate::EventRequirements + 'static>(
         &self,

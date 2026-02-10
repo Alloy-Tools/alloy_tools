@@ -90,7 +90,7 @@ struct App<N: NonceTrait> {
     username: String,
     input: String,
     cursor_pos: u16,
-    history: VecDeque<Msg>,
+    history: Arc<RwLock<VecDeque<Msg>>>,
     max_history_len: u8,
 }
 
@@ -110,7 +110,7 @@ impl<N: NonceTrait> App<N> {
             username: String::new(),
             input: String::new(),
             cursor_pos: 0,
-            history: VecDeque::with_capacity(150),
+            history: Arc::new(RwLock::new(VecDeque::with_capacity(150))),
             max_history_len: 100,
         }));
 
@@ -119,10 +119,11 @@ impl<N: NonceTrait> App<N> {
         // Register `Msg` handler to store messages
         dispatcher
             .register_event(|_, app, event: Msg| async move {
-                let mut guard = app.write().await;
-                guard.history.push_back(event);
-                if guard.history.len() > guard.max_history_len as usize {
-                    guard.history.pop_front();
+                let app = app.read().await;
+                let mut history = app.history.write().await;
+                history.push_back(event);
+                if history.len() > app.max_history_len as usize {
+                    history.pop_front();
                 }
             })
             .await;
@@ -194,7 +195,8 @@ impl<N: NonceTrait> App<N> {
             state
                 .read()
                 .await
-                .draw(&mut last_history, &mut last_input)?;
+                .draw(&mut last_history, &mut last_input)
+                .await?;
         }
 
         // Cleanup terminal
@@ -217,7 +219,7 @@ impl<N: NonceTrait> App<N> {
 
     fn get_user_name(&mut self, stdout: &mut std::io::Stdout) -> Result<(), TuiError> {
         let title =
-            "Tic-Tac-Toe === Choose Username === Max 10 characters, UTF8 only === Ctrl+Q to quit";
+            "Chat Room === Choose Username === Max 10 characters, UTF8 only === Ctrl+Q to quit";
         let prompt = "Enter username (max 10 chars, UTF8 only): ";
         let error_msg = "=== Invalid Username! ===";
         let mut entered_invalid = false;
@@ -243,7 +245,7 @@ impl<N: NonceTrait> App<N> {
     }
 
     fn get_client_server(&mut self, stdout: &mut std::io::Stdout) -> Result<bool, TuiError> {
-        let title = "Tic-Tac-Toe === Choose client or server === Ctrl+Q to quit";
+        let title = "Chat Room === Choose client or server === Ctrl+Q to quit";
         let prompt = "Start as (c)lient or (s)erver? [s/c]: ";
         let error_msg = "=== Invalid Choice! ===";
         let mut entered_invalid = false;
@@ -274,7 +276,7 @@ impl<N: NonceTrait> App<N> {
         server: bool,
         stdout: &mut std::io::Stdout,
     ) -> Result<String, TuiError> {
-        let title = "Tic-Tac-Toe === Enter address === Ctrl+Q to quit";
+        let title = "Chat Room === Enter address === Ctrl+Q to quit";
         let prompt = if server {
             "Enter port to listen on [default: 7878]: "
         } else {
@@ -388,6 +390,7 @@ impl<N: NonceTrait> App<N> {
 
             let publisher = self.publisher_ref.clone();
             let local_id = self.id;
+            let history = self.history.clone();
             let server_handle = tokio::spawn(async move {
                 Tcp::<N>::run_server_with_shutdown(
                     addr,
@@ -402,18 +405,51 @@ impl<N: NonceTrait> App<N> {
                         let dispatcher_clone = dispatcher.clone();
                         let connection_manager_clone = connection_manager.clone();
                         let publisher_clone = publisher.clone();
+                        let history_clone = history.clone();
                         tokio::spawn(async move {
                             let tcp = Arc::new(tcp);
                             let conn_id = connection_manager_clone.insert(tcp.clone()).await;
 
-                            if let Err(e) = publisher_clone.subscribe(tcp.clone()) {
-                                eprintln!(
-                                    "Failed to subscribe new client {} to outbound publisher: {:?}",
-                                    conn_id, e
-                                );
-                                connection_manager_clone.remove(&conn_id).await;
-                                return;
+                            // Send current history to client
+                            {
+                                let mut batch = history_clone.read().await.iter().filter_map(|msg| if msg.0 == "Client".as_bytes() || msg.0 == "Server".as_bytes() { None } else { Some(msg.clone().to_cmd()) }).collect::<Vec<_>>();
+                                batch.push(Command::Stop);
+                                if let Err(e) = tcp.send_batch(batch).await {
+                                    eprintln!("Failed to send history to new client with id {}: {:?}", conn_id, e);
+                                    app_dispatcher_clone
+                                        .dispatch(
+                                            (local_id, connection_manager_clone.clone()),
+                                            Msg::new(
+                                                "Server",
+                                                format!("Failed to send history to new client with id {}.", conn_id),
+                                            )
+                                            .to_cmd(),
+                                        )
+                                        .await;
+                                }
                             }
+
+                            let sub_id = match publisher_clone.subscribe(tcp.clone()) {
+                                Ok(id) => id,
+                                Err(e) => {
+                                    eprintln!(
+                                        "Failed to subscribe new client {} to outbound publisher: {:?}",
+                                        conn_id, e
+                                    );
+                                    app_dispatcher_clone
+                                        .dispatch(
+                                            (local_id, connection_manager_clone.clone()),
+                                            Msg::new(
+                                                "Server",
+                                                format!("Failed to subscribe new client {} to outbound publisher.", conn_id),
+                                            )
+                                            .to_cmd(),
+                                        )
+                                        .await;
+                                    connection_manager_clone.remove(&conn_id).await;
+                                    return;
+                                }
+                            };
 
                             app_dispatcher_clone
                                 .dispatch(
@@ -441,6 +477,7 @@ impl<N: NonceTrait> App<N> {
                                     Err(e) => {
                                         eprintln!("Client {} disconnected: {:?}", conn_id, e);
                                         connection_manager_clone.remove(&conn_id).await;
+                                        let _ = publisher_clone.unsubscribe(tcp, sub_id);
                                         app_dispatcher_clone
                                             .dispatch(
                                                 (local_id, connection_manager_clone.clone()),
@@ -480,21 +517,47 @@ impl<N: NonceTrait> App<N> {
             );
             let conn_id = connection_manager.insert(tcp.clone()).await;
 
-            if let Err(e) = self.publisher_ref.subscribe(tcp.clone()) {
-                let msg = format!(
-                    "Failed to subscribe server with id {} to outbound publisher: {:?}",
-                    conn_id, e
+            // Receive history sync from server
+            {
+                let mut history = Vec::new();
+                while !history.contains(&Command::Stop) {
+                    match tcp.recv_avaliable().await {
+                        Ok(mut batch) => history.append(&mut batch),
+                        Err(e) => {
+                            eprintln!("Failed to recieve history from server: {:?}", e);
+                            break;
+                        }
+                    }
+                }
+                let mut app_history = self.history.write().await;
+                app_history.extend(
+                    history
+                        .iter()
+                        .filter_map(|cmd| cmd.clone().downcast_event::<Msg>().ok()),
                 );
-                eprintln!("{}", msg);
-                self.connections.remove(&conn_id).await;
-                Err(TuiError::AppError(msg))?
+                app_history.push_back(Msg::new(
+                    "Client",
+                    format!("Connected to server {}!", conn_id),
+                ));
             }
 
-            let _ = self.inbound.send(TcpMsg(self.id, Msg::new("Client", format!("Connected to server {}!", conn_id)).to_cmd())).await;
+            let sub_id = match self.publisher_ref.subscribe(tcp.clone()) {
+                Ok(id) => id,
+                Err(e) => {
+                    let msg = format!(
+                        "Failed to subscribe server with id {} to outbound publisher: {:?}",
+                        conn_id, e
+                    );
+                    eprintln!("{}", msg);
+                    self.connections.remove(&conn_id).await;
+                    Err(TuiError::AppError(msg))?
+                }
+            };
 
             let local_id = self.id;
             let connection_clone = self.connections.clone();
             let app_dispatcher_clone = app_dispatcher.clone();
+            let publisher = self.publisher_ref.clone();
             let client_handle = tokio::spawn(async move {
                 loop {
                     tokio::task::yield_now().await;
@@ -508,6 +571,7 @@ impl<N: NonceTrait> App<N> {
                         Err(e) => {
                             eprintln!("Disconnected from server {}: {:?}", conn_id, e);
                             connection_clone.remove(&conn_id).await;
+                            let _ = publisher.unsubscribe(tcp, sub_id);
                             app_dispatcher_clone
                                 .dispatch(
                                     (local_id, connection_clone.clone()),
@@ -528,14 +592,15 @@ impl<N: NonceTrait> App<N> {
         Ok(())
     }
 
-    fn draw(
+    async fn draw(
         &self,
         last_history: &mut (&mut [Msg], &mut [Msg]),
         last_input: &mut String,
     ) -> Result<(), std::io::Error> {
         let mut stdout = std::io::stdout();
 
-        let history_slices = self.history.as_slices();
+        let history = self.history.read().await;
+        let history_slices = history.as_slices();
         let len_0 = history_slices.0.len();
         let len_1 = history_slices.1.len();
         if last_input != &self.input
@@ -555,15 +620,15 @@ impl<N: NonceTrait> App<N> {
 
             // Move cursor to correct position of chat area
             let msg_area = (self.dims.1 - 5) as usize;
-            if self.history.len() < msg_area {
+            if history.len() < msg_area {
                 execute!(
                     stdout,
-                    crossterm::cursor::MoveTo(0, 2 + (msg_area - self.history.len()) as u16)
+                    crossterm::cursor::MoveTo(0, 2 + (msg_area - history.len()) as u16)
                 )?;
             }
 
             // Messages
-            for msg in self.history.iter().rev().take(msg_area).rev() {
+            for msg in history.iter().rev().take(msg_area).rev() {
                 println!("   {}", msg.to_chat().unwrap());
             }
 
@@ -634,9 +699,10 @@ impl<N: NonceTrait> App<N> {
                                 .await;
                         }
                     } else {
-                        self.history.push_back(msg);
-                        if self.history.len() > self.max_history_len as usize {
-                            self.history.pop_front();
+                        let mut history = self.history.write().await;
+                        history.push_back(msg);
+                        if history.len() > self.max_history_len as usize {
+                            history.pop_front();
                         }
                         self.input.clear();
                         self.cursor_pos = 0;
