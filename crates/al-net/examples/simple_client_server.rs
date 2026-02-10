@@ -1,11 +1,12 @@
 use std::{
+    collections::VecDeque,
     fs::{self},
     io::Write,
     sync::Arc,
     time::Duration,
 };
 
-use al_core::{event, register_event, Command, Event, Link, Queue, Transport};
+use al_core::{event, register_event, Buffered, Command, Event, Publisher, Queue, Transport};
 use al_crypto::{Monotonic, NonceTrait};
 use al_net::{CommandDispatcher, ConnectionManager, Tcp, TcpError};
 use crossterm::{
@@ -18,38 +19,27 @@ use tokio::sync::RwLock;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NetworkConfig {
-    pub address: String,
+    pub ip: String,
     pub port: u16,
 }
 
 impl NetworkConfig {
     pub fn address(&self) -> String {
-        format!("{}:{}", self.address, self.port)
+        format!("{}:{}", self.ip, self.port)
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NoiseConfig {
-    pub server: bool,
-    pub timeout: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub network: NetworkConfig,
-    pub noise: NoiseConfig,
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
             network: NetworkConfig {
-                address: "127.0.0.1".to_string(),
+                ip: "127.0.0.1".to_string(),
                 port: 7878,
-            },
-            noise: NoiseConfig {
-                server: false,
-                timeout: Some(500),
             },
         }
     }
@@ -89,62 +79,55 @@ struct App<N: NonceTrait> {
     dims: (u16, u16),
     stop: bool,
     // Communication
-    inbound: Arc<Queue<TuiUpdate>>,
-    outbound: Arc<Queue<Command>>,
-    dispatcher: Option<CommandDispatcher<N, Arc<RwLock<Self>>>>,
+    inbound: Arc<Queue<TcpMsg>>,
+    outbound: Arc<Buffered<Command>>,
+    publisher_ref: Arc<Publisher<Command>>,
+    dispatcher: Option<Arc<CommandDispatcher<(u64, Arc<ConnectionManager<N>>), Arc<RwLock<Self>>>>>,
     connections: Arc<ConnectionManager<N>>,
+    id: u64,
     tcp_handle: Option<tokio::task::JoinHandle<Result<(), al_net::TcpError>>>,
     // Chat
     username: String,
     input: String,
     cursor_pos: u16,
-    history: Vec<Msg>,
-    // Game
-    first: bool,
-    turn: bool,
-    board: [u8; 9],
+    history: VecDeque<Msg>,
+    max_history_len: u8,
 }
 
 impl<N: NonceTrait> App<N> {
     pub async fn new(width: u16, height: u16) -> Arc<RwLock<Self>> {
+        let publisher = Arc::new(Publisher::new());
         let app = Arc::new(RwLock::new(Self {
             dims: (width, height),
             stop: false,
             inbound: Arc::new(Queue::new()),
-            outbound: Arc::new(Queue::new()),
+            outbound: Arc::new(Buffered::new(publisher.clone())),
+            publisher_ref: publisher,
             dispatcher: None,
             connections: Arc::new(ConnectionManager::new()),
+            id: 0,
             tcp_handle: None,
             username: String::new(),
             input: String::new(),
             cursor_pos: 0,
-            history: Vec::new(),
-            first: false,
-            turn: false,
-            board: [0u8; 9],
+            history: VecDeque::with_capacity(150),
+            max_history_len: 100,
         }));
 
         let mut dispatcher = CommandDispatcher::new(app.clone());
 
         // Register `Msg` handler to store messages
         dispatcher
-            .register_event(|_, _, app, event: Msg| async move {
-                app.write().await.history.push(event);
-            })
-            .await;
-        // Register `MakeMove` handler to update the board
-        dispatcher
-            .register_event(|_, _, app, event: MakeMove| async move {
-                let mut app = app.write().await;
-                let opp_val = if app.first { 2 } else { 1 };
-                if event.0 < 9 && app.board[event.0] == 0 {
-                    app.board[event.0] = opp_val;
-                    app.turn = true;
+            .register_event(|_, app, event: Msg| async move {
+                let mut guard = app.write().await;
+                guard.history.push_back(event);
+                if guard.history.len() > guard.max_history_len as usize {
+                    guard.history.pop_front();
                 }
             })
             .await;
 
-        app.write().await.dispatcher = Some(dispatcher);
+        app.write().await.dispatcher = Some(Arc::new(dispatcher));
 
         app
     }
@@ -161,10 +144,11 @@ impl<N: NonceTrait> App<N> {
             state.start_client_or_server(&mut stdout).await?;
         }
 
-        // Start with non-empty last_board to trigger first draw
-        let mut last_board = [10u8; 9];
-        let mut last_history = Vec::new();
-        let mut last_input = String::new();
+        // Start with non-empty last_input to trigger first draw
+        let mut slice_0 = vec![Msg::new(Vec::new(), Vec::new()); 150];
+        let mut slice_1 = vec![Msg::new(Vec::new(), Vec::new()); 150];
+        let mut last_history = (slice_0.as_mut_slice(), slice_1.as_mut_slice());
+        let mut last_input = ".".to_string();
         loop {
             let (dispatcher, connections, inbound) = {
                 let state_guard = state.read().await;
@@ -188,7 +172,7 @@ impl<N: NonceTrait> App<N> {
                 Ok(updates) => {
                     for update in updates {
                         dispatcher
-                            .dispatch(update.0, connections.clone(), update.1)
+                            .dispatch((update.0, connections.clone()), update.1)
                             .await;
                     }
                 }
@@ -210,7 +194,7 @@ impl<N: NonceTrait> App<N> {
             state
                 .read()
                 .await
-                .draw(&mut last_board, &mut last_history, &mut last_input)?;
+                .draw(&mut last_history, &mut last_input)?;
         }
 
         // Cleanup terminal
@@ -353,15 +337,21 @@ impl<N: NonceTrait> App<N> {
         &mut self,
         stdout: &mut std::io::Stdout,
     ) -> Result<(), TuiError> {
+        let app_dispatcher = if let Some(d) = &self.dispatcher {
+            d.clone()
+        } else {
+            Err(TuiError::AppError("No dispatcher".to_string()))?
+        };
         let server = self.get_client_server(stdout)?;
         let addr = self.get_address(server, stdout)?;
 
         // Setup common server/client handlers
-        let mut dispatcher = CommandDispatcher::new(self.inbound.clone());
+        let mut dispatcher =
+            CommandDispatcher::<(u64, Arc<ConnectionManager<N>>), _>::new(self.inbound.clone());
         dispatcher
-            .register_command(|conn_id, _, inbound, cmd| async move {
+            .register_command(|(conn_id, _), inbound, cmd| async move {
                 inbound
-                    .send(TuiUpdate(conn_id, cmd))
+                    .send(TcpMsg(conn_id, cmd))
                     .await
                     .expect("TUI inbound queue failed.");
             })
@@ -369,13 +359,37 @@ impl<N: NonceTrait> App<N> {
 
         let connection_manager = Arc::new(ConnectionManager::new());
         if server {
-            self.turn = true;
             let token = Arc::new(RwLock::new(false));
             let token_clone = token.clone();
-            let outbound_clone = self.outbound.clone();
 
+            //TODO: just place in the outbound queue as well
+            // Forward recieved messsages to all other connected clients
+            dispatcher
+                .register_command(|(sender_id, connections), _, cmd| async move {
+                    for (id, conn) in connections
+                        .with_connections(|conns| {
+                            conns
+                                .iter()
+                                .filter(|(&id, _)| id != sender_id)
+                                .map(|(&id, tcp)| (id, tcp.clone()))
+                                .collect::<Vec<_>>()
+                        })
+                        .await
+                    {
+                        if let Err(e) = conn.send(cmd.clone()).await {
+                            eprintln!(
+                                "Failed to forward message from conn {} to conn {}: {:?}",
+                                sender_id, id, e
+                            );
+                        }
+                    }
+                })
+                .await;
+
+            let publisher = self.publisher_ref.clone();
+            let local_id = self.id;
             let server_handle = tokio::spawn(async move {
-                Tcp::<Monotonic>::run_server_with_shutdown(
+                Tcp::<N>::run_server_with_shutdown(
                     addr,
                     Some(Duration::from_millis(500)),
                     al_net::HandshakePattern::NN,
@@ -384,25 +398,33 @@ impl<N: NonceTrait> App<N> {
                     None,
                     token_clone,
                     |tcp| {
+                        let app_dispatcher_clone = app_dispatcher.clone();
                         let dispatcher_clone = dispatcher.clone();
                         let connection_manager_clone = connection_manager.clone();
-                        let outbound_clone = outbound_clone.clone();
+                        let publisher_clone = publisher.clone();
                         tokio::spawn(async move {
                             let tcp = Arc::new(tcp);
                             let conn_id = connection_manager_clone.insert(tcp.clone()).await;
 
-                            dispatcher_clone
-                                .dispatch_event(
-                                    conn_id,
-                                    connection_manager_clone.clone(),
-                                    Box::new(Msg::new(
+                            if let Err(e) = publisher_clone.subscribe(tcp.clone()) {
+                                eprintln!(
+                                    "Failed to subscribe new client {} to outbound publisher: {:?}",
+                                    conn_id, e
+                                );
+                                connection_manager_clone.remove(&conn_id).await;
+                                return;
+                            }
+
+                            app_dispatcher_clone
+                                .dispatch(
+                                    (local_id, connection_manager_clone.clone()),
+                                    Msg::new(
                                         "Server",
                                         format!("New client with id {} connected!", conn_id),
-                                    )),
+                                    )
+                                    .to_cmd(),
                                 )
                                 .await;
-
-                            let outbound_link = Link::new(outbound_clone, tcp.clone());
 
                             loop {
                                 tokio::task::yield_now().await;
@@ -411,15 +433,27 @@ impl<N: NonceTrait> App<N> {
                                     Ok(cmd) => {
                                         dispatcher_clone
                                             .dispatch(
-                                                conn_id,
-                                                connection_manager_clone.clone(),
+                                                (conn_id, connection_manager_clone.clone()),
                                                 cmd,
                                             )
                                             .await
                                     }
                                     Err(e) => {
                                         eprintln!("Client {} disconnected: {:?}", conn_id, e);
-                                        outbound_link.link_task().write().await.abort();
+                                        connection_manager_clone.remove(&conn_id).await;
+                                        app_dispatcher_clone
+                                            .dispatch(
+                                                (local_id, connection_manager_clone.clone()),
+                                                Msg::new(
+                                                    "Server",
+                                                    format!(
+                                                        "Client with id {} disconnected!",
+                                                        conn_id
+                                                    ),
+                                                )
+                                                .to_cmd(),
+                                            )
+                                            .await;
                                         break;
                                     }
                                 }
@@ -434,7 +468,7 @@ impl<N: NonceTrait> App<N> {
         } else {
             // if client connect to server with address
             let tcp = Arc::new(
-                Tcp::<Monotonic>::connect(
+                Tcp::<N>::connect(
                     addr,
                     None,
                     al_net::HandshakePattern::NN,
@@ -446,22 +480,41 @@ impl<N: NonceTrait> App<N> {
             );
             let conn_id = connection_manager.insert(tcp.clone()).await;
 
-            let outbound_clone = self.outbound.clone();
-            let client_handle = tokio::spawn(async move {
-                let outbound_link = Link::new(outbound_clone, tcp.clone());
+            if let Err(e) = self.publisher_ref.subscribe(tcp.clone()) {
+                let msg = format!(
+                    "Failed to subscribe server with id {} to outbound publisher: {:?}",
+                    conn_id, e
+                );
+                eprintln!("{}", msg);
+                self.connections.remove(&conn_id).await;
+                Err(TuiError::AppError(msg))?
+            }
 
+            let _ = self.inbound.send(TcpMsg(self.id, Msg::new("Client", format!("Connected to server {}!", conn_id)).to_cmd())).await;
+
+            let local_id = self.id;
+            let connection_clone = self.connections.clone();
+            let app_dispatcher_clone = app_dispatcher.clone();
+            let client_handle = tokio::spawn(async move {
                 loop {
                     tokio::task::yield_now().await;
 
                     match tcp.recv().await {
                         Ok(cmd) => {
                             dispatcher
-                                .dispatch(conn_id, connection_manager.clone(), cmd)
+                                .dispatch((conn_id, connection_manager.clone()), cmd)
                                 .await
                         }
                         Err(e) => {
-                            eprintln!("Disconnected from server: {:?}", e);
-                            outbound_link.link_task().write().await.abort();
+                            eprintln!("Disconnected from server {}: {:?}", conn_id, e);
+                            connection_clone.remove(&conn_id).await;
+                            app_dispatcher_clone
+                                .dispatch(
+                                    (local_id, connection_clone.clone()),
+                                    Msg::new("Client", format!("Client disconnected from server!"))
+                                        .to_cmd(),
+                                )
+                                .await;
                             break;
                         }
                     }
@@ -477,13 +530,18 @@ impl<N: NonceTrait> App<N> {
 
     fn draw(
         &self,
-        last_board: &mut [u8; 9],
-        last_history: &mut Vec<Msg>,
+        last_history: &mut (&mut [Msg], &mut [Msg]),
         last_input: &mut String,
     ) -> Result<(), std::io::Error> {
         let mut stdout = std::io::stdout();
 
-        if last_board != &self.board || last_history != &self.history || last_input != &self.input {
+        let history_slices = self.history.as_slices();
+        let len_0 = history_slices.0.len();
+        let len_1 = history_slices.1.len();
+        if last_input != &self.input
+            || &last_history.0[..len_0] != history_slices.0
+            || &last_history.1[..len_1] != history_slices.1
+        {
             // Clear the screen
             execute!(
                 stdout,
@@ -492,44 +550,25 @@ impl<N: NonceTrait> App<N> {
 
             // Title
             execute!(stdout, crossterm::cursor::MoveTo(0, 0))?;
-            println!("Tic-Tac-Toe === Ctrl+Q to quit");
+            println!("Chat Room === {} === Ctrl+Q to quit", self.username);
             println!("{}", "─".repeat(self.dims.0 as usize));
 
-            // Tic Tac Toe
-            println!(
-                "{}|{}|{}",
-                get_char(self.board[0]),
-                get_char(self.board[1]),
-                get_char(self.board[2])
-            );
-            println!(
-                "{}|{}|{}",
-                get_char(self.board[3]),
-                get_char(self.board[4]),
-                get_char(self.board[5])
-            );
-            println!(
-                "{}|{}|{}",
-                get_char(self.board[6]),
-                get_char(self.board[7]),
-                get_char(self.board[8])
-            );
-            println!("{}", "─".repeat(self.dims.0 as usize));
+            // Move cursor to correct position of chat area
+            let msg_area = (self.dims.1 - 5) as usize;
+            if self.history.len() < msg_area {
+                execute!(
+                    stdout,
+                    crossterm::cursor::MoveTo(0, 2 + (msg_area - self.history.len()) as u16)
+                )?;
+            }
 
             // Messages
-            println!("Chat:");
-            for msg in self
-                .history
-                .iter()
-                .rev()
-                .take((self.dims.1 - 8) as usize)
-                .rev()
-            {
+            for msg in self.history.iter().rev().take(msg_area).rev() {
                 println!("   {}", msg.to_chat().unwrap());
             }
 
             // Draw the input line
-            execute!(stdout, crossterm::cursor::MoveTo(0, self.dims.1 - 2))?;
+            execute!(stdout, crossterm::cursor::MoveTo(0, self.dims.1 - 3))?;
             println!("{}", "─".repeat(self.dims.0 as usize));
             println!("> {}", self.input);
 
@@ -540,9 +579,11 @@ impl<N: NonceTrait> App<N> {
             )?;
             stdout.flush()?;
 
-            *last_board = self.board;
-            if last_history != &self.history {
-                *last_history = self.history.clone();
+            if &last_history.0[..len_0] != history_slices.0 {
+                last_history.0[..len_0].clone_from_slice(history_slices.0);
+            }
+            if &last_history.1[..len_1] != history_slices.1 {
+                last_history.1[..len_1].clone_from_slice(history_slices.1);
             }
             if last_input != &self.input {
                 *last_input = self.input.clone();
@@ -551,32 +592,12 @@ impl<N: NonceTrait> App<N> {
         Ok(())
     }
 
-    fn make_move(&mut self, space: usize) -> Result<(), ()> {
-        // Check if the spot is already filled
-        if self.turn && self.board[space] == 0 {
-            // Fill the spot
-            self.board[space] = if self.first { 1 } else { 2 };
-            self.turn = false;
-            Ok(())
-        } else {
-            Err(())
-        }
-    }
-
     async fn handle_key(&mut self, key: KeyEvent) -> Result<(), std::io::Error> {
         match key.code {
             KeyCode::Char(c) => {
                 if key.modifiers == crossterm::event::KeyModifiers::CONTROL {
                     match c {
                         'c' | 'q' => self.stop = true,
-                        '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' => {
-                            let pos = c.to_digit(10).unwrap() as usize - 1;
-                            if let Ok(_) = self.make_move(pos) {
-                                if let Err(e) = self.outbound.send(MakeMove(pos).to_cmd()).await {
-                                    eprintln!("Failed to send MakeMove: {:?}", e)
-                                }
-                            }
-                        }
                         _ => {}
                     }
                 } else {
@@ -603,25 +624,29 @@ impl<N: NonceTrait> App<N> {
                     let msg = self.input.trim();
                     let msg = Msg::new(self.username.as_bytes(), msg.as_bytes());
                     if let Err(e) = self.outbound.send(msg.clone().to_cmd()).await {
-                        eprintln!("Failed to send message: {:?}", e)
+                        eprintln!("Failed to send message: {:?}", e);
+                        if let Some(dispatcher) = &self.dispatcher {
+                            dispatcher
+                                .dispatch(
+                                    (self.id, self.connections.clone()),
+                                    Msg::new("Client", format!("Failed to send message!")).to_cmd(),
+                                )
+                                .await;
+                        }
+                    } else {
+                        self.history.push_back(msg);
+                        if self.history.len() > self.max_history_len as usize {
+                            self.history.pop_front();
+                        }
+                        self.input.clear();
+                        self.cursor_pos = 0;
                     }
-                    self.history.push(msg);
-                    self.input.clear();
-                    self.cursor_pos = 0;
                 }
             }
             KeyCode::Esc => self.stop = true,
             _ => {}
         }
         Ok(())
-    }
-}
-
-fn get_char(n: u8) -> char {
-    match n {
-        1 => 'X',
-        2 => 'O',
-        _ => ' ',
     }
 }
 
@@ -724,6 +749,7 @@ fn get_input_with_display(
 pub enum TuiError {
     IoError(std::io::Error),
     TcpError(TcpError),
+    AppError(String),
 }
 
 impl From<std::io::Error> for TuiError {
@@ -739,10 +765,7 @@ impl From<TcpError> for TuiError {
 }
 
 #[event]
-pub struct TuiUpdate(u64, Command);
-
-#[event]
-pub struct MakeMove(usize);
+pub struct TcpMsg(u64, Command);
 
 #[event]
 pub struct Msg(Vec<u8>, Vec<u8>);
@@ -766,8 +789,7 @@ impl Msg {
 #[tokio::main]
 async fn main() {
     // Register events
-    register_event!(TuiUpdate);
-    register_event!(MakeMove);
+    register_event!(TcpMsg);
     register_event!(Msg);
 
     let tui_handle = tokio::task::spawn_blocking(|| {

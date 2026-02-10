@@ -452,24 +452,18 @@ impl<T: TransportItemRequirements, N: NonceTrait> Transport<T> for Tcp<N> {
             // Encrypt using cipher
             let encrypted = self.encrypt_bytes(bytes).await?;
 
-            println!("Locking stream");
             // Send length prefixed encrypted message
             let mut stream = self.writer.lock().await;
-            println!("Writing to stream");
 
             stream
                 .write_all(&(encrypted.len() as u16).to_be_bytes())
                 .await
                 .map_err(|e| al_core::TransportError::Transport(e.to_string()))?;
 
-            println!("Length written");
-
             stream
                 .write_all(&encrypted)
                 .await
                 .map_err(|e| al_core::TransportError::Transport(e.to_string()))?;
-
-            println!("Stream written to");
 
             Ok(())
         })
@@ -638,14 +632,15 @@ mod tests {
         al_core::register_event!(TestEventB);
 
         // Create dispatcher
-        let mut dispatcher = CommandDispatcher::new(());
+        let mut dispatcher =
+            CommandDispatcher::<(u64, Arc<ConnectionManager<Monotonic>>), _>::new(());
 
         // Register two event handlers for `TestEventA`
         dispatcher
-            .register_event::<TestEventA, _>(|_, _, _, _| async { println!("Received TestEventA") })
+            .register_event::<TestEventA, _>(|_, _, _| async { println!("Received TestEventA") })
             .await;
         dispatcher
-            .register_event::<TestEventA, _>(|conn_id, connections, _, event| async move {
+            .register_event::<TestEventA, _>(|(conn_id, connections), _, event| async move {
                 let _x = connections.get(0).await;
                 println!("Received TestEventA from conn {}: {:?}", conn_id, event)
             })
@@ -653,10 +648,10 @@ mod tests {
 
         // Register two event handlers for `TestEventB`
         dispatcher
-            .register_event(|_, _, _, _: TestEventB| async { println!("Received TestEventB") })
+            .register_event(|_, _, _: TestEventB| async { println!("Received TestEventB") })
             .await;
         dispatcher
-            .register_event(|conn_id, connections, _, event: TestEventB| async move {
+            .register_event(|(conn_id, connections), _, event: TestEventB| async move {
                 connections.get(conn_id).await;
                 println!("Received TestEventB: {:?}", event)
             })
@@ -664,7 +659,7 @@ mod tests {
 
         // Register catch-all command handler
         dispatcher
-            .register_command(|conn_id, _, _, cmd| async move {
+            .register_command(|(conn_id, _), _, cmd| async move {
                 match cmd.event_type_name() {
                     Some(type_name) => println!(
                         "\nCommand from conn {} is event type {}: {:?}",
@@ -683,7 +678,7 @@ mod tests {
         let server_handle = tokio::spawn(async move {
             // Echo commands back to sender
             dispatcher_clone
-                .register_command(|id, connections, _, cmd| async move {
+                .register_command(|(id, connections), _, cmd| async move {
                     if let Some(conn) = connections.get(id).await {
                         let _ = conn.send(cmd).await;
                     }
@@ -709,7 +704,7 @@ mod tests {
                             match tcp.recv().await {
                                 Ok(cmd) => {
                                     dispatcher
-                                        .dispatch(conn_id, connection_manager_clone.clone(), cmd)
+                                        .dispatch((conn_id, connection_manager_clone.clone()), cmd)
                                         .await
                                 }
                                 Err(e) => eprintln!("Error: {:?}", e),
@@ -747,7 +742,7 @@ mod tests {
         let cmd: al_core::Command = tcp.recv().await.unwrap();
         assert_eq!(al_core::Command::Pulse, cmd);
         dispatcher
-            .dispatch(conn_id, connection_manager.clone(), cmd)
+            .dispatch((conn_id, connection_manager.clone()), cmd)
             .await;
 
         // Send event as command to server
@@ -757,7 +752,7 @@ mod tests {
         let cmd: al_core::Command = tcp.recv().await.unwrap();
         assert_eq!(TestEventA(0), cmd.downcast_event().unwrap());
         dispatcher
-            .dispatch(conn_id, connection_manager.clone(), cmd)
+            .dispatch((conn_id, connection_manager.clone()), cmd)
             .await;
 
         // Send event as command to server
@@ -767,7 +762,7 @@ mod tests {
         let cmd: al_core::Command = tcp.recv().await.unwrap();
         assert_eq!(TestEventA(5), cmd.downcast_event().unwrap());
         dispatcher
-            .dispatch(conn_id, connection_manager.clone(), cmd)
+            .dispatch((conn_id, connection_manager.clone()), cmd)
             .await;
 
         // Send event as command to server
@@ -777,7 +772,7 @@ mod tests {
         let cmd: al_core::Command = tcp.recv().await.unwrap();
         assert_eq!(TestEventB(10), cmd.downcast_event().unwrap());
         dispatcher
-            .dispatch(conn_id, connection_manager.clone(), cmd)
+            .dispatch((conn_id, connection_manager.clone()), cmd)
             .await;
 
         // Send event as command to server
@@ -787,7 +782,7 @@ mod tests {
         let cmd: al_core::Command = tcp.recv().await.unwrap();
         assert_eq!(TestEventB(15), cmd.downcast_event().unwrap());
         dispatcher
-            .dispatch(conn_id, connection_manager.clone(), cmd)
+            .dispatch((conn_id, connection_manager.clone()), cmd)
             .await;
 
         // Stop server and await handle

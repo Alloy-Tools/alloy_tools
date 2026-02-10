@@ -1,6 +1,3 @@
 [network]
-address = "0.0.0.0"
+ip = "127.0.0.1"
 port = 7878
-
-[noise]
-server = true

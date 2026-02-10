@@ -1,9 +1,8 @@
+use al_crypto::NonceTrait;
 use std::{
     collections::HashMap,
     sync::{atomic::AtomicU64, Arc},
 };
-
-use al_crypto::NonceTrait;
 use tokio::sync::RwLock;
 
 use crate::Tcp;
@@ -30,11 +29,23 @@ impl<N: NonceTrait> ConnectionManager<N> {
         id
     }
 
+    pub async fn remove(&self, id: &u64) -> Option<Arc<Tcp<N>>> {
+        self.connections.write().await.remove(id)
+    }
+
     pub async fn get(&self, id: u64) -> Option<Arc<Tcp<N>>> {
         self.connections
             .read()
             .await
             .get(&id)
             .map(|tcp| tcp.clone())
+    }
+
+    pub async fn with_connections<F: FnOnce(&HashMap<u64, Arc<Tcp<N>>>) -> R, R>(&self, f: F) -> R {
+        f(&*self.connections.read().await)
+    }
+
+    pub async fn connection_ids(&self) -> Vec<u64> {
+        self.connections.read().await.keys().copied().collect()
     }
 }
