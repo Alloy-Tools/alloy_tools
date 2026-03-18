@@ -28,6 +28,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "al-cereal"
+version = "0.1.0"
+
+[[package]]
 name = "al-core"
 version = "0.1.0"
 dependencies = [
@@ -92,7 +96,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "al-pipe"
+version = "0.1.0"
+dependencies = [
+ "al-core",
+ "tokio",
+]
+
+[[package]]
+name = "al-structures"
+version = "0.1.0"
+
+[[package]]
 name = "al-tui"
+version = "0.1.0"
+
+[[package]]
+name = "al-ui"
 version = "0.1.0"
 
 [[package]]
