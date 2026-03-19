@@ -31,10 +31,10 @@ With plans for:
 
 | Docs                                                                                                                                                 | Description                                    |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| [![al-core docs](https://img.shields.io/badge/al--core-grey?logo=readme)](https://github.com/Alloy-Tools/alloy_tools/tree/main/crates/al-core/README.md)       | Core utilities, traits, and foundational types |
-| [![al-crypto docs](https://img.shields.io/badge/al--crypto-grey?logo=readme)](https://github.com/Alloy-Tools/alloy_tools/tree/main/crates/al-crypto/README.md) | Cryptographic primitives and protocols         |
-| [![al-vault docs](https://img.shields.io/badge/al--vault-grey?logo=readme)](https://github.com/Alloy-Tools/alloy_tools/tree/main/crates/al-vault/README.md)    | Secure secret management and key storage       |
-| [![al-net docs](https://img.shields.io/badge/al--net-grey?logo=readme)](https://github.com/Alloy-Tools/alloy_tools/tree/main/crates/al-net/README.md)          | Secure network connections                     |
+| [![al-core docs](https://img.shields.io/badge/al--core-grey?logo=readme)](https://github.com/Alloy-Tools/alloy_tools/blob/main/crates/al-core/README.md)       | Core utilities, traits, and foundational types |
+| [![al-crypto docs](https://img.shields.io/badge/al--crypto-grey?logo=readme)](https://github.com/Alloy-Tools/alloy_tools/blob/main/crates/al-crypto/README.md) | Cryptographic primitives and protocols         |
+| [![al-vault docs](https://img.shields.io/badge/al--vault-grey?logo=readme)](https://github.com/Alloy-Tools/alloy_tools/blob/main/crates/al-vault/README.md)    | Secure secret management and key storage       |
+| [![al-net docs](https://img.shields.io/badge/al--net-grey?logo=readme)](https://github.com/Alloy-Tools/alloy_tools/blob/main/crates/al-net/README.md)          | Secure network connections                     |
 ## 2.2 Roadmap
 See [roadmap](https://github.com/Alloy-Tools/alloy_tools/blob/main/ROADMAP.md) for planned crates and features.
 # 3. Getting Started
