@@ -9,3 +9,10 @@ edition.workspace = true
 doctest = false
 
 [dependencies]
+al-core = { path = "../al-core" }
+serde = { version = "1.0", features = ["derive"] }
+erased-serde = "0.4.9"
+num-traits = "0.2"
+
+[dev-dependencies]
+serde_json = "1.0"

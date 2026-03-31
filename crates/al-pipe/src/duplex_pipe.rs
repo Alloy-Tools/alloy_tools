@@ -12,6 +12,7 @@ pub struct DuplexPipe {
         tokio::task::JoinHandle<Result<(), String>>,
         tokio::task::JoinHandle<Result<(), String>>,
     ),
+    #[allow(unused)]
     child: Child,
 }
 
