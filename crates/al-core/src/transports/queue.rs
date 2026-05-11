@@ -40,6 +40,16 @@ impl<T> Queue<T> {
             condvar: Condvar::new(),
         }
     }
+
+    /// Get the current number of items in the queue
+    pub fn len(&self) -> usize {
+        self.queue.lock().map(|guard| guard.len()).unwrap_or(0)
+    }
+
+    /// Check if the queue is empty
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 /// Impl transport for queue in FIFO order, handling the inner mutex for synchronization.

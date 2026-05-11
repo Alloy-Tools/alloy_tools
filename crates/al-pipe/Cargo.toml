@@ -8,6 +8,10 @@ edition.workspace = true
 [lib]
 doctest = false
 
+[[bin]]
+name = "echo"
+path = "src/bin/echo.rs"
+
 [dependencies]
 al-core = { path = "../al-core", features = ["binary"] }
 tokio = { version = "1", features = ["sync", "net", "time", "io-util"] }
