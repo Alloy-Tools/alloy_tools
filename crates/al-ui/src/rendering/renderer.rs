@@ -17,7 +17,7 @@ impl From<String> for RendererError {
 pub trait Renderer: Send + Sync {
     type Coord: CoordType;
     /// Render a single glyph by ID at position (x, y) with given style.
-    fn render_glyph(
+    fn draw_glyph(
         &mut self,
         pos: Point<Self::Coord, 2>,
         clip: Rect<Self::Coord>,
@@ -26,7 +26,7 @@ pub trait Renderer: Send + Sync {
     ) -> Result<(), RendererError>;
 
     /// Render multiple glyphs, starting at position (x, y), with given style.
-    fn render_glyphs(
+    fn draw_glyphs(
         &mut self,
         pos: Point<Self::Coord, 2>,
         clip: Rect<Self::Coord>,
@@ -36,7 +36,7 @@ pub trait Renderer: Send + Sync {
 
     /// Optimized: Render text assuming monospace font.
     /// Uses RendererMetrics for sizing (set once, not per-glyph).
-    fn render_text(
+    fn draw_text(
         &mut self,
         pos: Point<Self::Coord, 2>,
         text: &str,

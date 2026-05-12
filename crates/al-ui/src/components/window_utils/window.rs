@@ -239,12 +239,7 @@ impl<Coord: CoordType> ComponentTrait<Coord> for Window<Coord> {
             // Render title and title bar, removing them from clip
             if !self.title.is_empty() {
                 // Render title
-                renderer.render_text(
-                    (rect_clip.x, rect_clip.y).into(),
-                    &self.title,
-                    style,
-                    clip,
-                )?;
+                renderer.draw_text((rect_clip.x, rect_clip.y).into(), &self.title, style, clip)?;
                 // Render title bar
                 renderer.draw_rect(
                     Rect {

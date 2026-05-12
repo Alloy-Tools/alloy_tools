@@ -28,6 +28,10 @@ impl Modifier {
         self
     }
 
+    pub fn set_bold(&mut self, value: bool) {
+        self.bold = value;
+    }
+    
     pub fn toggle_bold(&mut self) {
         self.bold = !self.bold;
     }
@@ -38,6 +42,10 @@ impl Modifier {
         self
     }
 
+    pub fn set_italic(&mut self, value: bool) {
+        self.italic = value;
+    }
+    
     pub fn toggle_italic(&mut self) {
         self.italic = !self.italic;
     }
@@ -48,6 +56,10 @@ impl Modifier {
         self
     }
 
+    pub fn set_underline(&mut self, value: bool) {
+        self.underline = value;
+    }
+    
     pub fn toggle_underline(&mut self) {
         self.underline = !self.underline;
     }
@@ -58,6 +70,10 @@ impl Modifier {
         self
     }
 
+    pub fn set_inverse(&mut self, value: bool) {
+        self.inverse = value;
+    }
+    
     pub fn toggle_inverse(&mut self) {
         self.inverse = !self.inverse;
     }
@@ -68,6 +84,10 @@ impl Modifier {
         self
     }
 
+    pub fn set_strikethrough(&mut self, value: bool) {
+        self.strikethrough = value;
+    }
+    
     pub fn toggle_strikethrough(&mut self) {
         self.strikethrough = !self.strikethrough;
     }

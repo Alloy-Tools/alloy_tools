@@ -82,7 +82,7 @@ impl<Coord: CoordType> ComponentTrait<Coord> for Label {
         if let Some(rect) = state.rect() {
             let style = self.style.unwrap_or(style);
             // Use optimized text rendering - backend handles spacing with RendererMetrics
-            renderer.render_text((rect.x, rect.y).into(), &self.text, style, clip)
+            renderer.draw_text((rect.x, rect.y).into(), &self.text, style, clip)
         } else {
             Ok(())
         }
@@ -122,8 +122,8 @@ impl<Coord: CoordType> ComponentTrait<Coord> for Label {
 
 #[cfg(test)]
 mod tests {
-    use crate::ComponentState;
     use super::*;
+    use crate::ComponentState;
 
     #[test]
     fn set_text() {
@@ -143,22 +143,29 @@ mod tests {
         let label = Label::new("").with_style(Some(style));
         assert_eq!(label.style, Some(style));
         assert!(!label.wrapping);
-        
+
         let label = Label::new("").with_wrapping(true);
         assert!(label.wrapping);
     }
 
     #[test]
     fn size_constraints() {
-        let (w, h) = Label::new("Hello").size_with_state(&ComponentState::<u8>::default(), SizeConstraints::unbounded());
+        let (w, h) = Label::new("Hello").size_with_state(
+            &ComponentState::<u8>::default(),
+            SizeConstraints::unbounded(),
+        );
         assert_eq!(w, 5); // "Hello" is 5 characters
         assert_eq!(h, 1); // Labels are single-line
 
-        let (w, h) = Label::new("Hello World").size_with_state(&ComponentState::default(), SizeConstraints::width(5u8));
+        let (w, h) = Label::new("Hello World")
+            .size_with_state(&ComponentState::default(), SizeConstraints::width(5u8));
         assert_eq!(w, 5); // Constrained
         assert_eq!(h, 1);
 
-        let (w, h) = Label::new("").size_with_state(&ComponentState::<u8>::default(), SizeConstraints::unbounded());
+        let (w, h) = Label::new("").size_with_state(
+            &ComponentState::<u8>::default(),
+            SizeConstraints::unbounded(),
+        );
         assert_eq!(w, 0);
         assert_eq!(h, 1); // Still one tall
     }
