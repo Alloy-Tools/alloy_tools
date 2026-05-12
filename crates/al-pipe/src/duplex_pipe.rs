@@ -2,7 +2,7 @@ use al_core::{BinarySerde, Command, Queue, SerdeFormat, Transport, TransportErro
 use std::{
     io::{Read, Write},
     process::{Child, Command as Process, Stdio},
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -14,210 +14,350 @@ pub struct DuplexPipeStatus {
     pub pipe_alive: bool,
 }
 
+/// Errors that can occur while creating or using a `DuplexPipe`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DuplexPipeError {
+    ChildSpawnFailed(String),
+    ChildStdioMissing,
+    MessageTooLarge(usize),
+    WriteTimeout(Duration),
+    ReadTimeout(Duration),
+    IOError(String),
+    SerdeError(String),
+    TransportError(String),
+    UnexpectedEof,
+}
+
+impl std::fmt::Display for DuplexPipeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DuplexPipeError::ChildSpawnFailed(msg) => write!(f, "Child spawn failed: {msg}"),
+            DuplexPipeError::ChildStdioMissing => write!(f, "Child stdio handle missing"),
+            DuplexPipeError::MessageTooLarge(size) => {
+                write!(
+                    f,
+                    "Serialized command size {size} exceeds u16 message limit"
+                )
+            }
+            DuplexPipeError::WriteTimeout(duration) => {
+                write!(f, "Write timeout after {duration:?}")
+            }
+            DuplexPipeError::ReadTimeout(duration) => write!(f, "Read timeout after {duration:?}"),
+            DuplexPipeError::IOError(msg) => write!(f, "I/O error: {msg}"),
+            DuplexPipeError::SerdeError(msg) => write!(f, "Serde error: {msg}"),
+            DuplexPipeError::TransportError(msg) => write!(f, "Channel error: {msg}"),
+            DuplexPipeError::UnexpectedEof => write!(f, "Unexpected EOF reached on pipe"),
+        }
+    }
+}
+
+impl std::error::Error for DuplexPipeError {}
+
+impl From<std::io::Error> for DuplexPipeError {
+    fn from(e: std::io::Error) -> Self {
+        DuplexPipeError::IOError(e.to_string())
+    }
+}
+
+impl From<TransportError> for DuplexPipeError {
+    fn from(e: TransportError) -> Self {
+        DuplexPipeError::TransportError(format!("{e:?}"))
+    }
+}
+
 #[derive(Debug)]
 pub struct DuplexPipe {
     incoming: Arc<Queue<Command>>,
     outgoing: Arc<Queue<Command>>,
     threads: (
-        tokio::task::JoinHandle<Result<(), String>>,
-        tokio::task::JoinHandle<Result<(), String>>,
+        tokio::task::JoinHandle<Result<(), DuplexPipeError>>,
+        tokio::task::JoinHandle<Result<(), DuplexPipeError>>,
     ),
     #[allow(unused)]
-    child: Child,
+    child: Option<Child>,
+    last_error: Arc<Mutex<Option<DuplexPipeError>>>,
 }
 
 impl DuplexPipe {
-    pub fn spawn(command: Process) -> Result<Self, std::io::Error> {
+    pub fn spawn(command: Process) -> Result<Self, DuplexPipeError> {
         Self::spawn_with_timeout(command, None)
     }
 
     pub fn spawn_with_timeout(
         mut command: Process,
         timeout: Option<Duration>,
-    ) -> Result<Self, std::io::Error> {
-        // Set up stdio pipes
+    ) -> Result<Self, DuplexPipeError> {
         command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
 
-        let mut child = command.spawn()?;
+        let mut child = command
+            .spawn()
+            .map_err(|e| DuplexPipeError::ChildSpawnFailed(e.to_string()))?;
         let pipe_child_in = child
             .stdin
             .take()
-            .expect("Child should always have stdin on spawn");
+            .ok_or(DuplexPipeError::ChildStdioMissing)?;
         let pipe_child_out = child
             .stdout
             .take()
-            .expect("Child should always have stdout on spawn");
+            .ok_or(DuplexPipeError::ChildStdioMissing)?;
 
-        // Set up queues
         let queue_child_in = Arc::new(Queue::new());
         let queue_child_out = Arc::new(Queue::new());
+        let last_error = Arc::new(Mutex::new(None));
 
-        // Spawn writer thread
+        let write_last_error = last_error.clone();
         let write_queue = queue_child_in.clone();
-        let write_thread: tokio::task::JoinHandle<Result<(), String>> = tokio::spawn(async move {
-            let mut stdin = pipe_child_in;
-            let serializer = BinarySerde;
+        let write_thread: tokio::task::JoinHandle<Result<(), DuplexPipeError>> =
+            tokio::spawn(async move {
+                let mut stdin = pipe_child_in;
+                let serializer = BinarySerde;
+                loop {
+                    let cmd = write_queue
+                        .recv()
+                        .await
+                        .map_err(|e| DuplexPipeError::TransportError(format!("{e:?}")))?;
 
-            loop {
-                match write_queue.recv().await {
-                    Ok(cmd) => {
-                        let buf = serializer
-                            .serialize_command(&cmd)
-                            .map_err(|e| e.to_string())?;
+                    let buf = serializer
+                        .serialize_command(&cmd)
+                        .map_err(|e| DuplexPipeError::SerdeError(e.to_string()))?;
 
-                        // Wrap write operations with timeout if specified
-                        let write_op = async {
-                            // Write buffer length
-                            if let Err(e) = tokio::task::block_in_place(|| {
-                                stdin.write_all(&(buf.len() as u16).to_be_bytes())
-                            }) {
-                                let err = format!(
-                                    "[DUPLEX PIPE | WRITE THREAD] Length write error: {}",
-                                    e
-                                );
-                                eprintln!("{}", err);
-                                return Err(err);
-                            }
-                            // Write buffer
-                            if let Err(e) = tokio::task::block_in_place(|| stdin.write_all(&buf)) {
-                                let err = format!(
-                                    "[DUPLEX PIPE | WRITE THREAD] Payload write error: {}",
-                                    e
-                                );
-                                eprintln!("{}", err);
-                                return Err(err);
-                            }
-                            // Flush
-                            if let Err(e) = tokio::task::block_in_place(|| stdin.flush()) {
-                                let err =
-                                    format!("[DUPLEX PIPE | [WRITE THREAD] Flush error: {}", e);
-                                eprintln!("{}", err);
-                                return Err(err);
-                            }
-                            Ok(())
-                        };
-
-                        match timeout {
-                            Some(duration) => {
-                                match tokio::time::timeout(duration, write_op).await {
-                                    Ok(result) => result?,
-                                    Err(_) => {
-                                        return Err(
-                                            "Write timeout: subprocess did not accept data in time"
-                                                .to_string(),
-                                        )
-                                    }
-                                }
-                            }
-                            None => write_op.await?,
-                        }
+                    if buf.len() > u16::MAX as usize {
+                        return Err(DuplexPipeError::MessageTooLarge(buf.len()));
                     }
-                    Err(e) => {
-                        let err = format!(
-                            "[DUPLEX PIPE | WRITE THREAD] Error receiving from queue: {:?}",
-                            e
-                        );
-                        eprintln!("{}", err);
-                        Err(err)?
+
+                    let write_op = async {
+                        tokio::task::block_in_place(|| {
+                            stdin.write_all(&(buf.len() as u16).to_be_bytes())
+                        })
+                        .map_err(|e| DuplexPipeError::IOError(e.to_string()))?;
+                        tokio::task::block_in_place(|| stdin.write_all(&buf))
+                            .map_err(|e| DuplexPipeError::IOError(e.to_string()))?;
+                        tokio::task::block_in_place(|| stdin.flush())
+                            .map_err(|e| DuplexPipeError::IOError(e.to_string()))?;
+                        Ok::<(), DuplexPipeError>(())
+                    };
+
+                    match timeout {
+                        Some(duration) => match tokio::time::timeout(duration, write_op).await {
+                            Ok(result) => result?,
+                            Err(_) => {
+                                return Err(DuplexPipeError::WriteTimeout(duration));
+                            }
+                        },
+                        None => write_op.await?,
                     }
                 }
-            }
-        });
+            });
 
-        // spawn reader thread
+        let read_last_error = last_error.clone();
         let read_queue = queue_child_out.clone();
-        let read_thread: tokio::task::JoinHandle<Result<(), String>> = tokio::spawn(async move {
-            let mut stdout = pipe_child_out;
-            let mut buf = [0u8; 1024];
-            let mut len_bytes = [0u8; 2];
-            let mut len: usize;
-            let serializer = BinarySerde;
+        let read_thread: tokio::task::JoinHandle<Result<(), DuplexPipeError>> =
+            tokio::spawn(async move {
+                let mut buf = [0u8; 1024];
+                let mut len_bytes = [0u8; 2];
+                let mut stdout = pipe_child_out;
+                let serializer = BinarySerde;
 
-            loop {
-                // Read two bytes as message length
-                match tokio::task::block_in_place(|| stdout.read_exact(&mut len_bytes)) {
-                    Ok(()) => {
-                        len = u16::from_be_bytes(len_bytes) as usize;
-                        let read_op = async {
-                            // Read `message length` bytes as message
-                            tokio::task::block_in_place(|| stdout.read_exact(&mut buf[..len]))
-                                .map_err(|e| {
-                                    let err = format!(
-                                        "[DUPLEX PIPE | READ THREAD] Payload read error: {}",
-                                        e
-                                    );
-                                    eprintln!("{}", err);
-                                    err
-                                })?;
-                            // Deserialize message into a command
-                            let cmd = serializer.deserialize_command(&buf[..len]).map_err(|e| {
-                                let err = format!(
-                                    "[DUPLEX PIPE | READ THREAD] Deserialization error: {}",
-                                    e
-                                );
-                                eprintln!("{}", err);
-                                err
-                            })?;
-                            // Forward command to incoming queue
-                            if let Err(e) = read_queue.send(cmd).await {
-                                let err = format!(
-                                    "[DUPLEX PIPE | READ THREAD] Send to queue error: {:?}",
-                                    e
-                                );
-                                eprintln!("{}", err);
-                                return Err(err);
-                            }
-                            Ok(())
-                        };
+                loop {
+                    match tokio::task::block_in_place(|| stdout.read_exact(&mut len_bytes)) {
+                        Ok(()) => {
+                            let len = u16::from_be_bytes(len_bytes) as usize;
+                            let payload = if len <= buf.len() {
+                                tokio::task::block_in_place(|| stdout.read_exact(&mut buf[..len]))
+                                    .map_err(|e| DuplexPipeError::IOError(e.to_string()))?;
+                                buf[..len].to_vec()
+                            } else {
+                                let mut payload = vec![0u8; len];
+                                tokio::task::block_in_place(|| stdout.read_exact(&mut payload))
+                                    .map_err(|e| DuplexPipeError::IOError(e.to_string()))?;
+                                payload
+                            };
 
-                        match timeout {
-                            Some(duration) => match tokio::time::timeout(duration, read_op).await {
-                                Ok(result) => result?,
-                                Err(_) => {
-                                    return Err(
-                                        "Read timeout: subprocess did not send data in time"
-                                            .to_string(),
-                                    )
+                            let cmd = serializer
+                                .deserialize_command(&payload)
+                                .map_err(|e| DuplexPipeError::SerdeError(e.to_string()))?;
+
+                            read_queue
+                                .send(cmd)
+                                .await
+                                .map_err(|e| DuplexPipeError::TransportError(format!("{e:?}")))?;
+                        }
+                        Err(e) => {
+                            if e.kind() == std::io::ErrorKind::UnexpectedEof {
+                                if let Ok(mut guard) = read_last_error.lock() {
+                                    *guard = Some(DuplexPipeError::UnexpectedEof);
                                 }
-                            },
-                            None => read_op.await?,
+                            }
+                            break;
                         }
                     }
-                    Err(e) => {
-                        match e.kind() {
-                            std::io::ErrorKind::UnexpectedEof => {
-                                eprintln!("[DUPLEX PIPE | READ THREAD] EOF reached: {}", e)
-                            }
-                            _ => {} //TODO
-                        };
-                        break;
-                    }
                 }
-            }
-            Ok(())
-        });
+                Ok(())
+            });
 
         Ok(Self {
             incoming: queue_child_out,
             outgoing: queue_child_in,
             threads: (write_thread, read_thread),
-            child,
+            child: Some(child),
+            last_error,
         })
     }
 
-    fn connect_as_child() -> Result<Self, std::io::Error> {
-        todo!()
+    pub fn connect_as_child() -> Result<Self, DuplexPipeError> {
+        Self::connect_as_child_with_timeout(None)
     }
 
-    /// Check if both threads are still running
+    pub fn connect_as_child_with_timeout(
+        timeout: Option<Duration>,
+    ) -> Result<Self, DuplexPipeError> {
+        let queue_child_in = Arc::new(Queue::new());
+        let queue_child_out = Arc::new(Queue::new());
+        let last_error = Arc::new(Mutex::new(None));
+
+        let read_last_error = last_error.clone();
+        let read_queue = queue_child_in.clone();
+        let read_thread: tokio::task::JoinHandle<Result<(), DuplexPipeError>> =
+            tokio::spawn(async move {
+                let mut stdin = std::io::stdin();
+                let mut len_bytes = [0u8; 2];
+                let mut payload = vec![0u8; 1024];
+                let serializer = BinarySerde;
+
+                loop {
+                    let read_len = async {
+                        tokio::task::block_in_place(|| {
+                            std::io::Read::read_exact(&mut stdin, &mut len_bytes)
+                        })
+                    };
+
+                    match timeout {
+                        Some(duration) => {
+                            if tokio::time::timeout(duration, read_len).await.is_err()
+                            {
+                                break;
+                            }
+                        }
+                        None => {
+                            if std::io::Read::read_exact(&mut stdin, &mut len_bytes).is_err() {
+                                break;
+                            }
+                        }
+                    }
+
+                    let len = u16::from_be_bytes(len_bytes) as usize;
+                    // Reuse buffer, grow only if needed
+                    if payload.capacity() < len {
+                        payload.resize(len, 0);
+                    }
+
+                    let read_payload = async {
+                        tokio::task::block_in_place(|| {
+                            std::io::Read::read_exact(&mut stdin, &mut payload[..len])
+                        })
+                    };
+
+                    match timeout {
+                        Some(duration) => {
+                            if tokio::time::timeout(duration, read_payload).await.is_err()
+                            {
+                                break;
+                            }
+                        }
+                        None => {
+                            if std::io::Read::read_exact(&mut stdin, &mut payload[..len]).is_err() {
+                                break;
+                            }
+                        }
+                    }
+
+                    let cmd = serializer
+                        .deserialize_command(&payload[..len])
+                        .map_err(|e| DuplexPipeError::SerdeError(e.to_string()))?;
+
+                    read_queue
+                        .send(cmd)
+                        .await
+                        .map_err(|e| DuplexPipeError::TransportError(format!("{e:?}")))?;
+                }
+                Ok(())
+            });
+
+        // Child writer: reads from outgoing queue, writes responses to stdout
+        let write_last_error = last_error.clone();
+        let write_queue = queue_child_out.clone();
+        let write_thread: tokio::task::JoinHandle<Result<(), DuplexPipeError>> =
+            tokio::spawn(async move {
+                let mut stdout = std::io::stdout();
+                let serializer = BinarySerde;
+
+                loop {
+                    let cmd = write_queue
+                        .recv()
+                        .await
+                        .map_err(|e| DuplexPipeError::TransportError(format!("{e:?}")))?;
+
+                    let buf = serializer
+                        .serialize_command(&cmd)
+                        .map_err(|e| DuplexPipeError::SerdeError(e.to_string()))?;
+
+                    if buf.len() > u16::MAX as usize {
+                        return Err(DuplexPipeError::MessageTooLarge(buf.len()));
+                    }
+
+                    let write_op = async {
+                        tokio::task::block_in_place(|| {
+                            std::io::Write::write_all(
+                                &mut stdout,
+                                &(buf.len() as u16).to_be_bytes(),
+                            )
+                            .map_err(|e| DuplexPipeError::IOError(e.to_string()))?;
+                            std::io::Write::write_all(&mut stdout, &buf)
+                                .map_err(|e| DuplexPipeError::IOError(e.to_string()))?;
+                            std::io::Write::flush(&mut stdout)
+                                .map_err(|e| DuplexPipeError::IOError(e.to_string()))?;
+                            Ok::<(), DuplexPipeError>(())
+                        })
+                    };
+
+                    match timeout {
+                        Some(duration) => match tokio::time::timeout(duration, write_op).await {
+                            Ok(result) => result.map_err(|e| {
+                                if let Ok(mut guard) = write_last_error.lock() {
+                                    *guard = Some(e.clone());
+                                }
+                                e
+                            })?,
+                            Err(_) => {
+                                return Err(DuplexPipeError::WriteTimeout(duration));
+                            }
+                        },
+                        None => write_op.await.map_err(|e| {
+                            if let Ok(mut guard) = write_last_error.lock() {
+                                *guard = Some(e.clone());
+                            }
+                            e
+                        })?,
+                    }
+                }
+            });
+
+        Ok(Self {
+            incoming: queue_child_in,
+            outgoing: queue_child_out,
+            threads: (write_thread, read_thread),
+            child: None,
+            last_error,
+        })
+    }
+
     pub fn is_alive(&self) -> bool {
         !self.threads.0.is_finished() && !self.threads.1.is_finished()
     }
 
-    /// Get the current status of both threads and the pipe
     pub fn thread_status(&self) -> DuplexPipeStatus {
         let write_thread_finished = self.threads.0.is_finished();
         let read_thread_finished = self.threads.1.is_finished();
@@ -228,8 +368,10 @@ impl DuplexPipe {
         }
     }
 
-    /// Check for errors in background threads without blocking.
-    /// Returns a summary of thread states and any errors discovered.
+    pub fn last_error(&self) -> Option<DuplexPipeError> {
+        self.last_error.lock().ok().and_then(|guard| guard.clone())
+    }
+
     pub fn check_errors(&self) -> String {
         let status = self.thread_status();
         let mut report = String::new();
@@ -252,16 +394,17 @@ impl DuplexPipe {
             "  Incoming queue length: {}\n",
             self.incoming_queue_len()
         ));
+        if let Some(error) = self.last_error() {
+            report.push_str(&format!("  Last error: {error}\n"));
+        }
 
         report
     }
 
-    /// Get the length of the outgoing queue (commands waiting to be sent to subprocess)
     pub fn outgoing_queue_len(&self) -> usize {
         self.outgoing.len()
     }
 
-    /// Get the length of the incoming queue (responses waiting to be received from subprocess)
     pub fn incoming_queue_len(&self) -> usize {
         self.incoming.len()
     }
@@ -269,6 +412,8 @@ impl DuplexPipe {
     pub fn close(&self) {
         self.threads.0.abort();
         self.threads.1.abort();
+
+        //TODO: abort child process
     }
 
     pub fn incoming(&self) -> &Arc<Queue<Command>> {
@@ -277,6 +422,12 @@ impl DuplexPipe {
 
     pub fn outgoing(&self) -> &Arc<Queue<Command>> {
         &self.outgoing
+    }
+}
+
+impl Drop for DuplexPipe {
+    fn drop(&mut self) {
+        self.close();
     }
 }
 

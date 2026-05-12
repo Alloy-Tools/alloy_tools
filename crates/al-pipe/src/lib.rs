@@ -1,3 +1,3 @@
 mod duplex_pipe;
 
-pub use duplex_pipe::{DuplexPipe, DuplexPipeStatus};
+pub use duplex_pipe::{DuplexPipe, DuplexPipeError, DuplexPipeStatus};
