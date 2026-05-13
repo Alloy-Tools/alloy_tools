@@ -1,0 +1,13 @@
+[package]
+name = "al-transport"
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+edition.workspace = true
+rust-version = "1.80.1"
+
+[lib]
+doctest = false
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros"] }
