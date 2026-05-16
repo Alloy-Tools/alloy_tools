@@ -1,23 +1,102 @@
+//! # Driver
+//!
+//! The `Driver` is the coordinator of the transport system. It manages multiple transports
+//! and routes data between them based on configurable connections.
+//!
+//! ## Basic Usage
+//!
+//! ```ignore
+//! let mut driver = Driver::new();
+//!
+//! let producer = driver.add_transport(MyProducer::new());
+//! let consumer = driver.add_transport(MyConsumer::new());
+//!
+//! driver.connect(producer, consumer)?;
+//!
+//! // Drive the system asynchronously
+//! tokio::spawn(async move {
+//!     driver.drive(|| tokio::task::yield_now()).await;
+//! });
+//! ```
+//!
+//! ## Error Handling
+//!
+//! - `DriverError::InvalidSender` / `InvalidReceiver`: Returned when a `TransportID` doesn't match any registered transport
+//! - `DriverError::SelfConnection`: Returned when trying to connect a transport to itself
+//!
+//! # Splice Functions
+//!
+//! Utilities for bridging between sync and async queue boundaries.
+//!
+//! Splice functions spawn independent tasks or threads that continuously read from a source queue,
+//! apply a transformation, and write to a destination queue. They're useful for adapting between
+//! different concurrency models (sync ↔ async).
+//!
+//! ## Features
+//!
+//! - **Dual-mode support**: Both blocking (std::thread) and async (tokio) variants
+//! - **Cancellation**: Returns [`SpliceHandle`] to gracefully stop the operation
+//! - **Transformation**: Applies a closure to items during transit
+//! - **Fire-and-forget**: Spawns independently; caller can drop handle safely
+//!
+//! ## Examples
+//!
+//! ### Async Splice (requires `tokio` feature)
+//!
+//! ```ignore
+//! use al_transport::{BoundaryQueue, splice_async};
+//!
+//! let source = BoundaryQueue::new();
+//! let dest = BoundaryQueue::new();
+//!
+//! let handle = splice_async(source.clone(), dest.clone(), |x: i32| x * 2).await;
+//!
+//! // Can stop later:
+//! handle.stop();
+//! ```
+//!
+//! ### Blocking Splice
+//!
+//! ```ignore
+//! use al_transport::{BoundaryQueue, splice_blocking};
+//!
+//! let source = BoundaryQueue::new();
+//! let dest = BoundaryQueue::new();
+//!
+//! let handle = splice_blocking(source.clone(), dest.clone(), |x: i32| x * 2);
+//!
+//! // Do other work...
+//! handle.stop();  // Clean shutdown
+//! ```
+//!
+//! ## Error Handling
+//!
+//! Both functions use `.expect()` on queue operations; panics indicate a critical failure
+//! (poisoned mutex or condition variable failure). This is acceptable as failures here suggest
+//! a serious system-level issue that can't be recovered from gracefully.
+//!
+//! ## Performance Notes
+//!
+//! - Each splice spawns a new task/thread (overhead proportional to spawn cost)
+//! - Suitable for medium-frequency data flows; consider batching for high throughput
+//! - AtomicBool stop flag uses SeqCst for strong ordering guarantees
+
+//#![deny(missing_docs)]
+
 mod driver;
 mod marker;
 mod noop_waker;
 mod splice;
 mod transport;
-mod transports;
+pub mod transports;
 
 pub use driver::{Driver, DriverError};
 pub use marker::TransportItemRequirements;
 pub use noop_waker::{new_noop_waker, noop_context, noop_waker, NoOpWaker};
-pub use splice::{splice_async, splice_blocking};
+pub use splice::{log_on_error, panic_on_error, splice_async, splice_blocking, SpliceHandle};
 #[cfg(test)]
 pub use test_counting::{CountingConsumer, CountingProducer};
 pub use transport::{Action, Transport, TransportID, TransportIDError};
-pub use transports::{
-    boundary_queue::{BoundaryQueue, BoundaryQueueError, BoundaryQueueTransport},
-    filter::Filter,
-    map::Map,
-    queue::Queue,
-};
 
 #[cfg(test)]
 mod test_counting {
@@ -79,6 +158,7 @@ mod test_counting {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::transports::*;
 
     fn setup_driver() -> (Driver<u64>, std::sync::Arc<BoundaryQueue<u64>>) {
         let mut driver = Driver::new();

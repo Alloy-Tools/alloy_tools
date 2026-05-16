@@ -59,6 +59,12 @@ impl<T: TransportItemRequirements> std::future::Future for Driver<T> {
     }
 }
 
+impl<T: TransportItemRequirements> Default for Driver<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T: TransportItemRequirements> Driver<T> {
     pub fn new() -> Self {
         Self {
@@ -75,7 +81,7 @@ impl<T: TransportItemRequirements> Driver<T> {
     {
         let waker = noop_waker();
         loop {
-            self.poll(&mut std::task::Context::from_waker(&waker));
+            self.poll(&mut std::task::Context::from_waker(waker));
             yield_fn().await;
         }
     }
@@ -105,10 +111,10 @@ impl<T: TransportItemRequirements> Driver<T> {
     pub fn connect(&mut self, from: TransportID, to: TransportID) -> Result<(), DriverError> {
         let fi = self
             .resolve(from)
-            .map_err(|e| DriverError::InvalidSender(e))?;
+            .map_err(DriverError::InvalidSender)?;
         let ti = self
             .resolve(to)
-            .map_err(|e| DriverError::InvalidReceiver(e))?;
+            .map_err(DriverError::InvalidReceiver)?;
 
         if fi == ti {
             Err(DriverError::SelfConnection)?
@@ -137,10 +143,10 @@ impl<T: TransportItemRequirements> Driver<T> {
     pub fn disconnect(&mut self, from: TransportID, to: TransportID) -> Result<(), DriverError> {
         let fi = self
             .resolve(from)
-            .map_err(|e| DriverError::InvalidSender(e))?;
+            .map_err(DriverError::InvalidSender)?;
         let ti = self
             .resolve(to)
-            .map_err(|e| DriverError::InvalidReceiver(e))?;
+            .map_err(DriverError::InvalidReceiver)?;
 
         if fi != ti {
             match self.edges[fi] {

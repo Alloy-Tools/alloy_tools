@@ -1,7 +1,58 @@
+//! # Boundary Queue
+//!
+//! A thread-safe queue for transmitting data across thread and async task boundaries.
+//!
+//! [`BoundaryQueue<T>`] provides a unified interface for sending and receiving items from both
+//! synchronous threads and asynchronous tasks. Internally it wraps `Arc<Mutex<VecDeque<T>>>` with
+//! a condition variable for thread wakeup and a waker for async notification.
+//!
+//! ## Features
+//!
+//! - **Dual-mode consumption**: Both blocking and async receivers
+//! - **Batch operations**: `send_batch()` and `recv_available()` for efficiency
+//! - **Waker integration**: Async tasks get notified via Waker when data arrives
+//! - **Thread synchronization**: Condition variable wakes blocked threads
+//! - **Cloneable**: Multiple producers/consumers via Arc cloning
+//!
+//! ## Examples
+//!
+//! ```ignore
+//! use al_transport::BoundaryQueue;
+//!
+//! let queue = BoundaryQueue::new();
+//! let queue_clone = queue.clone();
+//!
+//! // Producer thread
+//! std::thread::spawn(move || {
+//!     for i in 0..10 {
+//!         queue_clone.send(i).unwrap();
+//!     }
+//! });
+//!
+//! // Consumer - asynchronously receives
+//! while let Ok(item) = queue.recv().await {
+//!     println!("Received: {}", item);
+//! }
+//! ```
+//!
+//! ## Error Handling
+//!
+//! All public methods return `Result<T, BoundaryQueueError>`. Errors occur when:
+//! - The internal mutex becomes poisoned (a thread panicked while holding it)
+//! - A condition variable wait operation fails (rare, system-level issue)
+//!
+//! ## Thread Safety
+//!
+//! `BoundaryQueue<T>` is `Send + Sync` for all `T: Send + Sync`, allowing safe use across
+//! thread boundaries. The internal `Arc<Mutex<...>>` ensures exclusive access to the queue.
+
 use crate::{Transport, TransportItemRequirements};
 use std::{
     collections::VecDeque,
-    sync::{Arc, Condvar, Mutex, PoisonError},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Condvar, Mutex, PoisonError,
+    },
     task::Waker,
 };
 
@@ -114,6 +165,32 @@ impl<T: TransportItemRequirements> BoundaryQueue<T> {
             .collect())
     }
 
+    /// Blocking receive that checks a cancellation flag.
+    /// Returns `Ok(None)` if the stop flag was raised before an item arrived.
+    pub fn recv_cancellable(&self, stop: &AtomicBool) -> Result<Option<T>, BoundaryQueueError> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|_| BoundaryQueueError::PoisonedMutex)?;
+
+        loop {
+            if stop.load(Ordering::SeqCst) {
+                return Ok(None);
+            }
+
+            if let Some(data) = inner.queue.pop_front() {
+                return Ok(Some(data));
+            }
+
+            let (new_inner, _timeout) = self
+                .condvar
+                .wait_timeout(inner, std::time::Duration::from_millis(50))
+                .map_err(|_| BoundaryQueueError::PoisonedMutex)?;
+
+            inner = new_inner;
+        }
+    }
+
     /// Synchronously wait to receive one item from the queue.
     /// Blocks the current thread until data is available.
     pub fn recv_blocking(&self) -> Result<T, BoundaryQueueError> {
@@ -166,6 +243,7 @@ impl<T: TransportItemRequirements> std::future::Future for RecvFuture<T> {
     }
 }
 
+/// A simple wrapper around an `Arc<BoundaryQueue<T>>` allowing `Box<dyn Transport<T>>`
 pub struct BoundaryQueueTransport<T: TransportItemRequirements> {
     inner: Arc<BoundaryQueue<T>>,
 }
