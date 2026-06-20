@@ -5,7 +5,33 @@ license.workspace = true
 repository.workspace = true
 edition.workspace = true
 
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "docsrs"]
+
 [lib]
 doctest = false
 
 [dependencies]
+arc-swap = { version = "1.9.1", optional = true }
+serde = { version = "1.0.228", features = ["derive"], optional = true }
+
+[features]
+default = [
+    "noop_waker",
+    "enums",
+    "traits",
+    "race",
+    "cancellation",
+    "collections",
+    "serde"
+]
+noop_waker = []
+enums = []
+traits = []
+race = []
+cancellation = []
+collections = ["dep:arc-swap"]
+serde = ["dep:serde"]
+
+[dev-dependencies]
+serde_json = "1.0"
