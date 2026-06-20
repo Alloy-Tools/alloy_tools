@@ -1,41 +1,54 @@
-//! # Queue Transport
+//! # Transport implementations
 //!
-//! A basic in-memory queue transport with waker notification support.
+//! This module exposes runtime-agnostic transport implementations for the `Transport<T>`
+//! state-machine core.
 //!
-//! [`Queue<T>`] is a simple FIFO buffer that implements the [`Transport<T>`] trait.
-//! It stores items in a [`VecDeque`] and maintains a single waker for async notification
-//! when the queue transitions from empty to non-empty.
+//! ## Transport summary
 //!
-//! ## Features
+//! - [`Queue<T>`]
+//!   - A lightweight in-memory FIFO queue transport.
+//!   - Stores incoming items in a `VecDeque` and wakes a pending poll when new data arrives.
+//!   - Best for simple single-threaded buffering and local pipeline composition.
 //!
-//! - **FIFO ordering**: Items are received in the order they were sent
-//! - **Waker notification**: Async tasks waiting on empty queue are awakened when data arrives
-//! - **Status reporting**: `status()` reports the current queue length
+//! - [`BoundaryQueue<T>`]
+//!   - A thread-safe queue for crossing sync/async boundaries.
+//!   - Supports blocking receive, cancellable receive, and async receive via `Waker`.
+//!   - Best when queue state needs to be shared safely across threads and async tasks.
 //!
-//! ## Examples
+//! - [`Filter<T, F>`]
+//!   - A transport adapter that forwards only items matching a predicate.
+//!   - Incoming items that do not pass the predicate are discarded.
+//!   - Useful for stream shaping and selective delivery.
+//!
+//! - [`Map<T, F>`]
+//!   - A transport adapter that transforms each incoming item before buffering.
+//!   - Supports type conversion or value transformation within the transport chain.
+//!   - Useful for adapting incompatible item types or mapping data before delivery.
+//!
+//! ## Usage
 //!
 //! ```ignore
-//! use al_transport::Queue;
-//! use al_transport::Transport;
+//! use al_transport::transports::{BoundaryQueue, Filter, Map, Queue};
 //!
 //! let mut queue = Queue::<i32>::new();
+//! let boundary = BoundaryQueue::new();
+//! let filter = Filter::new(|x: &i32| *x % 2 == 0);
+//! let map = Map::new(|x: i32| x * 2);
 //!
-//! // Send items
-//! queue.handle_incoming(42).unwrap();
-//! queue.handle_incoming(99).unwrap();
+//! queue.handle_incoming(1);
+//! queue.handle_incoming(2);
+//!```
 //!
-//! // Poll for items
-//! match queue.poll() {
-//!     std::task::Poll::Ready(Some(item)) => println!("Got: {}", item),
-//!     _ => println!("Queue empty"),
-//! }
-//! ```
+//! The public API is exposed through this module, so docs for the re-exported transports
+//! should be kept here rather than only inside child modules.
 //!
-//! ## Performance Notes
+//! ## When to use each transport
 //!
-//! - No allocations on send (items added to existing VecDeque)
-//! - Waker stored once per empty queue; subsequent sends don't trigger additional work
-//! - Perfect for in-process data flow with simple pub/sub patterns
+//! - Use [`Queue<T>`] for the simplest FIFO transport when all activity stays within a single
+//!   execution context.
+//! - Use [`BoundaryQueue<T>`] when you need safe sharing across threads and async tasks.
+//! - Use [`Filter<T, F>`] to filter incoming data before it is delivered.
+//! - Use [`Map<T, F>`] to transform items while preserving transport semantics.
 
 mod boundary_queue;
 mod filter;

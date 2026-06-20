@@ -85,15 +85,12 @@
 
 mod driver;
 mod marker;
-mod noop_waker;
-mod splice;
+pub mod splice;
 mod transport;
 pub mod transports;
 
 pub use driver::{Driver, DriverError};
 pub use marker::TransportItemRequirements;
-pub use noop_waker::{new_noop_waker, noop_context, noop_waker, NoOpWaker};
-pub use splice::{log_on_error, panic_on_error, splice_async, splice_blocking, SpliceHandle};
 #[cfg(test)]
 pub use test_counting::{CountingConsumer, CountingProducer};
 pub use transport::{Action, Transport, TransportID, TransportIDError};
@@ -157,6 +154,7 @@ mod test_counting {
 
 #[cfg(test)]
 mod tests {
+    use al_structures::noop_waker::noop_waker;
     use super::*;
     use crate::transports::*;
 

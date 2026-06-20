@@ -47,12 +47,10 @@
 //! thread boundaries. The internal `Arc<Mutex<...>>` ensures exclusive access to the queue.
 
 use crate::{Transport, TransportItemRequirements};
+use al_structures::cancellation::CancellationToken;
 use std::{
     collections::VecDeque,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Condvar, Mutex, PoisonError,
-    },
+    sync::{Arc, Condvar, Mutex, PoisonError},
     task::Waker,
 };
 
@@ -82,7 +80,7 @@ impl std::error::Error for BoundaryQueueError {}
 
 pub struct BoundaryQueue<T> {
     inner: Mutex<Inner<T>>,
-    condvar: Condvar,
+    condvar: Arc<Condvar>,
 }
 
 struct Inner<T> {
@@ -104,7 +102,7 @@ impl<T: TransportItemRequirements> BoundaryQueue<T> {
                 queue: VecDeque::new(),
                 async_waker: None,
             }),
-            condvar: Condvar::new(),
+            condvar: Arc::new(Condvar::new()),
         })
     }
 
@@ -165,16 +163,26 @@ impl<T: TransportItemRequirements> BoundaryQueue<T> {
             .collect())
     }
 
-    /// Blocking receive that checks a cancellation flag.
-    /// Returns `Ok(None)` if the stop flag was raised before an item arrived.
-    pub fn recv_cancellable(&self, stop: &AtomicBool) -> Result<Option<T>, BoundaryQueueError> {
+    /// Blocking receive that checks a cancellation token.
+    /// Returns `Ok(None)` if the cancellation flag was raised before an item arrived.
+    pub fn recv_cancellable(
+        self: &Arc<Self>,
+        token: &CancellationToken,
+    ) -> Result<Option<T>, BoundaryQueueError> {
+        let _waiter = token.cancelled_blocking({
+            let queue = self.clone();
+            Arc::new(move || {
+                let _guard = queue.inner.lock().unwrap_or_else(|e| e.into_inner());
+                queue.condvar.notify_all();
+            })
+        });
         let mut inner = self
             .inner
             .lock()
             .map_err(|_| BoundaryQueueError::PoisonedMutex)?;
 
         loop {
-            if stop.load(Ordering::SeqCst) {
+            if token.is_cancelled() {
                 return Ok(None);
             }
 
@@ -182,12 +190,10 @@ impl<T: TransportItemRequirements> BoundaryQueue<T> {
                 return Ok(Some(data));
             }
 
-            let (new_inner, _timeout) = self
+            inner = self
                 .condvar
-                .wait_timeout(inner, std::time::Duration::from_millis(50))
+                .wait(inner)
                 .map_err(|_| BoundaryQueueError::PoisonedMutex)?;
-
-            inner = new_inner;
         }
     }
 
@@ -197,7 +203,7 @@ impl<T: TransportItemRequirements> BoundaryQueue<T> {
         let mut inner = self
             .inner
             .lock()
-            .map_err(|_: PoisonError<_>| BoundaryQueueError::PoisonedMutex)?;
+            .map_err(|_| BoundaryQueueError::PoisonedMutex)?;
         loop {
             if let Some(data) = inner.queue.pop_front() {
                 return Ok(data);
@@ -205,7 +211,7 @@ impl<T: TransportItemRequirements> BoundaryQueue<T> {
             inner = self
                 .condvar
                 .wait(inner)
-                .map_err(|_: PoisonError<_>| BoundaryQueueError::PoisonedMutex)?;
+                .map_err(|_| BoundaryQueueError::PoisonedMutex)?;
         }
     }
 
@@ -233,7 +239,7 @@ impl<T: TransportItemRequirements> std::future::Future for RecvFuture<T> {
             .queue
             .inner
             .lock()
-            .map_err(|_: PoisonError<_>| BoundaryQueueError::PoisonedMutex)?;
+            .map_err(|_| BoundaryQueueError::PoisonedMutex)?;
         if let Some(data) = inner.queue.pop_front() {
             return std::task::Poll::Ready(Ok(data));
         }
@@ -294,6 +300,7 @@ impl<T: TransportItemRequirements> Transport<T> for BoundaryQueueTransport<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use al_structures::{cancellation::CancellationToken, noop_waker::noop_waker};
 
     #[test]
     fn send_and_try_recv_single_item() {
@@ -394,7 +401,7 @@ mod tests {
 
         let mut transport = BoundaryQueueTransport::new(queue.clone());
 
-        let waker = crate::noop_waker().clone();
+        let waker = noop_waker().clone();
         let mut cx = std::task::Context::from_waker(&waker);
         let result = transport.poll_action(&mut cx);
 
@@ -410,7 +417,7 @@ mod tests {
         let queue = BoundaryQueue::<i32>::new();
         let mut transport = BoundaryQueueTransport::new(queue);
 
-        let waker = crate::noop_waker().clone();
+        let waker = noop_waker().clone();
         let mut cx = std::task::Context::from_waker(&waker);
         let result = transport.poll_action(&mut cx);
 
@@ -447,5 +454,35 @@ mod tests {
             let result = queue.try_recv().unwrap();
             assert_eq!(result, Some(i), "Items should be in FIFO order");
         }
+    }
+
+    #[test]
+    fn recv_cancellable_returns_none_after_cancel() {
+        let queue = BoundaryQueue::<i32>::new();
+        let token = CancellationToken::new();
+        let queue_clone = queue.clone();
+        let token_clone = token.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        std::thread::spawn(move || {
+            let result = queue_clone.recv_cancellable(&token_clone).unwrap();
+            tx.send(result).unwrap();
+        });
+
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        assert!(token.cancel());
+        assert_eq!(
+            rx.recv_timeout(std::time::Duration::from_secs(1)).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn recv_cancellable_returns_data_when_available() {
+        let queue = BoundaryQueue::new();
+        let token = CancellationToken::new();
+
+        queue.send(33).unwrap();
+        assert_eq!(queue.recv_cancellable(&token).unwrap(), Some(33));
     }
 }

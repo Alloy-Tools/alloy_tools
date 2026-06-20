@@ -1,6 +1,5 @@
-use crate::{
-    noop_waker, Action, Transport, TransportID, TransportIDError, TransportItemRequirements,
-};
+use crate::{Action, Transport, TransportID, TransportIDError, TransportItemRequirements};
+use al_structures::noop_waker::noop_waker;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum DriverError {
@@ -109,12 +108,8 @@ impl<T: TransportItemRequirements> Driver<T> {
     }
 
     pub fn connect(&mut self, from: TransportID, to: TransportID) -> Result<(), DriverError> {
-        let fi = self
-            .resolve(from)
-            .map_err(DriverError::InvalidSender)?;
-        let ti = self
-            .resolve(to)
-            .map_err(DriverError::InvalidReceiver)?;
+        let fi = self.resolve(from).map_err(DriverError::InvalidSender)?;
+        let ti = self.resolve(to).map_err(DriverError::InvalidReceiver)?;
 
         if fi == ti {
             Err(DriverError::SelfConnection)?
@@ -141,12 +136,8 @@ impl<T: TransportItemRequirements> Driver<T> {
     }
 
     pub fn disconnect(&mut self, from: TransportID, to: TransportID) -> Result<(), DriverError> {
-        let fi = self
-            .resolve(from)
-            .map_err(DriverError::InvalidSender)?;
-        let ti = self
-            .resolve(to)
-            .map_err(DriverError::InvalidReceiver)?;
+        let fi = self.resolve(from).map_err(DriverError::InvalidSender)?;
+        let ti = self.resolve(to).map_err(DriverError::InvalidReceiver)?;
 
         if fi != ti {
             match self.edges[fi] {
@@ -223,7 +214,10 @@ mod tests {
         let mut driver = Driver::new();
         let id = driver.add_transport(CountingProducer::new());
 
-        assert!(matches!(driver.connect(id, id), Err(DriverError::SelfConnection)));
+        assert!(matches!(
+            driver.connect(id, id),
+            Err(DriverError::SelfConnection)
+        ));
     }
 
     #[test]
@@ -264,7 +258,10 @@ mod tests {
             generation: 0,
         };
 
-        assert!(matches!(driver.deliver_to(invalid_id, 10), Err(TransportIDError::InvalidIndex)));
+        assert!(matches!(
+            driver.deliver_to(invalid_id, 10),
+            Err(TransportIDError::InvalidIndex)
+        ));
     }
 
     #[test]
@@ -333,6 +330,9 @@ mod tests {
         let mut cx = std::task::Context::from_waker(waker);
         driver.poll(&mut cx);
 
-        assert_eq!(&format!("{:?}", driver), "Next Value: 1\nItems received: 1\nItems received: 1")
+        assert_eq!(
+            &format!("{:?}", driver),
+            "Next Value: 1\nItems received: 1\nItems received: 1"
+        )
     }
 }

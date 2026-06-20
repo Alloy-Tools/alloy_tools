@@ -1,144 +1,67 @@
 use crate::{transports::BoundaryQueue, TransportItemRequirements};
-use std::{
-    future::Future,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
-    },
-    task::{Poll, Waker},
+use al_structures::{
+    cancellation::{CancellationFuture, CancellationToken},
+    enums::{ControlFlow, Which},
+    Race,
 };
+use std::{future::Future, sync::Arc};
 
-pub enum ControlFlow {
-    Continue,
-    Break,
-}
-
-enum Which<A, B> {
-    A(A),
-    B(B),
-}
-
-/// Races two boxed futures. Resolves with the winner's output.
-struct Race<'a, A, B> {
-    a: Option<std::pin::Pin<Box<dyn Future<Output = A> + Send + 'a>>>,
-    b: Option<std::pin::Pin<Box<dyn Future<Output = B> + Send + 'a>>>,
-}
-
-impl<'a, A, B> Future for Race<'a, A, B> {
-    type Output = Which<A, B>;
-
-    fn poll(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        let this = self.get_mut();
-
-        // poll  a
-        if let Some(fut) = &mut this.a {
-            if let Poll::Ready(val) = fut.as_mut().poll(cx) {
-                return Poll::Ready(Which::A(val));
-            }
-        }
-
-        // poll b
-        if let Some(fut) = &mut this.b {
-            if let Poll::Ready(val) = fut.as_mut().poll(cx) {
-                return Poll::Ready(Which::B(val));
-            }
-        }
-
-        Poll::Pending
-    }
-}
-
+/// Any error's will cause the splice to panic, displaying the error
 pub fn panic_on_error(error: &dyn std::error::Error) -> ControlFlow {
     panic!("splice error: {}", error);
 }
 
+/// Any error's will be logged but ignored by the splice
 pub fn log_on_error(error: &dyn std::error::Error) -> ControlFlow {
     eprintln!("splice error, stopping: {}", error);
     ControlFlow::Break
 }
 
-/// Creates a handle that can be used to stop a splice operation.
+/// A handle that can be used to stop a splice operation.
 /// Call `stop()` to signal the splice to exit its loop.
+/// Await `stopped()` to pause until `stop()` is called.
 #[derive(Clone)]
 pub struct SpliceHandle {
-    should_stop: Arc<AtomicBool>,
-    waker: Arc<Mutex<Option<Waker>>>,
+    token: CancellationToken,
+}
+
+impl Default for SpliceHandle {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SpliceHandle {
+    pub fn new() -> Self {
+        Self {
+            token: CancellationToken::new(),
+        }
+    }
+
     /// Signal the associated splice to stop running
     pub fn stop(&self) {
-        self.should_stop.store(true, Ordering::SeqCst);
-        if let Ok(mut guard) = self.waker.lock() {
-            if let Some(w) = guard.take() {
-                w.wake();
-            }
-        }
+        self.token.cancel();
     }
 
     /// Check if a stop signal has been sent
     pub fn is_stopped(&self) -> bool {
-        self.should_stop.load(Ordering::SeqCst)
+        self.token.is_cancelled()
     }
 
-    pub fn stopped(&self) -> impl Future<Output = ()> + '_ {
-        StopFuture { handle: self }
-    }
-
-    fn new() -> Self {
-        Self {
-            should_stop: Arc::new(AtomicBool::new(false)),
-            waker: Arc::new(Mutex::new(None)),
-        }
-    }
-}
-
-struct StopFuture<'a> {
-    handle: &'a SpliceHandle,
-}
-
-impl Future for StopFuture<'_> {
-    type Output = ();
-
-    fn poll(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        if self.handle.should_stop.load(Ordering::SeqCst) {
-            std::task::Poll::Ready(())
-        } else {
-            // Register waker and recheck to avoid any missed wakes.
-            if let Ok(mut guard) = self.handle.waker.lock() {
-                if self.handle.should_stop.load(Ordering::SeqCst) {
-                    std::task::Poll::Ready(())
-                } else {
-                    *guard = Some(cx.waker().clone());
-                    std::task::Poll::Pending
-                }
-            } else {
-                std::task::Poll::Ready(())
-            }
-        }
+    /// Await until the splice is canceled
+    pub fn stopped(&self) -> CancellationFuture {
+        self.token.cancelled()
     }
 }
 
 /// Connects a source boundary queue to a destination boundary queue, transforming items asynchronously.
-/// Runs until the returned handle's `stop()` method is called or the queues are poisoned.
+/// Runs until the returned handle's `stop()` method is called or the `on_error` causes a break.
 ///
-/// Requires tokio runtime to be running.
 ///
-/// # Panics
-///
-/// Panics if either the source recv or destination send fails due to a poisoned mutex.
-/// This indicates a thread panicked while holding the mutex and the queue is in an unusable state.
-///
-/// # Example
+/// # Example TODO ----------------
 ///
 /// ```ignore
-/// let handle = splice_async(source, dest, |x| x * 2).await;
+/// let handle = splice_async(source, dest, |x| x * 2, tokio::spawn, panic_on_error);
 /// // ... later ...
 /// handle.stop();
 /// ```
@@ -159,28 +82,12 @@ pub async fn splice_async<
     let handle_clone = handle.clone();
 
     spawner(Box::pin(async move {
-        /*while !handle_clone.is_stopped() {
-            match source.recv().await {
-                Ok(item) => {
-                    if let Err(e) = dest.send(transform(item)) {
-                        if matches!(on_error(&e), ControlFlow::Break) {
-                            break;
-                        }
-                    }
-                }
-                Err(e) => {
-                    if matches!(on_error(&e), ControlFlow::Break) {
-                        break;
-                    }
-                }
-            }
-        }*/
         loop {
             // Race stop signal vs next item
-            let race = Race {
-                a: Some(Box::pin(handle_clone.stopped())),
-                b: Some(Box::pin(source.recv())),
-            };
+            let race = Race::new(
+                Box::pin(handle_clone.stopped()),
+                Box::pin(source.recv()),
+            );
 
             match race.await {
                 // stop signal recived
@@ -208,20 +115,15 @@ pub async fn splice_async<
 }
 
 /// Connects a source boundary queue to a destination boundary queue, transforming items in a blocking loop.
-/// Meant to be spawned on its own thread. Runs until the returned handle's `stop()` method is called
-/// or the queues are poisoned.
+/// Runs until the returned handle's `stop()` method is called or the `on_error` causes a break.
+/// Meant to be spawned on its own thread.
 ///
-/// # Panics
-///
-/// Panics if either the source recv_blocking or destination send fails due to a poisoned mutex.
-///
-/// # Example
+/// # Example TODO ------------------------
 ///
 /// ```ignore
-/// let handle = splice_blocking(source, dest, |x| x * 2);
-/// std::thread::spawn(move || {
-///     handle.stop(); // Called from another thread
-/// });
+/// let handle = splice_blocking(source, dest, |x| x * 2, std::thread::spawn, panic_on_error);
+///  // ... later ...
+/// handle.stop();
 /// ```
 pub fn splice_blocking<
     T: TransportItemRequirements,
@@ -241,7 +143,7 @@ pub fn splice_blocking<
 
     spawner(Box::new(move || {
         loop {
-            match source.recv_cancellable(&handle_clone.should_stop) {
+            match source.recv_cancellable(&handle_clone.token) {
                 Ok(Some(item)) => {
                     if let Err(e) = dest.send(transform(item)) {
                         if matches!(on_error(&e), ControlFlow::Break) {
@@ -261,4 +163,60 @@ pub fn splice_blocking<
     }));
 
     handle
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn splice_async_stop_stops_loop() {
+        let source = BoundaryQueue::new();
+        let dest = BoundaryQueue::new();
+
+        let handle = splice_async(
+            source.clone(),
+            dest.clone(),
+            |x| x,
+            |f| {
+                tokio::spawn(f);
+            },
+            panic_on_error,
+        )
+        .await;
+
+        assert!(!handle.is_stopped());
+        handle.stop();
+        std::thread::sleep(Duration::from_millis(20));
+
+        source.send(123).unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+
+        assert_eq!(dest.try_recv().unwrap(), None);
+    }
+
+    #[test]
+    fn splice_blocking_stop_stops_loop() {
+        let source = BoundaryQueue::new();
+        let dest = BoundaryQueue::new();
+
+        let handle = splice_blocking(
+            source.clone(),
+            dest.clone(),
+            |x| x,
+            |f| {
+                std::thread::spawn(f);
+            },
+            panic_on_error,
+        );
+
+        handle.stop();
+        std::thread::sleep(Duration::from_millis(20));
+
+        source.send(42).unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+
+        assert_eq!(dest.try_recv().unwrap(), None);
+    }
 }

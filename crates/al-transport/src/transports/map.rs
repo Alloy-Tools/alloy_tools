@@ -104,6 +104,7 @@ impl<T: TransportItemRequirements, F: Fn(T) -> T + Send + 'static> Transport<T> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use al_structures::noop_waker::noop_waker;
 
     #[test]
     fn map_transforms_data() {
@@ -113,7 +114,7 @@ mod tests {
         map.handle_incoming(10);
         map.handle_incoming(15);
 
-        let waker = crate::noop_waker().clone();
+        let waker = noop_waker().clone();
         let mut cx = std::task::Context::from_waker(&waker);
 
         if let std::task::Poll::Ready(crate::Action::Data(data)) = map.poll_action(&mut cx) {
@@ -142,7 +143,7 @@ mod tests {
         map.handle_incoming("hello".to_string());
         map.handle_incoming("world".to_string());
 
-        let waker = crate::noop_waker().clone();
+        let waker = noop_waker().clone();
         let mut cx = std::task::Context::from_waker(&waker);
 
         if let std::task::Poll::Ready(crate::Action::Data(data)) = map.poll_action(&mut cx) {
@@ -166,7 +167,7 @@ mod tests {
             map.handle_incoming(i);
         }
 
-        let waker = crate::noop_waker().clone();
+        let waker = noop_waker().clone();
         let mut cx = std::task::Context::from_waker(&waker);
 
         for i in 1..=5 {
@@ -182,7 +183,7 @@ mod tests {
     fn map_empty_returns_pending() {
         let mut map = Map::new(|x: i32| x * 2);
 
-        let waker = crate::noop_waker().clone();
+        let waker = noop_waker().clone();
         let mut cx = std::task::Context::from_waker(&waker);
 
         let result = map.poll_action(&mut cx);
@@ -205,7 +206,7 @@ mod tests {
 
         assert_eq!(map.status(), "Map Buffer Length: 3");
 
-        let waker = crate::noop_waker().clone();
+        let waker = noop_waker().clone();
         let mut cx = std::task::Context::from_waker(&waker);
         let _ = map.poll_action(&mut cx);
 
@@ -222,7 +223,7 @@ mod tests {
         map.handle_incoming(Point(1, 2));
         map.handle_incoming(Point(3, 4));
 
-        let waker = crate::noop_waker().clone();
+        let waker = noop_waker().clone();
         let mut cx = std::task::Context::from_waker(&waker);
 
         if let std::task::Poll::Ready(crate::Action::Data(data)) = map.poll_action(&mut cx) {
@@ -238,4 +239,3 @@ mod tests {
         }
     }
 }
-

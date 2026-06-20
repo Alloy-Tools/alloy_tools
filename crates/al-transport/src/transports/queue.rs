@@ -1,3 +1,33 @@
+//! # Queue Transport
+//!
+//! A simple in-memory FIFO queue transport for `Transport<T>` state machines.
+//!
+//! `Queue<T>` stores incoming items in a `VecDeque` and wakes a pending task when
+//! new data arrives.
+//!
+//! ## Features
+//!
+//! - FIFO ordering
+//! - Async wakeup support for pending polls
+//! - Status reporting via `status()`
+//!
+//! ## Example
+//!
+//! ```ignore
+//! use al_transport::Queue;
+//!
+//! let mut queue = Queue::<i32>::new();
+//! queue.handle_incoming(42);
+//!
+//! let waker = crate::noop_waker().clone();
+//! let mut cx = std::task::Context::from_waker(&waker);
+//!
+//! match queue.poll_action(&mut cx) {
+//!     std::task::Poll::Ready(crate::Action::Data(value)) => println!("Got {}", value),
+//!     _ => println!("Queue empty"),
+//! }
+//! ```
+
 use crate::{Transport, TransportItemRequirements};
 use std::{collections::VecDeque, task::Waker};
 
@@ -55,11 +85,12 @@ impl<T: TransportItemRequirements> Transport<T> for Queue<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use al_structures::noop_waker::noop_waker;
 
     #[test]
     fn new_queue_is_empty() {
         let mut queue = Queue::<i32>::new();
-        let waker = crate::noop_waker().clone();
+        let waker = noop_waker().clone();
         let mut cx = std::task::Context::from_waker(&waker);
 
         let result = queue.poll_action(&mut cx);
@@ -75,7 +106,7 @@ mod tests {
         let mut queue = Queue::new();
         queue.handle_incoming(42);
 
-        let waker = crate::noop_waker().clone();
+        let waker = noop_waker().clone();
         let mut cx = std::task::Context::from_waker(&waker);
 
         let result = queue.poll_action(&mut cx);
@@ -93,7 +124,7 @@ mod tests {
         queue.handle_incoming(2);
         queue.handle_incoming(3);
 
-        let waker = crate::noop_waker().clone();
+        let waker = noop_waker().clone();
         let mut cx = std::task::Context::from_waker(&waker);
 
         // Items should come out in FIFO order
@@ -114,7 +145,7 @@ mod tests {
         queue.handle_incoming(1);
         queue.handle_incoming(2);
 
-        let waker = crate::noop_waker().clone();
+        let waker = noop_waker().clone();
         let mut cx = std::task::Context::from_waker(&waker);
 
         // Drain all items
@@ -142,7 +173,7 @@ mod tests {
         queue.handle_incoming(3);
         assert_eq!(queue.status(), "Queue Length: 3");
 
-        let waker = crate::noop_waker().clone();
+        let waker = noop_waker().clone();
         let mut cx = std::task::Context::from_waker(&waker);
         let _ = queue.poll_action(&mut cx);
 
@@ -153,7 +184,7 @@ mod tests {
     fn waker_is_stored_when_empty() {
         let mut queue = Queue::<i32>::new();
 
-        let waker = crate::noop_waker().clone();
+        let waker = noop_waker().clone();
         let mut cx = std::task::Context::from_waker(&waker);
 
         // Poll on empty queue stores waker

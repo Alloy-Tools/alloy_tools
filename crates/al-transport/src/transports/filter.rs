@@ -96,6 +96,7 @@ impl<T: TransportItemRequirements, F: Fn(&T) -> bool + Send + 'static> Transport
 #[cfg(test)]
 mod tests {
     use super::*;
+    use al_structures::noop_waker::noop_waker;
 
     #[test]
     fn filter_passes_matching_items() {
@@ -106,7 +107,7 @@ mod tests {
         filter.handle_incoming(2); // Filtered out
         filter.handle_incoming(10); // Passes
 
-        let waker = crate::noop_waker().clone();
+        let waker = noop_waker().clone();
         let mut cx = std::task::Context::from_waker(&waker);
 
         if let std::task::Poll::Ready(crate::Action::Data(data)) = filter.poll_action(&mut cx) {
@@ -131,7 +132,7 @@ mod tests {
         filter.handle_incoming(3);
         filter.handle_incoming(4);
 
-        let waker = crate::noop_waker().clone();
+        let waker = noop_waker().clone();
         let mut cx = std::task::Context::from_waker(&waker);
 
         if let std::task::Poll::Ready(crate::Action::Data(data)) = filter.poll_action(&mut cx) {
@@ -155,7 +156,7 @@ mod tests {
         filter.handle_incoming(2);
         filter.handle_incoming(3);
 
-        let waker = crate::noop_waker().clone();
+        let waker = noop_waker().clone();
         let mut cx = std::task::Context::from_waker(&waker);
 
         let result = filter.poll_action(&mut cx);
@@ -183,7 +184,7 @@ mod tests {
 
         filter.handle_incoming(42);
 
-        let waker = crate::noop_waker().clone();
+        let waker = noop_waker().clone();
         let mut cx = std::task::Context::from_waker(&waker);
 
         // Poll and consume the item
@@ -207,7 +208,7 @@ mod tests {
         filter.handle_incoming("ok".to_string()); // Filtered out
         filter.handle_incoming("rust".to_string()); // Passes
 
-        let waker = crate::noop_waker().clone();
+        let waker = noop_waker().clone();
         let mut cx = std::task::Context::from_waker(&waker);
 
         if let std::task::Poll::Ready(crate::Action::Data(data)) = filter.poll_action(&mut cx) {
