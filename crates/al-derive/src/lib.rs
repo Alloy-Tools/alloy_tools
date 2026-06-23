@@ -212,3 +212,32 @@ fn add_c_bound(where_clause: &mut syn::WhereClause) {
         FutC: Future<Output = bool> + Send + Sync + 'static
     });
 }
+
+/// Derive the required elements for a `Message`
+/// Adds MessageRequirements bound to all generic parameters
+#[proc_macro_derive(MessageMarker)]
+pub fn message_marker_derive(input: TokenStream) -> TokenStream {
+    let mut input = parse_macro_input!(input as DeriveInput);
+
+    for param in &mut input.generics.params {
+        if let GenericParam::Type(type_param) = param {
+            type_param
+                .bounds
+                .push(parse_quote!(al_events::MessageRequirements));
+        }
+    }
+    derive_message_marker(input)
+}
+
+/// Generate the implementation of MessageMarker
+/// type name concats module path with the name for 'path::to::module::TypeName'
+fn derive_message_marker(input: DeriveInput) -> TokenStream {
+    let name = &input.ident;
+    let (impl_generics, type_generics, where_clause) = &input.generics.split_for_impl();
+    quote! {impl #impl_generics al_events::MessageMarker for #name #type_generics #where_clause {
+        fn module_path() -> &'static str {
+            module_path!()
+        }
+    }}
+    .into()
+}

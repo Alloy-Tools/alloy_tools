@@ -6,3 +6,16 @@ repository.workspace = true
 edition.workspace = true
 
 [dependencies]
+al-derive = { path = "../al-derive" }
+al-structures = { path = "../al-structures", features = ["collections"] }
+serde = { version = "1.0.219", features = ["derive"], optional = true }
+erased-serde = { version = "0.4.6", optional = true }
+tynm = "0.2.0"
+paste = "1.0.15"
+
+[features]
+default = ["serde"]
+serde = ["dep:serde", "dep:erased-serde"]
+
+[dev-dependencies]
+serde_json = "1.0.15"
