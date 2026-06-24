@@ -50,7 +50,6 @@ dependencies = [
 name = "al-derive"
 version = "0.1.0"
 dependencies = [
- "proc-macro2",
  "quote",
  "syn",
 ]
@@ -105,9 +104,14 @@ dependencies = [
 name = "al-structures"
 version = "0.1.0"
 dependencies = [
+ "al-derive",
  "arc-swap",
+ "bitcode",
+ "erased-serde",
+ "paste",
  "serde",
  "serde_json",
+ "tynm",
 ]
 
 [[package]]

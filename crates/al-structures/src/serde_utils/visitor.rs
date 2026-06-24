@@ -1,16 +1,17 @@
-use crate::DeserializerFn;
-use al_structures::collections::registries::RegistryRead;
-use serde::de::{DeserializeSeed, Visitor};
+use crate::{collections::storage::utils::keyed::KeyedHandleRead, DeserializeFromDeFn};
 use std::marker::PhantomData;
 
-/// A generic serde visitor that works with any registry implementing `RegistryRead`.
-/// `T` is the trait object produced (e.g., `dyn Command`).
-pub struct GenericMessageVisitor<'a, R, T: ?Sized> {
+//QUESTION: Move this to the crate that ends up using it? OR do the registries bypass it?
+
+/// A serde visitor for any registry implementing `RegistryRead<String, DeserializerFn<T>>`.
+/// - `R` is the `RegistryRead`.
+/// - `T` is the type produced.
+pub struct GenericRegistryVisitor<'a, R, T> {
     pub registry: &'a R,
     _marker: PhantomData<T>,
 }
 
-impl<'a, R, T: ?Sized> GenericMessageVisitor<'a, R, T> {
+impl<'a, R, T> GenericRegistryVisitor<'a, R, T> {
     pub fn new(registry: &'a R) -> Self {
         Self {
             registry,
@@ -19,15 +20,14 @@ impl<'a, R, T: ?Sized> GenericMessageVisitor<'a, R, T> {
     }
 }
 
-impl<'de, R, T> Visitor<'de> for GenericMessageVisitor<'_, R, T>
+impl<'de, R, T> serde::de::Visitor<'de> for GenericRegistryVisitor<'_, R, T>
 where
-    T: ?Sized + 'static,
-    R: RegistryRead<String, DeserializerFn<Box<T>>> + 'static,
+    R: KeyedHandleRead<String, DeserializeFromDeFn<T>> + 'static,
 {
-    type Value = Box<T>;
+    type Value = T;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-        formatter.write_str("a tuple (type name, data)")
+        formatter.write_str("a tuple (type_name: String, data: T)")
     }
 
     fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
@@ -36,28 +36,33 @@ where
             .ok_or_else(|| serde::de::Error::custom("expected type name"))?;
 
         Ok(seq
-            .next_element_seed(GenericMessageSeed {
-                type_name: &type_name,
-                registry: self.registry,
-                _marker: PhantomData,
-            })?
+            .next_element_seed(GenericRegistrySeed::new(&type_name, self.registry))?
             .ok_or_else(|| serde::de::Error::custom("expected message data"))?)
     }
 }
 
-/// Seed for deserializing a specific message type using its type name and the registry
-struct GenericMessageSeed<'a, R, T: ?Sized> {
+/// Seed for deserializing a type using its type name and passed registry
+struct GenericRegistrySeed<'a, R, T> {
     type_name: &'a str,
     registry: &'a R,
     _marker: PhantomData<T>,
 }
 
-impl<'de, R, T> DeserializeSeed<'de> for GenericMessageSeed<'_, R, T>
+impl<'a, R, T> GenericRegistrySeed<'a, R, T> {
+    pub fn new(type_name: &'a str, registry: &'a R) -> Self {
+        Self {
+            type_name,
+            registry,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<'de, R, T> serde::de::DeserializeSeed<'de> for GenericRegistrySeed<'_, R, T>
 where
-    T: ?Sized + 'static,
-    R: RegistryRead<String, DeserializerFn<Box<T>>>,
+    R: KeyedHandleRead<String, DeserializeFromDeFn<T>>,
 {
-    type Value = Box<T>;
+    type Value = T;
 
     fn deserialize<D: serde::Deserializer<'de>>(
         self,

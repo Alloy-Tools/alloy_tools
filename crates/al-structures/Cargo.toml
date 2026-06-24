@@ -14,24 +14,35 @@ doctest = false
 [dependencies]
 arc-swap = { version = "1.9.1", optional = true }
 serde = { version = "1.0.228", features = ["derive"], optional = true }
+erased-serde = { version = "0.4.10", optional = true }
+serde_json = { version = "1.0.15", optional = true }
+al-derive = { path = "../al-derive", optional = true }
+tynm = { version = "0.2.0", optional = true }
+bitcode = { version = "0.6.9", features = ["serde"], optional = true }
+paste = { version = "1.0.15", optional = true }
 
 [features]
-default = [
+default = ["test"]
+test = [
     "noop_waker",
     "enums",
     "traits",
     "race",
     "cancellation",
     "collections",
-    "serde"
+    "serde_format",
+    "json",
+    "binary",
 ]
+paste = ["dep:paste"]
 noop_waker = []
 enums = []
-traits = []
+traits = ["dep:al-derive", "dep:tynm"]
 race = []
 cancellation = []
-collections = ["dep:arc-swap"]
+collections = ["dep:arc-swap", "paste"]
 serde = ["dep:serde"]
-
-[dev-dependencies]
-serde_json = "1.0"
+serde_utils = ["serde"]
+serde_format = ["dep:erased-serde", "serde_utils"]
+json = ["serde_format", "dep:serde_json"]
+binary = ["serde_format", "dep:bitcode"]

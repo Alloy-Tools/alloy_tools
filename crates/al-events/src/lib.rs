@@ -6,8 +6,8 @@ mod event;
 mod markers;
 mod message;
 mod query;
-#[cfg(feature = "serde")]
-mod visitor;
+//#[cfg(feature = "serde")]
+//mod visitor;
 
 #[cfg(feature = "serde")]
 pub use command::{
@@ -22,17 +22,17 @@ pub use event::{
 pub use event::{Event, EventHelpers, EventMarker};
 pub use markers::{MessageMarker, MessageRequirements, ObjectTraits};
 use message::define_message_kind;
-#[cfg(feature = "serde")]
-pub use message::message_serde::{DeserializerFn, MessageDeserializer, MessageRegistry};
+#[cfg(feature = "borrow")]
+pub use message::BorrowedMessage;
 pub use message::{DynMessage, Message};
+#[cfg(feature = "serde")]
+pub use message::{MessageDeserializer, MessageRegistry};
 #[cfg(feature = "serde")]
 pub use query::{
     try_register_query, try_register_query_with, QueryDeserializer, QueryRegistry, QUERY_REGISTRY,
 };
 pub use query::{Query, QueryHelpers, QueryMarker};
-
-#[cfg(feature = "serde")]
-pub use visitor::GenericMessageVisitor;
+pub use al_structures::traits::AsAny;
 
 #[cfg(test)]
 mod tests {

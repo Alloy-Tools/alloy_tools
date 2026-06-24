@@ -1,9 +1,11 @@
-use proc_macro::TokenStream;
+use proc_macro::{Span, TokenStream};
 use quote::quote;
 use syn::{
     parse_macro_input, parse_quote, punctuated::Punctuated, token::Comma, DeriveInput,
-    GenericParam, Ident, ItemFn, Meta, Path,
+    GenericParam, Ident, ItemFn, Meta, Path, TypeParam,
 };
+
+// ----- Helpers -----
 
 /// Debugging attribute macro to print the input tokens
 #[proc_macro_attribute]
@@ -19,6 +21,8 @@ pub fn show_item(_: TokenStream, item: TokenStream) -> TokenStream {
     println!("item: \"{item}\"");
     item
 }
+
+// ----- al-core Event -----
 
 /// Derive the required elements for an `Event`
 /// Adds EventRequirements bound to all generic parameters
@@ -185,9 +189,9 @@ pub fn with_bounds(attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 fn add_generic(generics: &mut syn::Generics, ident: &str) {
-    generics.params.push(GenericParam::Type(syn::TypeParam {
+    generics.params.push(GenericParam::Type(TypeParam {
         attrs: Vec::new(),
-        ident: Ident::new(ident, proc_macro2::Span::call_site()),
+        ident: Ident::new(ident, Span::call_site().into()),
         colon_token: None,
         bounds: Punctuated::new(),
         eq_token: None,
@@ -239,5 +243,48 @@ fn derive_message_marker(input: DeriveInput) -> TokenStream {
             module_path!()
         }
     }}
+    .into()
+}
+
+// ----- al-structures -----
+
+/// Derive the module path required for `TypeName`
+#[proc_macro_derive(TypeName)]
+pub fn type_name_derive(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+
+    let name = &input.ident;
+    let (impl_generics, type_generics, where_clause) = &input.generics.split_for_impl();
+    quote! {impl #impl_generics al_structures::traits::TypeName for #name #type_generics #where_clause {
+        fn module_path() -> &'static str {
+            module_path!()
+        }
+    }}
+    .into()
+}
+
+#[proc_macro_attribute]
+pub fn type_name(_: TokenStream, item: TokenStream) -> TokenStream {
+    let mut item = parse_macro_input!(item as DeriveInput);
+
+    // Add `TypeName` derive if not already present
+    if !item.attrs.iter().any(|attr| {
+        if attr.path().is_ident("derive") {
+            if let Ok(meta) = attr.parse_args_with(Punctuated::<Meta, Comma>::parse_terminated) {
+                return meta.iter().any(|m| match m {
+                    Meta::Path(path) => path.is_ident("TypeName"),
+                    _ => false,
+                });
+            }
+        }
+        false
+    }) {
+        item.attrs
+            .push(parse_quote!(#[derive(al_structures::TypeName)]));
+    }
+
+    quote! {
+        #item
+    }
     .into()
 }

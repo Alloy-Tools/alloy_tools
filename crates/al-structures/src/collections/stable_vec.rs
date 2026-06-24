@@ -32,6 +32,7 @@ impl GenerationKey {
     }
 }
 
+//QUESTION: Maybe make a StableSlice for stack allocated slice. Then add as an `IndexedStorage`.
 /// A stable, generational vector with O(1) insertion, deletion, and access.
 /// Inspired by the video [Magic container by Pezzza's Work](https://www.youtube.com/watch?v=L4xOCvELWlU)
 ///

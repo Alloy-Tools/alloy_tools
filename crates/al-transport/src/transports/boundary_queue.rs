@@ -353,7 +353,7 @@ mod tests {
         assert_eq!(items, vec![1, 2, 3]);
 
         let items = queue.recv_available().unwrap();
-        assert_eq!(items, vec![]);
+        assert_eq!(items, Vec::<u8>::new());
     }
 
     #[tokio::test]

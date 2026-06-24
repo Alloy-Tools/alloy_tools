@@ -14,6 +14,7 @@
 ///     ControlFlow::Break => println!("Done"),
 /// }
 /// ```
+//TODO: Remove in favor of std::ops::ControlFlow<B, C>
 #[derive(Debug)]
 pub enum ControlFlow {
     /// Continue normal execution.
@@ -22,7 +23,7 @@ pub enum ControlFlow {
     Break,
 }
 
-/// A either/or enum used to indicate one of two values.
+/// An enum used to indicate one of two values.
 ///
 /// # Examples
 ///
@@ -36,6 +37,7 @@ pub enum ControlFlow {
 ///     Which::B(text) => println!("Got text: {}", text),
 /// }
 /// ```
+//TODO: rename either
 #[derive(Debug)]
 pub enum Which<A, B> {
     /// The first variant.

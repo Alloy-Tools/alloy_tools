@@ -83,6 +83,18 @@
 
 //#![deny(missing_docs)]
 
+//REVIEW: Instead of requiring clone and cloning/moving data around, the dependencey inversion already
+//      made everything sync and get owned by the driver, so look into using Rc (the thread local version of Arc)
+//      (or even just passing a ref `&_` with owned data? as the code is sync so a `&_` could be passed when ran?)
+//      to have some sort of reuseable buffer of the T data type. Then on recv from a `BoundaryQueue`
+//      the data would get inserted into the data buffer and its buffer id/reference would be passed instead?
+//      That would make the "actual" data movement easier as it wouldn't move but just be referenced?
+//      But then what if the stage needs to modify it? Since its sync it should be safe to get mut.
+//      Then on send to a `BoundaryQueue` it could send it if Rc < 2 or clone and drop ref?
+//      So I would still need clone but it would just make the system do less work?
+//      I need to estimate the benefit of not actually moving/cloning the data vs the cost of Rc and getting mut.
+//      Copies might be treated differently so I might need a CoW instead of Rc.
+
 mod driver;
 mod marker;
 pub mod splice;
@@ -154,9 +166,9 @@ mod test_counting {
 
 #[cfg(test)]
 mod tests {
-    use al_structures::noop_waker::noop_waker;
     use super::*;
     use crate::transports::*;
+    use al_structures::noop_waker::noop_waker;
 
     fn setup_driver() -> (Driver<u64>, std::sync::Arc<BoundaryQueue<u64>>) {
         let mut driver = Driver::new();
