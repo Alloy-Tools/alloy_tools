@@ -1,21 +1,23 @@
-use std::{
-    marker::PhantomData,
-    sync::atomic::{AtomicU64, Ordering},
-};
-
 use crate::{
     container::secure_container::SecureAccess, AsSecurityLevel, Ephemeral, SecureContainer,
     SecureRef,
 };
 use al_crypto::fill_random;
 use secrets::{Secret, SecretBox};
+use std::{
+    marker::PhantomData,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex,
+    },
+};
 
 /// For raw, fixed-size byte arrays.
 /// This is the most efficient and secure for keys, tokens, etc. when the size is known at compile time.
 /// It uses `secrets::SecretBox<T>` directly.
 #[derive(Debug)]
 pub struct FixedSecret<const N: usize, L: AsSecurityLevel = Ephemeral> {
-    inner: SecretBox<[u8; N]>,
+    inner: Mutex<SecretBox<[u8; N]>>,
     tag: String,
     access_count: AtomicU64,
     _phantom: PhantomData<L>,
@@ -24,7 +26,7 @@ pub struct FixedSecret<const N: usize, L: AsSecurityLevel = Ephemeral> {
 impl<const N: usize, L: AsSecurityLevel> Clone for FixedSecret<N, L> {
     fn clone(&self) -> Self {
         Self {
-            inner: self.inner.clone(),
+            inner: Mutex::new((*self.inner.lock().expect("Secret mutex poisoned")).clone()),
             tag: self.tag.clone(),
             access_count: AtomicU64::new(self.access_count()),
             _phantom: self._phantom.clone(),
@@ -35,21 +37,36 @@ impl<const N: usize, L: AsSecurityLevel> Clone for FixedSecret<N, L> {
 impl<const N: usize, L: AsSecurityLevel> Eq for FixedSecret<N, L> {}
 impl<const N: usize, L: AsSecurityLevel> PartialEq for FixedSecret<N, L> {
     fn eq(&self, other: &Self) -> bool {
-        self.inner == other.inner
-            && self.tag == other.tag
-            && self.access_count() == other.access_count()
-            && self._phantom == other._phantom
+        if self.tag == other.tag && self.access_count() == other.access_count() {
+            // Lock both mutexes in a consistent order by memory address.
+            // This prevents deadlocks when two threads call eq on the same two objects in reverse order.
+            let (lower_guard, higher_guard) = if &self.inner as *const _ < &other.inner as *const _
+            {
+                (
+                    self.inner.lock().expect("Secret mutex poisoned"),
+                    other.inner.lock().expect("Secret mutex poisoned"),
+                )
+            } else {
+                (
+                    other.inner.lock().expect("Secret mutex poisoned"),
+                    self.inner.lock().expect("Secret mutex poisoned"),
+                )
+            };
+            *lower_guard == *higher_guard
+        } else {
+            false
+        }
     }
 }
 
 impl<const N: usize, L: AsSecurityLevel> FixedSecret<N, L> {
     pub fn random(tag: impl Into<String>) -> Self {
         Self {
-            inner: SecretBox::<[u8; N]>::new(|s| {
+            inner: Mutex::new(SecretBox::<[u8; N]>::new(|s| {
                 if let Err(_) = fill_random(s) {
                     Secret::<[u8; N]>::random(|bytes| s.copy_from_slice(&*bytes))
                 }
-            }),
+            })),
             tag: tag.into(),
             access_count: AtomicU64::new(0),
             _phantom: PhantomData,
@@ -65,7 +82,7 @@ impl<const N: usize, L: AsSecurityLevel> FixedSecret<N, L> {
     pub fn take(inner: &mut [u8; N], tag: impl Into<String>) -> Self {
         Self {
             // `SecretBox::from` will attempt to zero out the data in `inner` after taking it
-            inner: SecretBox::from(inner),
+            inner: Mutex::new(SecretBox::from(inner)),
             tag: tag.into(),
             access_count: AtomicU64::new(0),
             _phantom: PhantomData,
@@ -85,14 +102,14 @@ impl<const N: usize, L: AsSecurityLevel> SecureContainer for FixedSecret<N, L> {
         self.access_count.load(Ordering::SeqCst)
     }
 
-    fn len(&self) -> usize {
-        N
+    fn len(&self) -> Result<usize, crate::SecretError> {
+        Ok(N)
     }
 }
 
 impl<const N: usize, L: AsSecurityLevel> SecureAccess for FixedSecret<N, L> {
-    type ResultType<R> = R;
-    type CopyResultType = Self::InnerType;
+    type ResultType<R> = Result<R, crate::SecretError>;
+    type CopyResultType = Result<Self::InnerType, crate::SecretError>;
 
     fn copy(&self) -> Self::CopyResultType {
         //TODO: handle io error possibility?
@@ -102,7 +119,7 @@ impl<const N: usize, L: AsSecurityLevel> SecureAccess for FixedSecret<N, L> {
                 .saturating_add(1),
             "copy",
         );
-        *self.inner.borrow()
+        Ok(*self.inner.lock()?.borrow())
     }
 
     fn with<R>(&self, f: impl FnOnce(&Self::InnerType) -> R) -> Self::ResultType<R> {
@@ -113,7 +130,7 @@ impl<const N: usize, L: AsSecurityLevel> SecureAccess for FixedSecret<N, L> {
                 .saturating_add(1),
             "access",
         );
-        f(SecureRef::new(*self.inner.borrow()).get())
+        Ok(f(SecureRef::new(*self.inner.lock()?.borrow()).get()))
     }
 
     fn with_mut<R>(&mut self, f: impl FnOnce(&mut Self::InnerType) -> R) -> Self::ResultType<R> {
@@ -124,18 +141,10 @@ impl<const N: usize, L: AsSecurityLevel> SecureAccess for FixedSecret<N, L> {
                 .saturating_add(1),
             "mutable access",
         );
-        let mut secure_ref = SecureRef::new(*self.inner.borrow());
+        let mut guard = self.inner.lock()?;
+        let mut secure_ref = SecureRef::new(*guard.borrow());
         let result = f(secure_ref.get_mut());
-        self.inner.borrow_mut().copy_from_slice(secure_ref.get());
-        result
+        guard.borrow_mut().copy_from_slice(secure_ref.get());
+        Ok(result)
     }
 }
-
-/// SAFETY: FixedSecret is safe to share between threads because:
-/// 1. Interior mutability is mediated through SecureAccess trait methods
-///    that enforce Rust's borrow checker rules (exclusive access for mutations)
-/// 2. The underlying SecretBox protects memory with mlock/mprotect
-/// 3. Access counting uses atomic operations for thread safety
-/// 4. All public access is through safe borrowed references
-unsafe impl<const N: usize, L: AsSecurityLevel> Send for FixedSecret<N, L> {}
-unsafe impl<const N: usize, L: AsSecurityLevel> Sync for FixedSecret<N, L> {}

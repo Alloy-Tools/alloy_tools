@@ -1,6 +1,6 @@
-use std::sync::RwLock;
 use crate::{Ephemeral, FixedSecret, SecretError, SecureAccess};
 use al_crypto::{decrypt, encrypt, Nonce, NonceTrait, KEY_SIZE};
+use std::sync::RwLock;
 
 //TODO: Add rekey checks and alerts
 
@@ -76,7 +76,7 @@ impl<T: NonceTrait, const N: usize> Key<T, N> {
         drop(guard);
         Ok(self
             .0
-            .with(|k| encrypt(dest, plaintext, k, nonce, associated_data))?)
+            .with(|k| encrypt(dest, plaintext, k, nonce, associated_data))??)
     }
 
     /// Encrypts the `plaintext` into `dest` using `associated_data` and `nonce`
@@ -89,7 +89,7 @@ impl<T: NonceTrait, const N: usize> Key<T, N> {
     ) -> Result<(), SecretError> {
         Ok(self
             .0
-            .with(|k| encrypt(dest, plaintext, k, nonce, associated_data))?)
+            .with(|k| encrypt(dest, plaintext, k, nonce, associated_data))??)
     }
 
     /// Decrypts the `ciphertext` into `dest` using `associated_data` and `nonce`
@@ -102,6 +102,6 @@ impl<T: NonceTrait, const N: usize> Key<T, N> {
     ) -> Result<(), SecretError> {
         Ok(self
             .0
-            .with(|k| decrypt(dest, ciphertext, k, nonce, associated_data))?)
+            .with(|k| decrypt(dest, ciphertext, k, nonce, associated_data))??)
     }
 }

@@ -78,7 +78,7 @@ pub struct Data<S: CryptoState> {
 }
 
 impl<S: CryptoState> Data<S> {
-    pub fn len(&self) -> usize {
+    pub fn len(&self) -> Result<usize, SecretError> {
         self.inner.inner_len()
     }
 
@@ -93,7 +93,7 @@ impl<S: CryptoState + ProtectedState> Data<S> {
     }
 
     pub fn as_packet(&self) -> Result<Vec<u8>, SecretError> {
-        let len = self.len();
+        let len = self.len()?;
         let mut vec = vec![0; len + NONCE_SIZE];
         vec[len..].copy_from_slice(self.nonce());
         self.inner.with(|bytes| vec[..len].copy_from_slice(bytes))?;
@@ -132,7 +132,7 @@ impl Data<Plain> {
     pub fn encrypt<T: NonceTrait>(self, key: &Key<T>) -> Result<Data<Encrypted>, SecretError> {
         let mut nonce = [0u8; NONCE_SIZE];
         let mut dest = DynamicSecret::<Vec<u8>>::new(
-            vec![0; self.len() + TAG_SIZE],
+            vec![0; self.len()? + TAG_SIZE],
             Encrypted::to_string() + self.inner.tag().strip_prefix(&Plain::to_string()).unwrap(),
         )?;
 
@@ -153,7 +153,7 @@ impl Data<Plain> {
     ) -> Result<Data<Authenticated>, SecretError> {
         let mut nonce = [0u8; NONCE_SIZE];
         let mut dest = DynamicSecret::<Vec<u8>>::new(
-            vec![0; self.len() + TAG_SIZE],
+            vec![0; self.len()? + TAG_SIZE],
             Authenticated::to_string()
                 + self.inner.tag().strip_prefix(&Plain::to_string()).unwrap(),
         )?;
@@ -179,7 +179,7 @@ impl Data<Encrypted> {
 
     pub fn decrypt<T: NonceTrait>(self, key: &Key<T>) -> Result<Data<Plain>, SecretError> {
         let mut dest = DynamicSecret::<Vec<u8>>::new(
-            vec![0; self.len() - TAG_SIZE],
+            vec![0; self.len()? - TAG_SIZE],
             Plain::to_string()
                 + self
                     .inner
@@ -221,7 +221,7 @@ impl Data<Authenticated> {
         associated_data: &[u8],
     ) -> Result<Data<Plain>, SecretError> {
         let mut dest = DynamicSecret::<Vec<u8>>::new(
-            vec![0; self.len() - TAG_SIZE],
+            vec![0; self.len()? - TAG_SIZE],
             Plain::to_string()
                 + self
                     .inner

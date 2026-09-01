@@ -4,7 +4,7 @@ pub trait SecureContainer {
 
     fn tag(&self) -> &str;
     fn access_count(&self) -> u64;
-    fn len(&self) -> usize;
+    fn len(&self) -> Result<usize, crate::SecretError>;
 
     fn security_level(&self) -> crate::SecurityLevel {
         <Self::SecurityLevel as crate::AsSecurityLevel>::as_security_level()
