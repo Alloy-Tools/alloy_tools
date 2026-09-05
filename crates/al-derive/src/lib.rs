@@ -233,17 +233,11 @@ pub fn message_marker_derive(input: TokenStream) -> TokenStream {
     derive_message_marker(input)
 }
 
-/// Generate the implementation of MessageMarker
-/// type name concats module path with the name for 'path::to::module::TypeName'
 fn derive_message_marker(input: DeriveInput) -> TokenStream {
     let name = &input.ident;
     let (impl_generics, type_generics, where_clause) = &input.generics.split_for_impl();
-    quote! {impl #impl_generics al_events::MessageMarker for #name #type_generics #where_clause {
-        fn module_path() -> &'static str {
-            module_path!()
-        }
-    }}
-    .into()
+    quote! {impl #impl_generics al_events::MessageMarker for #name #type_generics #where_clause {}}
+        .into()
 }
 
 // ----- al-structures -----

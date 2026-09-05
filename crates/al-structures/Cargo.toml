@@ -30,7 +30,7 @@ test = [
     "race",
     "cancellation",
     "collections",
-    "serde_format",
+    "serde_utils",
     "json",
     "binary",
 ]
@@ -42,7 +42,6 @@ race = []
 cancellation = []
 collections = ["dep:arc-swap", "paste"]
 serde = ["dep:serde"]
-serde_utils = ["serde"]
-serde_format = ["dep:erased-serde", "serde_utils"]
-json = ["serde_format", "dep:serde_json"]
-binary = ["serde_format", "dep:bitcode"]
+serde_utils = ["serde", "dep:erased-serde"]
+json = ["serde_utils", "dep:serde_json"]
+binary = ["serde_utils", "dep:bitcode"]

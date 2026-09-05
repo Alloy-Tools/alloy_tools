@@ -1,3 +1,6 @@
+use crate::serde_utils::serde_format::{
+    DeserializeReaderFormat, DeserializeSliceFormat, Format, SerializeFormat,
+};
 use al_derive::TypeName;
 use std::error::Error;
 use std::io::Write;
@@ -15,13 +18,13 @@ crate::impl_erased_deserializer!(
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, TypeName)]
 pub struct JsonFormat;
 
-impl<T> From<JsonFormat> for crate::Format<T> {
+impl<T> From<JsonFormat> for Format<T> {
     fn from(value: JsonFormat) -> Self {
         Self::Serde(Box::new(value))
     }
 }
 
-impl crate::SerializeFormat for JsonFormat {
+impl SerializeFormat for JsonFormat {
     fn is_human_readable(&self) -> bool {
         true
     }
@@ -36,7 +39,7 @@ impl crate::SerializeFormat for JsonFormat {
     }
 }
 
-impl crate::DeserializeSliceFormat for JsonFormat {
+impl DeserializeSliceFormat for JsonFormat {
     fn deserialize_slice<'de>(
         &self,
         data: &'de [u8],
@@ -47,7 +50,7 @@ impl crate::DeserializeSliceFormat for JsonFormat {
     }
 }
 
-impl crate::DeserializeReaderFormat for JsonFormat {
+impl DeserializeReaderFormat for JsonFormat {
     fn deserialize_reader<'de>(
         &self,
         reader: &'de mut dyn std::io::Read,

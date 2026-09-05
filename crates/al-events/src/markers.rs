@@ -1,3 +1,4 @@
+use al_structures::traits::{DynTypeName, TypeName};
 use std::{any::Any, fmt::Debug, hash::Hash};
 
 /// Sealed marker traits ensure all required traits are impl'd while users can only impl their desired mark
@@ -22,13 +23,24 @@ mod sealed {
 }
 
 /// Shared traits required for Command, Event, and Query traits
-pub trait ObjectTraits: Send + Sync + Debug + Any + 'static {}
+pub trait ObjectTraits: Send + Sync + Debug + Any + DynTypeName + 'static {}
 
-impl<T: Send + Sync + Debug + Any + 'static> ObjectTraits for T {}
+impl<T: Send + Sync + Debug + Any + DynTypeName + 'static> ObjectTraits for T {}
 
-/// Required traits for an event type to be used in the event system
+//REVIEW: Do I really need Default and Hash? Transport only needs `Debug + Clone + Send`
+/// Required traits for a message type to be used in the message system
 pub trait MessageRequirements:
-    'static + Send + Sync + Clone + Default + PartialEq + Any + Debug + Hash + sealed::SerdeFeature
+    'static
+    + Send
+    + Sync
+    + Clone
+    + Default
+    + PartialEq
+    + Any
+    + Debug
+    + Hash
+    + sealed::SerdeFeature
+    + TypeName
 {
 }
 
@@ -42,20 +54,12 @@ impl<
             + Any
             + Debug
             + Hash
-            + sealed::SerdeFeature,
+            + sealed::SerdeFeature
+            + TypeName,
     > MessageRequirements for T
 {
 }
 
 /// `MessageMarker` trait acts as a marker for `Message` systems and should be derived for each message type.
-/// It requires an impl of `sealed::MessageMarker` to ensure all required traits are impl'd
-/// type_with_generics is derived from the module_path and type name, eg. `my_crate::MyMessage`.
-/// Generics are included in simple name form through the `tynm` crate. This is used for type registration and lookup.
-pub trait MessageMarker: sealed::MessageMarker {
-    fn module_path() -> &'static str;
-    /// Helper function to return the simple names of generic messages
-    fn type_with_generics() -> String {
-        format!("{}::{}", Self::module_path(), tynm::type_name::<Self>())
-    }
-}
+pub trait MessageMarker: sealed::MessageMarker {}
 impl<T: MessageMarker> sealed::MessageMarker for T {}

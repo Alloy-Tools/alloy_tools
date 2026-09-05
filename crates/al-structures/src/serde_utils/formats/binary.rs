@@ -3,8 +3,11 @@ use std::{ops::Deref, sync::Arc};
 use al_derive::TypeName;
 
 use crate::{
-    collections::storage::utils::keyed::KeyedHandle, DeserializeInto, DirectFactory,
-    ErasedDeserialize, TypeId,
+    collections::storage::utils::keyed::KeyedHandle,
+    serde_utils::{
+        serde_format::{DeserializeInto, ErasedDeserialize, Format, SerializeFormat},
+        serde_registries::{DirectFactory, TypeId, TypeIdRegistry},
+    },
 };
 
 //REVIEW: Also add a `bincode` format for performance testing
@@ -45,14 +48,14 @@ impl<T, D: KeyedHandle<TypeId, DirectFactory<T>> + Clone + Send + Sync> std::fmt
 }
 
 impl<T: 'static, D: KeyedHandle<TypeId, DirectFactory<T>> + Clone + Send + Sync + 'static>
-    From<BinaryFormat<T, D>> for crate::Format<T>
+    From<BinaryFormat<T, D>> for Format<T>
 {
     fn from(value: BinaryFormat<T, D>) -> Self {
         Self::Erased(Box::new(value))
     }
 }
 
-impl<T, D: KeyedHandle<TypeId, DirectFactory<T>> + Clone + Send + Sync> crate::SerializeFormat
+impl<T, D: KeyedHandle<TypeId, DirectFactory<T>> + Clone + Send + Sync> SerializeFormat
     for BinaryFormat<T, D>
 {
     fn is_human_readable(&self) -> bool {
@@ -97,15 +100,15 @@ impl<T: 'static, D: KeyedHandle<TypeId, DirectFactory<T>> + Clone + Send + Sync 
 
     fn register_named<
         U: for<'de> serde::Deserialize<'de>,
-        R: Deref<Target = crate::TypeIdRegistry<K, I>>,
-        K: KeyedHandle<Arc<str>, crate::TypeId>,
+        R: Deref<Target = TypeIdRegistry<K, I>>,
+        K: KeyedHandle<Arc<str>, TypeId>,
         I: crate::collections::storage::utils::indexed::IndexedHandle<Arc<str>>,
     >(
         &self,
         name: impl AsRef<str>,
         type_registry: R,
         into_target: impl Fn(U) -> T + Send + Sync + 'static,
-    ) -> Result<crate::TypeId, Box<dyn std::error::Error>>
+    ) -> Result<TypeId, Box<dyn std::error::Error>>
     where
         Self: Sized,
         I::Key: TryInto<TypeId> + TryFrom<TypeId> + Eq,
@@ -117,7 +120,7 @@ impl<T: 'static, D: KeyedHandle<TypeId, DirectFactory<T>> + Clone + Send + Sync 
 
     fn get_deserializer(
         &self,
-        type_id: crate::TypeId,
+        type_id: TypeId,
     ) -> Result<Option<DirectFactory<T>>, Box<dyn std::error::Error>> {
         Ok(self.deserializers.get(&type_id)?.clone())
     }

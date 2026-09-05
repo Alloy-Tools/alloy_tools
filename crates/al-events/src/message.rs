@@ -1,20 +1,46 @@
 use crate::{Command, Event, Query};
+#[cfg(feature = "serde")]
+use al_structures::{
+    collections::storage::CowStorage,
+    serde_utils::serde_registries::{FormatTypeRegistry, SerdeFactory, TypeId, TypeIdRegistry},
+};
+#[cfg(feature = "serde")]
+use std::{collections::HashMap, sync::Arc};
+
+#[cfg(feature = "serde")]
+type CowVec<V> = CowStorage<Vec<V>>;
+#[cfg(feature = "serde")]
+type CowHashMap<K, V> = CowStorage<HashMap<K, V>>;
+#[cfg(feature = "serde")]
+pub(crate) type MessageRegistryType<'a> = FormatTypeRegistry<
+    DynMessage,
+    &'a TypeIdRegistry<CowHashMap<Arc<str>, TypeId>, CowVec<Arc<str>>>,
+    CowHashMap<Arc<str>, TypeId>,
+    CowVec<Arc<str>>,
+    CowHashMap<TypeId, usize>,
+    CowVec<SerdeFactory<DynMessage>>,
+>;
+#[cfg(feature = "serde")]
+al_structures::init_registries!(MESSAGE: DynMessage, CowHashMap, CowVec, CowHashMap, CowVec);
+
+#[cfg(feature = "serde")]
+impl<Cmd: serde::Serialize, Evt: serde::Serialize, Qry: serde::Serialize> serde::Serialize
+    for Message<Cmd, Evt, Qry>
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Message::Command(m) => m.serialize(serializer),
+            Message::Event(m) => m.serialize(serializer),
+            Message::Query(m) => m.serialize(serializer),
+        }
+    }
+}
 
 pub type DynMessage = Message<Box<dyn Command>, Box<dyn Event>, Box<dyn Query>>;
 
-#[cfg(feature = "serde")]
-pub type MessageDeserializer<T> = al_structures::collections::storage::DeserializerFn<Box<T>>;
-
-#[cfg(feature = "serde")]
-pub type MessageRegistry<T> = al_structures::collections::storage::CowStorage<String, T>;
-
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(
-    feature = "serde",
-    serde(
-        bound = "Cmd: serde::Serialize + serde::de::DeserializeOwned, Evt: serde::Serialize + serde::de::DeserializeOwned, Qry: serde::Serialize + serde::de::DeserializeOwned"
-    )
-)]
 #[derive(Debug)]
 pub enum Message<Cmd, Evt, Qry> {
     Command(Cmd),
@@ -362,9 +388,9 @@ macro_rules! define_message_kind {
             pub trait [<$kind Marker>]: crate::MessageMarker {}
 
             #[doc = concat!("Object-safe helper methods for `dyn ", stringify!($kind), "`.")]
-            pub trait [<$kind Helpers>]: crate::ObjectTraits + crate::AsAny {
+            pub trait [<$kind Helpers>]: crate::ObjectTraits + al_structures::traits::AsAny {
                 #[cfg(feature = "serde")]
-                fn register(self) -> Result<Option<[<$kind Deserializer>]>, al_structures::collections::registries::RegistryError>
+                fn register(self) -> Result<al_structures::serde_utils::serde_registries::TypeId, al_structures::collections::storage::utils::HandleError>
                 where
                     Self: for<'de> serde::Deserialize<'de>;
 
@@ -372,7 +398,6 @@ macro_rules! define_message_kind {
                 where
                     Self: Sized;
 
-                fn type_with_generics(&self) -> String;
                 fn [<clone_ $kind:snake>](&self) -> Box<dyn $kind>;
                 fn [<partial_eq_ $kind:snake>](&self, other: &dyn $kind) -> bool;
                 fn [<hash_ $kind:snake>](&self, state: &mut dyn std::hash::Hasher);
@@ -381,22 +406,17 @@ macro_rules! define_message_kind {
             // ----- Blanket impl -----
             impl<T: [<$kind Marker>] + crate::ObjectTraits> [<$kind Helpers>] for T {
                 #[cfg(feature = "serde")]
-                fn register(self) -> Result<Option<[<$kind Deserializer>]>, al_structures::collections::registries::RegistryError>
+                fn register(self) -> Result<al_structures::serde_utils::serde_registries::TypeId, al_structures::collections::storage::utils::HandleError>
                 where
                     Self: for<'de> serde::Deserialize<'de>,
                 {
                     [<try_register_ $kind:snake>]::<T>()
                 }
-
                 fn to_msg(self) -> DynMessage
                 where
                     Self: Sized,
                 {
                     DynMessage::$kind(Box::new(self))
-                }
-
-                fn type_with_generics(&self) -> String {
-                    <T as crate::MessageMarker>::type_with_generics()
                 }
                 fn [<clone_ $kind:snake>](&self) -> Box<dyn $kind> {
                     Box::new(self.clone())
@@ -466,29 +486,18 @@ macro_rules! define_message_kind {
             #[cfg(feature = "serde")]
             pub(crate) mod [< $kind:snake _serde >] {
                 use super::*;
-                use al_structures::collections::registries::{Registry, RegistryWrite};
 
-                pub type [<$kind Deserializer>] = crate::MessageDeserializer<dyn $kind>;
-
-                pub type [<$kind Registry>] =
-                    crate::MessageRegistry<[<$kind Deserializer>]>;
-
-                pub static [<$kind:snake:upper _REGISTRY>]: std::sync::LazyLock<[<$kind Registry>]> =
-                    std::sync::LazyLock::new([<$kind Registry>]::new);
+                type [<$kind Registry>]<'a> = crate::message::MessageRegistryType<'a>;
 
                 pub fn [<try_register_ $kind:snake>]<K: $kind + [<$kind Marker>] + for<'de> serde::Deserialize<'de> + 'static>(
-                ) -> Result<Option<[<$kind Deserializer>]>, al_structures::collections::registries::RegistryError> {
-                    [<try_register_ $kind:snake _with>]::<K>(&[<$kind:snake:upper _REGISTRY>])
+                ) -> Result<al_structures::serde_utils::serde_registries::TypeId, al_structures::collections::storage::utils::HandleError> {
+                    [<try_register_ $kind:snake _with>]::<K>(crate::MESSAGE_TYPE_REGISTRY())
                 }
 
                 pub fn [<try_register_ $kind:snake _with>]<K: $kind + [<$kind Marker>] + for<'de> serde::Deserialize<'de> + 'static>(
                     registry: &[<$kind Registry>],
-                ) -> Result<Option<[<$kind Deserializer>]>, al_structures::collections::registries::RegistryError> {
-                    let deser: [<$kind Deserializer>] = al_structures::collections::registries::DeserializerFn::new(move |de| {
-                        let msg: K = ::erased_serde::deserialize(de)?;
-                        Ok(Box::new(msg) as Box<dyn $kind>)
-                    });
-                    registry.insert(<K as crate::MessageMarker>::type_with_generics(), deser)
+                ) -> Result<al_structures::serde_utils::serde_registries::TypeId, al_structures::collections::storage::utils::HandleError> {
+                    registry.register::<K>(<K as [<$kind Helpers>]>::to_msg)
                 }
 
                 ::paste::paste! {
@@ -527,26 +536,9 @@ macro_rules! define_message_kind {
                     where
                         S: serde::Serializer,
                     {
-                        ::erased_serde::serialize(
-                            &(
-                                self.type_with_generics(),
-                                self as &dyn ::erased_serde::Serialize,
-                            ),
+                        erased_serde::serialize(
+                            self as &dyn erased_serde::Serialize,
                             serializer,
-                        )
-                    }
-                }
-
-                impl<'de> serde::Deserialize<'de> for Box<dyn $kind> {
-                    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-                    where
-                        D: serde::Deserializer<'de>,
-                    {
-                        deserializer.deserialize_tuple(
-                            2,
-                            al_structures::GenericRegistryVisitor::<'_, [<$kind Registry>], Box<dyn $kind>>::new(
-                                &[<$kind:snake:upper _REGISTRY>],
-                            ),
                         )
                     }
                 }

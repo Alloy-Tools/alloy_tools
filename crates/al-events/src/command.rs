@@ -10,11 +10,17 @@ pub trait Command: CommandHelpers + erased_serde::Serialize {
 
 #[cfg(test)]
 mod tests {
+    use crate::{MESSAGE_FORMATS, MESSAGE_TYPE_REGISTRY};
+
     use super::*;
-    use al_derive::MessageMarker;
+    use al_derive::{MessageMarker, TypeName};
+    use al_structures::serde_utils::formats::JsonFormat;
     use serde::{Deserialize, Serialize};
 
-    #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize, MessageMarker)]
+    //TODO: add variant derives so `#[command]` will derive `CommandMarker` and `MessageMarker` like the old `#[event]`
+    #[derive(
+        Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize, TypeName, MessageMarker,
+    )]
     struct TestCommand {
         pub id: u32,
         pub name: String,
@@ -22,30 +28,43 @@ mod tests {
     impl CommandMarker for TestCommand {}
 
     #[test]
-    fn roundtrip() -> Result<(), Box<dyn std::error::Error>> {
-        // Register the type with the registry
-        try_register_command::<TestCommand>()?;
+    fn roundtrip() {
+        // Register the format
+        let f_id = MESSAGE_FORMATS().register(JsonFormat).unwrap();
+
+        // Register the type
+        let t_id = try_register_command::<TestCommand>().unwrap();
 
         // Create an instance and box it as a trait object
         let original = TestCommand {
             id: 42,
             name: "test".to_string(),
         };
-        let boxed: Box<dyn Command> = Box::new(original.clone());
+        let boxed = original.clone().to_msg();
 
         // Serialize to JSON
-        let json = serde_json::to_string(&boxed)?;
-        eprintln!("Serialized JSON: {}", json);
+        let mut json = Vec::new();
+        MESSAGE_FORMATS()
+            .serialize(f_id, t_id, &boxed, &mut json)
+            .unwrap();
+        println!(
+            "(format_id, type_id, Serialized JSON): ({}, {}, {})",
+            u8::from_be_bytes([json[0]]),
+            u32::from_be_bytes(json[1..5].try_into().unwrap()),
+            str::from_utf8(&json[5..]).unwrap()
+        );
 
-        // Deserialize back to Box<dyn Command>
-        let deserialized: Box<dyn Command> = serde_json::from_str(&json)?;
+        // Deserialize back to DynMessage::Command
+        let deserialized = MESSAGE_FORMATS()
+            .deserialize_slice(MESSAGE_TYPE_REGISTRY(), &json)
+            .unwrap();
 
+        println!("DynMessage: {:?}", deserialized);
         // Downcast to concrete type and compare
         let downcast = deserialized
+            .as_command().unwrap()
             .downcast_ref::<TestCommand>()
             .expect("Should be TestCommand");
         assert_eq!(downcast, &original);
-
-        Ok(())
     }
 }
