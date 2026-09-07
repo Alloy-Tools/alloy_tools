@@ -26,8 +26,8 @@ pub fn show_item(_: TokenStream, item: TokenStream) -> TokenStream {
 
 /// Derive the required elements for an `Event`
 /// Adds EventRequirements bound to all generic parameters
-#[proc_macro_derive(EventMarker)]
-pub fn event_marker_derive(input: TokenStream) -> TokenStream {
+#[proc_macro_derive(OldEventMarker)]
+pub fn old_event_marker_derive(input: TokenStream) -> TokenStream {
     let mut input = parse_macro_input!(input as DeriveInput);
 
     for param in &mut input.generics.params {
@@ -37,12 +37,12 @@ pub fn event_marker_derive(input: TokenStream) -> TokenStream {
                 .push(parse_quote!(al_core::EventRequirements));
         }
     }
-    derive_event_marker(input)
+    derive_old_event_marker(input)
 }
 
-/// Generate the implementation of EventMarker
+/// Generate the implementation of OldEventMaker
 /// type name concats module path with the name for 'path::to::module::TypeName'
-fn derive_event_marker(input: DeriveInput) -> TokenStream {
+fn derive_old_event_marker(input: DeriveInput) -> TokenStream {
     let name = &input.ident;
     let (impl_generics, type_generics, where_clause) = &input.generics.split_for_impl();
     quote! {impl #impl_generics al_core::EventMarker for #name #type_generics #where_clause {
@@ -120,10 +120,10 @@ fn add_event_traits(mut item: DeriveInput, attrs: Punctuated<Meta, Comma>) -> To
 ///
 /// Will cause conflicting implementations if placed after any `#derive(...)]` attributes that implement any super traits of `EventRequirements`.
 #[proc_macro_attribute]
-pub fn event(attrs: TokenStream, item: TokenStream) -> TokenStream {
+pub fn old_event(attrs: TokenStream, item: TokenStream) -> TokenStream {
     let mut item = parse_macro_input!(item as DeriveInput);
 
-    // Add the `EventMarker` derive if not already present
+    // Add the `OldEventMaker` derive if not already present
     if !item.attrs.iter().any(|attr| {
         if attr.path().is_ident("derive") {
             if let Ok(meta) = attr.parse_args_with(Punctuated::<Meta, Comma>::parse_terminated) {
@@ -217,29 +217,6 @@ fn add_c_bound(where_clause: &mut syn::WhereClause) {
     });
 }
 
-/// Derive the required elements for a `Message`
-/// Adds MessageRequirements bound to all generic parameters
-#[proc_macro_derive(MessageMarker)]
-pub fn message_marker_derive(input: TokenStream) -> TokenStream {
-    let mut input = parse_macro_input!(input as DeriveInput);
-
-    for param in &mut input.generics.params {
-        if let GenericParam::Type(type_param) = param {
-            type_param
-                .bounds
-                .push(parse_quote!(al_events::MessageRequirements));
-        }
-    }
-    derive_message_marker(input)
-}
-
-fn derive_message_marker(input: DeriveInput) -> TokenStream {
-    let name = &input.ident;
-    let (impl_generics, type_generics, where_clause) = &input.generics.split_for_impl();
-    quote! {impl #impl_generics al_events::MessageMarker for #name #type_generics #where_clause {}}
-        .into()
-}
-
 // ----- al-structures -----
 
 /// Derive the module path required for `TypeName`
@@ -281,4 +258,210 @@ pub fn type_name(_: TokenStream, item: TokenStream) -> TokenStream {
         #item
     }
     .into()
+}
+
+// ----- al-net -----
+
+/// Derive the required elements for a `Message`
+/// Adds MessageRequirements bound to all generic parameters
+#[proc_macro_derive(MessageMarker)]
+pub fn message_marker_derive(input: TokenStream) -> TokenStream {
+    let mut input = parse_macro_input!(input as DeriveInput);
+
+    for param in &mut input.generics.params {
+        if let GenericParam::Type(type_param) = param {
+            type_param
+                .bounds
+                .push(parse_quote!(al_events::MessageRequirements));
+        }
+    }
+    derive_message_marker(input)
+}
+
+fn derive_message_marker(input: DeriveInput) -> TokenStream {
+    let name = &input.ident;
+    let (impl_generics, type_generics, where_clause) = &input.generics.split_for_impl();
+    quote! {impl #impl_generics al_events::MessageMarker for #name #type_generics #where_clause {}}
+        .into()
+}
+
+/// Helper function to add required `MessageMarker` traits to a DeriveInput
+fn add_message_traits(mut item: DeriveInput, attrs: Punctuated<Meta, Comma>) -> TokenStream {
+    let mut required_traits: Vec<Path> = vec![
+        parse_quote!(Clone),
+        parse_quote!(Default),
+        parse_quote!(PartialEq),
+        parse_quote!(Debug),
+        parse_quote!(Hash),
+        parse_quote!(al_events::DeriveTypeName),
+    ];
+
+    #[cfg(feature = "serde")]
+    required_traits.extend(vec![
+        parse_quote!(serde::Serialize),
+        parse_quote!(serde::Deserialize),
+    ]);
+
+    // Remove any traits specified in the attribute arguments
+    for arg in attrs {
+        match arg {
+            Meta::Path(path) => {
+                let path = path.segments.last().unwrap().ident.clone();
+                required_traits.retain(|t| t.segments.last().unwrap().ident != path)
+            }
+            _ => panic!("Only trait paths like `Clone` or `serde::Serialize` are supported."),
+        }
+    }
+
+    // Find any existing #[derive(...)] attributes and remove any duplicates from required_traits
+    let _ = &item
+        .attrs
+        .iter()
+        .filter(|attr| attr.path().is_ident("derive"))
+        .filter_map(|attr| {
+            attr.parse_args_with(Punctuated::<Meta, Comma>::parse_terminated)
+                .ok()
+        })
+        .flatten()
+        .for_each(|meta| {
+            if let Meta::Path(path) = meta {
+                let path = path.segments.last().unwrap().ident.clone();
+                if let Some(pos) = required_traits
+                    .iter()
+                    .position(|t| t.segments.last().unwrap().ident == path)
+                {
+                    required_traits.remove(pos);
+                }
+            }
+        });
+
+    // Add all the missing required traits as a second #[derive(...)] attribute
+    if !required_traits.is_empty() {
+        item.attrs
+            .push(parse_quote!(#[derive(#(#required_traits),*)]));
+    }
+
+    quote! {
+        #item
+    }
+    .into()
+}
+
+fn has_path(item: &DeriveInput, marker: &str) -> bool {
+    let derive_marker = format!("Derive{marker}");
+    item.attrs.iter().any(|attr| {
+        if attr.path().is_ident("derive") {
+            if let Ok(meta) = attr.parse_args_with(Punctuated::<Meta, Comma>::parse_terminated) {
+                return meta.iter().any(|m| match m {
+                    Meta::Path(path) => path.is_ident(&derive_marker) || path.is_ident(marker),
+                    _ => false,
+                });
+            }
+        }
+        false
+    })
+}
+
+/// Attribute macro to mark a struct as an event, automatically implementing `EventMarker` and required traits.
+///
+/// Will cause conflicting implementations if placed after any `#derive(...)]` attributes that implement any super traits of `MessageRequirements`.
+#[proc_macro_attribute]
+pub fn event(attrs: TokenStream, item: TokenStream) -> TokenStream {
+    let mut item = parse_macro_input!(item as DeriveInput);
+
+    // Add the `EventMarker` derive if not already present
+    if !has_path(&item, "EventMarker") {
+        item.attrs
+            .push(parse_quote!(#[derive(al_events::DeriveEventMarker)]));
+    }
+
+    add_message_traits(
+        item,
+        parse_macro_input!(attrs with Punctuated<Meta, Comma>::parse_terminated),
+    )
+}
+
+#[proc_macro_attribute]
+pub fn command(attrs: TokenStream, item: TokenStream) -> TokenStream {
+    let mut item = parse_macro_input!(item as DeriveInput);
+
+    // Add the `CommandMarker` derive if not already present
+    if !has_path(&item, "CommandMarker") {
+        item.attrs
+            .push(parse_quote!(#[derive(al_events::DeriveCommandMarker)]));
+    }
+
+    add_message_traits(
+        item,
+        parse_macro_input!(attrs with Punctuated<Meta, Comma>::parse_terminated),
+    )
+}
+
+#[proc_macro_attribute]
+pub fn query(attrs: TokenStream, item: TokenStream) -> TokenStream {
+    let mut item = parse_macro_input!(item as DeriveInput);
+
+    // Add the `QueryMarker` derive if not already present
+    if !has_path(&item, "QueryMarker") {
+        item.attrs
+            .push(parse_quote!(#[derive(al_events::DeriveQueryMarker)]));
+    }
+
+    add_message_traits(
+        item,
+        parse_macro_input!(attrs with Punctuated<Meta, Comma>::parse_terminated),
+    )
+}
+
+fn derive_message_sub_marker(input: &DeriveInput, name: &Ident, marker: Path) -> TokenStream {
+    let (impl_generics, type_generics, where_clause) = &input.generics.split_for_impl();
+    quote! {impl #impl_generics #marker for #name #type_generics #where_clause {}}.into()
+}
+
+#[proc_macro_derive(EventMarker)]
+pub fn event_marker_derive(input: TokenStream) -> TokenStream {
+    let mut input = parse_macro_input!(input as DeriveInput);
+    let name = &input.ident;
+
+    for param in &mut input.generics.params {
+        if let GenericParam::Type(type_param) = param {
+            type_param
+                .bounds
+                .push(parse_quote!(al_events::MessageRequirements));
+        }
+    }
+
+    derive_message_sub_marker(&input, name, parse_quote!(al_events::EventMarker))
+}
+
+#[proc_macro_derive(CommandMarker)]
+pub fn command_marker_derive(input: TokenStream) -> TokenStream {
+    let mut input = parse_macro_input!(input as DeriveInput);
+    let name = &input.ident;
+
+    for param in &mut input.generics.params {
+        if let GenericParam::Type(type_param) = param {
+            type_param
+                .bounds
+                .push(parse_quote!(al_events::MessageRequirements));
+        }
+    }
+
+    derive_message_sub_marker(&input, name, parse_quote!(al_events::CommandMarker))
+}
+
+#[proc_macro_derive(QueryMarker)]
+pub fn query_marker_derive(input: TokenStream) -> TokenStream {
+    let mut input = parse_macro_input!(input as DeriveInput);
+    let name = &input.ident;
+
+    for param in &mut input.generics.params {
+        if let GenericParam::Type(type_param) = param {
+            type_param
+                .bounds
+                .push(parse_quote!(al_events::MessageRequirements));
+        }
+    }
+
+    derive_message_sub_marker(&input, name, parse_quote!(al_events::QueryMarker))
 }

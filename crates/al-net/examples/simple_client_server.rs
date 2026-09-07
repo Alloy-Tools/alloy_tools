@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use al_core::{event, register_event, Buffered, Command, Event, Publisher, Queue, Transport};
+use al_core::{old_event, register_event, Buffered, Command, Event, Publisher, Queue, Transport};
 use al_crypto::{Monotonic, NonceTrait};
 use al_net::{CommandDispatcher, ConnectionManager, Tcp, TcpError};
 use crossterm::{
@@ -830,10 +830,10 @@ impl From<TcpError> for TuiError {
     }
 }
 
-#[event]
+#[old_event]
 pub struct TcpMsg(u64, Command);
 
-#[event]
+#[old_event]
 pub struct Msg(Vec<u8>, Vec<u8>);
 
 impl Msg {

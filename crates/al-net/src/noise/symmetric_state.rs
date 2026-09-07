@@ -43,14 +43,16 @@ impl<N: NonceTrait> SymmetricState<N> {
             );
             keys.zeroize();
             Ok(())
-        })
+        })?
     }
 
-    pub fn mix_hash(&mut self, data: &[u8]) {
-        self.h.with_mut(|h| {
-            let temp = h.clone();
-            h.copy_from_slice(&hash::<HASHLEN>(&[&temp, data].concat()))
-        })
+    pub fn mix_hash(&mut self, data: &[u8]) -> Result<(), NoiseError> {
+        self.h
+            .with_mut(|h| {
+                let temp = h.clone();
+                h.copy_from_slice(&hash::<HASHLEN>(&[&temp, data].concat()))
+            })
+            .map_err(NoiseError::SecretError)
     }
 
     pub fn mix_key_and_hash(&mut self, input_key_material: &[u8]) -> Result<(), NoiseError> {
@@ -70,21 +72,21 @@ impl<N: NonceTrait> SymmetricState<N> {
             );
             keys.zeroize();
             Ok::<(), NoiseError>(())
-        })?;
-        self.mix_hash(&temp_h);
+        })??;
+        self.mix_hash(&temp_h)?;
         temp_h.zeroize();
         Ok(())
     }
 
-    pub fn get_handshake_hash(&self) -> [u8; HASHLEN] {
-        self.h.copy()
+    pub fn get_handshake_hash(&self) -> Result<[u8; HASHLEN], NoiseError> {
+        self.h.copy().map_err(NoiseError::SecretError)
     }
 
     pub fn encrypt_and_hash(&mut self, plaintext: &mut [u8]) -> Result<Vec<u8>, NoiseError> {
         let ciphertext = self
             .h
-            .with(|h| self.cipher_state.encrypt_with_ad(h, plaintext))?;
-        self.mix_hash(&ciphertext);
+            .with(|h| self.cipher_state.encrypt_with_ad(h, plaintext))??;
+        self.mix_hash(&ciphertext)?;
         Ok(ciphertext)
     }
 
@@ -95,8 +97,8 @@ impl<N: NonceTrait> SymmetricState<N> {
         let packet = ciphertext_packet.to_vec();
         let plaintext = self
             .h
-            .with(|h| self.cipher_state.decrypt_with_ad(h, ciphertext_packet))?;
-        self.mix_hash(&packet);
+            .with(|h| self.cipher_state.decrypt_with_ad(h, ciphertext_packet))??;
+        self.mix_hash(&packet)?;
         Ok(plaintext)
     }
 
@@ -128,7 +130,7 @@ impl<N: NonceTrait> SymmetricState<N> {
             );
             keys.zeroize();
 
-            Ok((c1, c2, self.get_handshake_hash()))
-        })
+            Ok((c1, c2, self.get_handshake_hash()?))
+        })?
     }
 }

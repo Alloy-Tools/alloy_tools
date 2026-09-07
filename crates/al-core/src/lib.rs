@@ -41,9 +41,10 @@ pub use serde_utils::serde_format::SerdeFormat;
 pub use stable_vec::StableVec;
 #[cfg(feature = "event")]
 pub use {
-    al_derive::event, al_derive::event_requirements, al_derive::EventMarker as DeriveEventMarker,
-    event::downcast as downcast_event, event::type_with_generics, event::DowncastEvent,
-    event::Event, markers::EventMarker, markers::EventRequirements, markers::SerdeFeature,
+    al_derive::event_requirements, al_derive::old_event,
+    al_derive::OldEventMarker as DeriveEventMarker, event::downcast as downcast_event,
+    event::type_with_generics, event::DowncastEvent, event::Event, markers::EventMarker,
+    markers::EventRequirements, markers::SerdeFeature,
 };
 #[cfg(feature = "task")]
 pub use {
@@ -112,7 +113,7 @@ mod tests {
     use crate::Command;
     use crate::SliceDebug;
     #[cfg(feature = "event")]
-    use crate::{event, Event, EventMarker};
+    use crate::{old_event, Event, EventMarker};
     #[cfg(feature = "event")]
     use std::hash::{DefaultHasher, Hash, Hasher};
 
@@ -124,18 +125,18 @@ mod tests {
 
     #[cfg(feature = "event")]
     /// Simple event for testing using the `event` attribute macro
-    #[event]
+    #[old_event]
     struct TestEventA;
 
     #[cfg(feature = "event")]
     /// Second simple event for testing using the `EventMarker` derive macro
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[derive(Clone, Default, PartialEq, Hash, Debug, al_derive::EventMarker)]
+    #[derive(Clone, Default, PartialEq, Hash, Debug, al_derive::OldEventMarker)]
     struct TestEventB;
 
     #[cfg(feature = "event")]
     /// Enum for testing, along with omitting traits within the `event` attribute macro
-    #[event(Default, Clone)]
+    #[old_event(Default, Clone)]
     #[derive(Default, Clone)]
     enum TestEventEnum {
         #[default]
@@ -146,7 +147,7 @@ mod tests {
 
     #[cfg(feature = "event")]
     /// Event with payload for testing
-    #[event]
+    #[old_event]
     struct TestEventPayload {
         value: u128,
         message: String,
@@ -154,7 +155,7 @@ mod tests {
 
     #[cfg(feature = "event")]
     /// Event with generic for testing
-    #[event]
+    #[old_event]
     struct TestEventGeneric<T>(T);
 
     #[test]
@@ -354,14 +355,14 @@ mod tests {
         mod crate_a {
             use super::*;
 
-            #[event]
+            #[old_event]
             pub struct DuplicateEvent;
         }
 
         mod crate_b {
             use super::*;
 
-            #[event]
+            #[old_event]
             pub struct DuplicateEvent;
         }
 

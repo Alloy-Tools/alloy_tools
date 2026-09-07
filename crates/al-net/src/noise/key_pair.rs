@@ -8,15 +8,15 @@ pub struct KeyPair(FixedSecret<DHLEN>, PublicKey);
 
 impl KeyPair {
     const KEY_PAIR_TAG: &str = "Local Private DH Key";
-    pub fn new() -> Self {
+    pub fn new() -> Result<Self, NoiseError> {
         let private = FixedSecret::random(Self::KEY_PAIR_TAG);
         let public = private.with(|private| {
             let mut secret = x25519_dalek::StaticSecret::from(*private);
             let public = PublicKey::new(&secret);
             secret.zeroize();
             public
-        });
-        Self(private, public)
+        })?;
+        Ok(Self(private, public))
     }
 
     pub fn from_bytes(private: [u8; DHLEN]) -> Self {
@@ -36,9 +36,10 @@ impl KeyPair {
         &self.0
     }
 
-    pub fn diffie_hellman(&self, remote_public: [u8; DHLEN]) -> [u8; DHLEN] {
+    pub fn diffie_hellman(&self, remote_public: [u8; DHLEN]) -> Result<[u8; DHLEN], NoiseError> {
         self.0
             .with(|private| al_crypto::diffie_hellman(*private, remote_public))
+            .map_err(NoiseError::SecretError)
     }
 }
 

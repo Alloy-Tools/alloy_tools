@@ -384,8 +384,12 @@ mod borrow {
 macro_rules! define_message_kind {
     ($kind:ident) => {
         ::paste::paste! {
+            mod sealed {
+                pub trait [<$kind Marker>]: crate::MessageRequirements {}
+                impl<T: super::[<$kind Marker>]> [<$kind Marker>] for T {}
+            }
             #[doc = concat!("`", stringify!($kind), "Marker` trait acts as a marker for `", stringify!($kind), "` systems and should be derived for each `", stringify!($kind), "` type")]
-            pub trait [<$kind Marker>]: crate::MessageMarker {}
+            pub trait [<$kind Marker>]: sealed::[<$kind Marker>] {}
 
             #[doc = concat!("Object-safe helper methods for `dyn ", stringify!($kind), "`.")]
             pub trait [<$kind Helpers>]: crate::ObjectTraits + al_structures::traits::AsAny {

@@ -1,6 +1,6 @@
 #[cfg(all(test, feature = "event"))]
 mod tests {
-    use al_derive::event;
+    use al_derive::old_event;
 
     /// Helper function to ensure a type implements EventMarker
     fn has_impl_marker<T: al_core::EventMarker>() {}
@@ -9,24 +9,24 @@ mod tests {
     #[test]
     fn event_marker_derive() {
         // Using `event` attribute macro
-        #[event]
+        #[old_event]
         struct TestEventA;
 
         // Using `event` attribute macro with existing derive
         // The `#[event]` macro will duplicate derives if after any `#derive(...)]`
-        #[event]
+        #[old_event]
         #[derive(Clone, Default)]
         struct TestEventB(String, Vec<u128>);
 
         // Using `EventMarker` derive macro
-        #[derive(Clone, Default, PartialEq, Hash, Debug, al_derive::EventMarker)]
+        #[derive(Clone, Default, PartialEq, Hash, Debug, al_derive::OldEventMarker)]
         struct TestEventC {
             x: u8,
             y: u8,
         }
 
         // Using the `event` attribute macro with omitting derives
-        #[event(Clone, Default)]
+        #[old_event(Clone, Default)]
         #[derive(Clone, Default)]
         struct TestEventD;
 
@@ -40,7 +40,7 @@ mod tests {
     #[test]
     fn generic_marker_derive() {
         // Using `event` attribute macro
-        #[event]
+        #[old_event]
         struct GenericEvent<T>(T);
         has_impl_marker::<GenericEvent<u128>>();
         has_impl_marker::<GenericEvent<String>>();
@@ -50,7 +50,7 @@ mod tests {
         //has_impl_marker::<GenericEvent<GenericType>>();
 
         // Using `EventMarker` derive macro
-        #[derive(Clone, Default, PartialEq, Hash, Debug, al_derive::EventMarker)]
+        #[derive(Clone, Default, PartialEq, Hash, Debug, al_derive::OldEventMarker)]
         struct GenericEvent2<T, U>(T, U);
         has_impl_marker::<GenericEvent2<u128, String>>();
         has_impl_marker::<GenericEvent2<String, u128>>();

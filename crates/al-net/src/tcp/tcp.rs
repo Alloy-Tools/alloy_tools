@@ -619,10 +619,10 @@ mod tests {
         235, 104, 35, 131, 93, 247, 14, 98, 74, 152, 206, 183, 1,
     ];
 
-    #[al_core::event]
+    #[al_core::old_event]
     struct TestEventA(u8);
 
-    #[al_core::event]
+    #[al_core::old_event]
     struct TestEventB(u8);
 
     #[tokio::test]

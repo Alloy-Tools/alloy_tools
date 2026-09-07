@@ -88,7 +88,7 @@ impl HandshakePattern {
         local: &Option<KeyPair>,
     ) -> Result<(), NoiseError> {
         match local {
-            Some(local) => symmetric_state.mix_hash(local.public().as_bytes()),
+            Some(local) => symmetric_state.mix_hash(local.public().as_bytes())?,
             None => Err(NoiseError::LocalStaticMissing)?,
         }
         Ok(())
@@ -100,7 +100,7 @@ impl HandshakePattern {
         remote: &Option<PublicKey>,
     ) -> Result<(), NoiseError> {
         match remote {
-            Some(remote) => symmetric_state.mix_hash(remote.as_bytes()),
+            Some(remote) => symmetric_state.mix_hash(remote.as_bytes())?,
             None => Err(NoiseError::RemoteStaticMissing)?,
         }
         Ok(())

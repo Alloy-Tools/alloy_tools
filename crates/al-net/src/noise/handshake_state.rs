@@ -55,7 +55,7 @@ impl<N: NonceTrait> HandshakeState<N> {
         re: Option<PublicKey>,
     ) -> Result<Self, NoiseError> {
         let mut symmetric_state = SymmetricState::initialize_symmetric(pattern.clone());
-        symmetric_state.mix_hash(prologue);
+        symmetric_state.mix_hash(prologue)?;
         pattern.mix_premessages(&mut symmetric_state, initiator, &s, &e, &rs, &re)?;
         Ok(Self {
             symmetric_state,
@@ -88,7 +88,7 @@ impl<N: NonceTrait> HandshakeState<N> {
                 // Calls DH(key_pair.private, public_key).
                 Ok(key_pair
                     .private()
-                    .with(|private| diffie_hellman(*private, public.to_bytes())))
+                    .with(|private| diffie_hellman(*private, public.to_bytes()))?)
             }
             (Some(_), None) => Err(public_key_missing_error)?,
             (None, Some(_)) => Err(key_pair_missing_error)?,
@@ -155,7 +155,7 @@ impl<N: NonceTrait> HandshakeState<N> {
         match token {
             HandshakeToken::E => {
                 // Sets e (which must be empty) to GENERATE_KEYPAIR().
-                let pair = self.e.take().unwrap_or(KeyPair::new());
+                let pair = self.e.take().unwrap_or(KeyPair::new()?);
 
                 // Appends e.public_key to the buffer.
                 let mut public_bytes = pair.public().to_bytes();
@@ -164,7 +164,7 @@ impl<N: NonceTrait> HandshakeState<N> {
                 message_buffer[head..head + len].copy_from_slice(&public_bytes);
 
                 // Calls MixHash(e.public_key).
-                self.symmetric_state.mix_hash(&public_bytes);
+                self.symmetric_state.mix_hash(&public_bytes)?;
                 public_bytes.zeroize();
             }
             HandshakeToken::S => {
@@ -305,7 +305,7 @@ impl<N: NonceTrait> HandshakeState<N> {
                 self.re = Some(PublicKey::from_bytes(public_bytes)?);
 
                 //Calls MixHash(re.public_key).
-                self.symmetric_state.mix_hash(public_bytes);
+                self.symmetric_state.mix_hash(public_bytes)?;
             }
             HandshakeToken::S => {
                 if self.rs.is_some() {

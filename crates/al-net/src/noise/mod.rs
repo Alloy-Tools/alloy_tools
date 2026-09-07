@@ -69,7 +69,9 @@ mod tests {
         initiator
             .symmetric_state
             .h
-            .with(|i_h| responder.symmetric_state.h.with(|r_h| assert_eq!(i_h, r_h)));
+            .with(|i_h| responder.symmetric_state.h.with(|r_h| assert_eq!(i_h, r_h)))
+            .unwrap()
+            .unwrap();
 
         // Assert both buffers are empty
         assert!(initiator_buffer.iter().all(|b| *b == 0));
@@ -120,7 +122,9 @@ mod tests {
         initiator
             .symmetric_state
             .h
-            .with(|i_h| responder.symmetric_state.h.with(|r_h| assert_eq!(i_h, r_h)));
+            .with(|i_h| responder.symmetric_state.h.with(|r_h| assert_eq!(i_h, r_h)))
+            .unwrap()
+            .unwrap();
 
         // Assert both buffers are empty
         assert!(initiator_buffer.iter().all(|b| *b == 0));
@@ -177,7 +181,10 @@ mod tests {
         };
 
         // Responder reads ephemeral from initiator and calculates DH(resp_s, init_e) and DH(resp_s, init_s)
-        match responder.read_message(&mut initiator_buffer[..msg1_len as usize], &mut responder_buffer) {
+        match responder.read_message(
+            &mut initiator_buffer[..msg1_len as usize],
+            &mut responder_buffer,
+        ) {
             Ok(HandshakeResult::InProgress(len)) => assert_eq!(len, 0),
             _ => panic!("Handshake still ongoing!"),
         }
@@ -192,7 +199,9 @@ mod tests {
         initiator
             .symmetric_state
             .h
-            .with(|i_h| responder.symmetric_state.h.with(|r_h| assert_eq!(i_h, r_h)));
+            .with(|i_h| responder.symmetric_state.h.with(|r_h| assert_eq!(i_h, r_h)))
+            .unwrap()
+            .unwrap();
 
         assert!(initiator_buffer.iter().all(|b| *b == 0));
         assert!(responder_buffer.iter().all(|b| *b == 0));
@@ -242,7 +251,9 @@ mod tests {
         initiator
             .symmetric_state
             .h
-            .with(|i_h| responder.symmetric_state.h.with(|r_h| assert_eq!(i_h, r_h)));
+            .with(|i_h| responder.symmetric_state.h.with(|r_h| assert_eq!(i_h, r_h)))
+            .unwrap()
+            .unwrap();
 
         // Assert both buffers are empty
         assert!(initiator_buffer.iter().all(|b| *b == 0));

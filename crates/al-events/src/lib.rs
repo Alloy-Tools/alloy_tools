@@ -7,6 +7,11 @@ mod markers;
 mod message;
 mod query;
 
+pub use al_derive::CommandMarker as DeriveCommandMarker;
+pub use al_derive::EventMarker as DeriveEventMarker;
+pub use al_derive::QueryMarker as DeriveQueryMarker;
+pub use al_derive::TypeName as DeriveTypeName;
+
 // Expose `TypeId` and FormatId here
 #[cfg(feature = "serde")]
 pub type TypeId = al_structures::serde_utils::serde_registries::TypeId;

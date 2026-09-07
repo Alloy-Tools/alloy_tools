@@ -766,8 +766,9 @@ mod tests {
     type RwLockVec<V> = RwLockStorage<Vec<V>>;
     init_registries!(TEST: Test, RwLockHashMap, RwLockVec, RwLockHashMap, RwLockVec);
 
-    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypeName)]
+    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TypeName, Default)]
     pub enum Test {
+        #[default]
         A,
         B(u8),
         C { name: String, age: u8 },
@@ -886,5 +887,65 @@ mod tests {
             .get_format_by_name(binary_format_name)
             .unwrap()
             .is_some());
+    }
+
+    #[test]
+    fn rejects_unknown_format_id() {
+        let format_id = TEST_FORMATS().register(JsonFormat).unwrap();
+        let type_id = TEST_TYPE_REGISTRY().register::<Test>(|u| u).unwrap();
+        let mut encoded = Vec::new();
+
+        TEST_FORMATS()
+            .serialize(
+                format_id,
+                type_id,
+                &Test::default(),
+                &mut encoded,
+            )
+            .unwrap();
+
+        let unknown_format_id = (0..=u8::MAX)
+            .find(|candidate| {
+                *candidate != format_id
+                    && TEST_FORMATS().get_format(*candidate).unwrap().is_none()
+            })
+            .expect("test registry should have an unused format id");
+        encoded[0] = unknown_format_id;
+        assert!(TEST_FORMATS()
+            .deserialize_slice(TEST_TYPE_REGISTRY(), &encoded)
+            .is_err());
+    }
+
+    #[test]
+    fn rejects_unknown_type_id() {
+        let format_id = TEST_FORMATS().register(JsonFormat).unwrap();
+        let type_id = TEST_TYPE_REGISTRY().register::<Test>(|u| u).unwrap();
+        let mut encoded = Vec::new();
+
+        TEST_FORMATS()
+            .serialize(
+                format_id,
+                type_id,
+                &Test::default(),
+                &mut encoded,
+            )
+            .unwrap();
+
+        encoded[1..5].copy_from_slice(&u32::MAX.to_be_bytes());
+        assert!(TEST_FORMATS()
+            .deserialize_slice(TEST_TYPE_REGISTRY(), &encoded)
+            .is_err());
+    }
+
+    #[test]
+    fn rejects_truncated_header() {
+        assert!(TEST_FORMATS()
+            .deserialize_slice(TEST_TYPE_REGISTRY(), &[0, 0, 0, 0])
+            .is_err());
+
+        let mut reader = std::io::Cursor::new([0, 0, 0, 0]);
+        assert!(TEST_FORMATS()
+            .deserialize_reader(TEST_TYPE_REGISTRY(), &mut reader)
+            .is_err());
     }
 }

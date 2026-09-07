@@ -290,14 +290,14 @@ mod tests {
     use std::{sync::Arc, vec};
 
     #[cfg(feature = "event")]
-    use crate::event;
+    use crate::old_event;
 
     use crate::{
         transports::transform::Transform, ApplyTransform, NoOp, Queue, TransformFn, Transport,
     };
 
     #[cfg(feature = "event")]
-    #[event]
+    #[old_event]
     struct AddOne(u8);
 
     #[derive(Debug)]
@@ -483,7 +483,7 @@ mod tests {
     async fn builder() {
         Transform::<u8>::new(Queue::new().into())
             .with_send(TestStruct)
-            .with_recv(|x| { x + 1 })
+            .with_recv(|x| x + 1)
             .build();
     }
 }

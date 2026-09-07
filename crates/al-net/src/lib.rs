@@ -16,13 +16,14 @@ const HASHLEN: usize = 32; // Noise has HASHLEN 32 for BLAKE2s
 const MAX_MSG_BYTE_LEN: usize = 65535; // Noise message sizes are capped at 65,535 bytes
 
 mod command_dispatcher;
+mod connection_manager;
 mod noise;
 mod router;
 mod tcp;
 mod udp;
-mod connection_manager;
 
 pub use command_dispatcher::CommandDispatcher;
+pub use connection_manager::ConnectionManager;
 pub use noise::{
     cipher_state::{CipherState, CipherStateReturn},
     handshake_pattern::{HandshakePattern, HandshakeToken},
@@ -35,10 +36,9 @@ pub use noise::{
 pub use router::Router;
 pub use tcp::{tcp::Tcp, tcp_error::TcpError};
 pub use udp::udp::UDP;
-pub use connection_manager::ConnectionManager;
 
 /// A wrapper to hold any serialized `dyn Event` data for transport without needing the inner type
-#[al_core::event]
+#[al_core::old_event]
 pub struct NetworkEvent {
     type_name: String,
     data: Vec<u8>,

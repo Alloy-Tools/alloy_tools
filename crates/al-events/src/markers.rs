@@ -39,8 +39,8 @@ pub trait MessageRequirements:
     + Any
     + Debug
     + Hash
-    + sealed::SerdeFeature
     + TypeName
+    + sealed::SerdeFeature
 {
 }
 
@@ -54,8 +54,8 @@ impl<
             + Any
             + Debug
             + Hash
-            + sealed::SerdeFeature
-            + TypeName,
+            + TypeName
+            + sealed::SerdeFeature,
     > MessageRequirements for T
 {
 }
