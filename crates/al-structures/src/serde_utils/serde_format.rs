@@ -27,9 +27,12 @@
 //! Both paths are used through a single `deserialize` call on the appropriate registry,
 //! so the rest of the application is agnostic to which kind of format is in use.
 
-#[cfg(any(feature = "collections", doc))]
-use crate::serde_utils::serde_registries::{DirectFactory, TypeId, TypeIdRegistry};
 use crate::traits::{AsAny, DynTypeName, TypeName};
+#[cfg(any(feature = "collections", doc))]
+use crate::{
+    collections::storage::utils::{indexed::IndexedHandle, keyed::KeyedHandle},
+    serde_utils::serde_registries::{DirectFactory, TypeId, TypeIdRegistry},
+};
 use std::error::Error;
 #[cfg(any(feature = "collections", doc))]
 use std::{ops::Deref, sync::Arc};
@@ -189,8 +192,8 @@ pub trait ErasedDeserialize<T>:
     fn register<
         U: TypeName + for<'de> serde::Deserialize<'de>,
         R: Deref<Target = TypeIdRegistry<K, I>>,
-        K: crate::collections::storage::utils::keyed::KeyedHandle<Arc<str>, TypeId>,
-        I: crate::collections::storage::utils::indexed::IndexedHandle<Arc<str>>,
+        K: KeyedHandle<Arc<str>, TypeId>,
+        I: IndexedHandle<Arc<str>>,
     >(
         &self,
         type_registry: R,
@@ -208,8 +211,8 @@ pub trait ErasedDeserialize<T>:
     fn register_named<
         U: for<'de> serde::Deserialize<'de>,
         R: Deref<Target = TypeIdRegistry<K, I>>,
-        K: crate::collections::storage::utils::keyed::KeyedHandle<Arc<str>, TypeId>,
-        I: crate::collections::storage::utils::indexed::IndexedHandle<Arc<str>>,
+        K: KeyedHandle<Arc<str>, TypeId>,
+        I: IndexedHandle<Arc<str>>,
     >(
         &self,
         name: impl AsRef<str>,
@@ -222,7 +225,43 @@ pub trait ErasedDeserialize<T>:
         <I::Key as TryFrom<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
         <I::Key as TryInto<TypeId>>::Error: std::error::Error + Send + Sync + 'static;
 
-    fn get_deserializer(
+    fn register_with<
+        U: TypeName + for<'de> serde::Deserialize<'de>,
+        R: Deref<Target = TypeIdRegistry<K, I>>,
+        K: KeyedHandle<Arc<str>, TypeId>,
+        I: IndexedHandle<Arc<str>>,
+    >(
+        &self,
+        type_registry: R,
+        type_factory: DirectFactory<T>,
+    ) -> Result<TypeId, Box<dyn std::error::Error>>
+    where
+        Self: Sized,
+        I::Key: TryInto<TypeId> + TryFrom<TypeId> + Eq,
+        <I::Key as TryFrom<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
+        <I::Key as TryInto<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
+    {
+        self.register_named_with::<U, R, K, I>(U::type_with_generics(), type_registry, type_factory)
+    }
+
+    fn register_named_with<
+        U: for<'de> serde::Deserialize<'de>,
+        R: Deref<Target = TypeIdRegistry<K, I>>,
+        K: KeyedHandle<Arc<str>, TypeId>,
+        I: IndexedHandle<Arc<str>>,
+    >(
+        &self,
+        name: impl AsRef<str>,
+        type_registry: R,
+        type_factory: DirectFactory<T>,
+    ) -> Result<TypeId, Box<dyn std::error::Error>>
+    where
+        Self: Sized,
+        I::Key: TryInto<TypeId> + TryFrom<TypeId> + Eq,
+        <I::Key as TryFrom<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
+        <I::Key as TryInto<TypeId>>::Error: std::error::Error + Send + Sync + 'static;
+
+    fn get_factory(
         &self,
         type_id: TypeId,
     ) -> Result<Option<DirectFactory<T>>, Box<dyn std::error::Error>>;

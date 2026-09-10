@@ -12,6 +12,7 @@ serde = { version = "1.0.219", features = ["derive"], optional = true }
 erased-serde = { version = "0.4.6", optional = true }
 tynm = "0.2.0"
 paste = "1.0.15"
+uuid = { version = "1.26", features = ["v4"] }
 
 [features]
 default = ["serde"]
@@ -21,7 +22,7 @@ serde = [
     "al-derive/serde",
     "al-structures/serde_utils",
     "al-structures/collections",
-] #TODO enable `al-structures` features here
+] #REVIEW: can traits feature be optional?
 borrow = []
 
 [dev-dependencies]

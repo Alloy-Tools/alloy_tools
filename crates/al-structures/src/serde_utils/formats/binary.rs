@@ -3,7 +3,7 @@ use std::{ops::Deref, sync::Arc};
 use al_derive::TypeName;
 
 use crate::{
-    collections::storage::utils::keyed::KeyedHandle,
+    collections::storage::utils::{indexed::IndexedHandle, keyed::KeyedHandle},
     serde_utils::{
         serde_format::{DeserializeInto, ErasedDeserialize, Format, SerializeFormat},
         serde_registries::{DirectFactory, TypeId, TypeIdRegistry},
@@ -102,7 +102,7 @@ impl<T: 'static, D: KeyedHandle<TypeId, DirectFactory<T>> + Clone + Send + Sync 
         U: for<'de> serde::Deserialize<'de>,
         R: Deref<Target = TypeIdRegistry<K, I>>,
         K: KeyedHandle<Arc<str>, TypeId>,
-        I: crate::collections::storage::utils::indexed::IndexedHandle<Arc<str>>,
+        I: IndexedHandle<Arc<str>>,
     >(
         &self,
         name: impl AsRef<str>,
@@ -118,7 +118,27 @@ impl<T: 'static, D: KeyedHandle<TypeId, DirectFactory<T>> + Clone + Send + Sync 
         crate::register_type!(self, type_registry, into_target, name, BinaryFormat<T, D>, "Failed to downcast to BinaryFormat")
     }
 
-    fn get_deserializer(
+    fn register_named_with<
+        U: for<'de> serde::Deserialize<'de>,
+        R: Deref<Target = TypeIdRegistry<K, I>>,
+        K: KeyedHandle<Arc<str>, TypeId>,
+        I: IndexedHandle<Arc<str>>,
+    >(
+        &self,
+        name: impl AsRef<str>,
+        type_registry: R,
+        type_factory: DirectFactory<T>,
+    ) -> Result<TypeId, Box<dyn std::error::Error>>
+    where
+        Self: Sized,
+        I::Key: TryInto<TypeId> + TryFrom<TypeId> + Eq,
+        <I::Key as TryFrom<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
+        <I::Key as TryInto<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
+    {
+        crate::register_type_with!(self, type_registry, type_factory, name)
+    }
+
+    fn get_factory(
         &self,
         type_id: TypeId,
     ) -> Result<Option<DirectFactory<T>>, Box<dyn std::error::Error>> {

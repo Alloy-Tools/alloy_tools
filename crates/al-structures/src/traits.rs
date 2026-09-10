@@ -82,3 +82,61 @@ impl<T: TypeName> DynTypeName for T {
         T::type_with_generics()
     }
 }
+
+// ----- As Bytes -----
+pub trait AsBytes: Sized {
+    const LEN: usize;
+    fn to_bytes<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()>;
+    fn from_bytes(buffer: &[u8]) -> Result<Self, Box<dyn std::error::Error>>;
+}
+
+// ----- Header -----
+pub trait Header {
+    const BUF_LEN: usize;
+    fn encode<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()>;
+
+    fn decode(buffer: &[u8]) -> Result<Self, Box<dyn std::error::Error>>
+    where
+        Self: Sized;
+
+    fn decode_at(offset: &mut usize, buffer: &[u8]) -> Result<Self, Box<dyn std::error::Error>>
+    where
+        Self: Sized,
+    {
+        let target = offset
+            .checked_add(Self::BUF_LEN)
+            .ok_or_else(|| "header offset overflow")?;
+        if target > buffer.len() {
+            Err(format!(
+                "Buffer length too small for header with end index '{target}.'"
+            ))?;
+        }
+        let res = Self::decode(&buffer[*offset..target]);
+        if res.is_ok() {
+            *offset = target;
+        }
+        res
+    }
+}
+
+impl<T: AsBytes> Header for T {
+    const BUF_LEN: usize = T::LEN;
+
+    fn encode<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        self.to_bytes(writer)
+    }
+
+    fn decode(buffer: &[u8]) -> Result<Self, Box<dyn std::error::Error>>
+    where
+        Self: Sized,
+    {
+        if buffer.len() != Self::BUF_LEN {
+            Err(format!(
+                "Expected '{}' bytes, got '{}'",
+                Self::BUF_LEN,
+                buffer.len()
+            ))?;
+        }
+        Self::from_bytes(buffer)
+    }
+}

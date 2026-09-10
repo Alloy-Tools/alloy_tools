@@ -42,15 +42,23 @@
 //!     - For erased formats, each concrete type you want to deserialize must be registered with the format itself.
 //! 4. Register each concrete type you want to deserialize with the `FormatTypeRegistry`.
 //! 5. At runtime, call `registry.deserialize(data)` which will pull out the `(FormatId, TypeId, &[u8])`, deserialize the type, and return it as a homogenous `T`.
-use std::{marker::PhantomData, ops::Deref, sync::Arc};
-
 use crate::{
     collections::storage::utils::{indexed::IndexedHandle, keyed::KeyedHandle, HandleError},
     serde_utils::serde_format::{ErasedDeserialize, Format, SerdeFormat, SerializeFormat},
-    traits::{DynTypeName, TypeName},
+    traits::{AsBytes, DynTypeName, Header, TypeName},
 };
+use std::{marker::PhantomData, ops::Deref, sync::Arc};
 
 pub trait TypeDispatcher<T> {
+    fn serialize_registered(
+        &self,
+        format: &Format<T>,
+        type_id: TypeId,
+        value: &T,
+        writer: &mut dyn std::io::Write,
+    ) -> Result<(), HandleError>
+    where
+        T: erased_serde::Serialize;
     fn deserialize_slice(
         &self,
         format: &Format<T>,
@@ -79,6 +87,19 @@ where
     <I::Key as TryFrom<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
     <I::Key as TryInto<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
 {
+    fn serialize_registered(
+        &self,
+        format: &Format<T>,
+        type_id: TypeId,
+        value: &T,
+        writer: &mut dyn std::io::Write,
+    ) -> Result<(), HandleError>
+    where
+        T: erased_serde::Serialize,
+    {
+        FormatTypeRegistry::serialize_registered(&self, format, type_id, value, writer)
+    }
+
     fn deserialize_slice(
         &self,
         format: &Format<T>,
@@ -100,77 +121,19 @@ where
     }
 }
 
-pub trait BeBytes: Sized {
-    const LEN: usize;
-    fn to_be_bytes<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()>;
-    fn from_be_bytes(buffer: &[u8]) -> Result<Self, HandleError>;
-}
-
-pub trait PayloadHeader {
-    const BUF_LEN: usize;
-    fn encode<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()>;
-
-    fn decode(buffer: &[u8]) -> Result<Self, HandleError>
-    where
-        Self: Sized;
-
-    fn decode_at(offset: &mut usize, buffer: &[u8]) -> Result<Self, HandleError>
-    where
-        Self: Sized,
-    {
-        let target = offset
-            .checked_add(Self::BUF_LEN)
-            .ok_or_else(|| HandleError::Deserialization("header offset overflow".into()))?;
-        if target > buffer.len() {
-            return Err(HandleError::Deserialization(format!(
-                "Buffer length too small for header with end index '{target}.'"
-            )));
-        }
-        let res = Self::decode(&buffer[*offset..target]);
-        if res.is_ok() {
-            *offset = target;
-        }
-        res
-    }
-}
-
-impl<T: BeBytes> PayloadHeader for T {
-    const BUF_LEN: usize = T::LEN;
-
-    fn encode<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-        self.to_be_bytes(writer)
-    }
-
-    fn decode(buffer: &[u8]) -> Result<Self, HandleError>
-    where
-        Self: Sized,
-    {
-        if buffer.len() != Self::BUF_LEN {
-            return Err(HandleError::Deserialization(format!(
-                "Expected '{}' bytes, got '{}'",
-                Self::BUF_LEN,
-                buffer.len()
-            )));
-        }
-        Self::from_be_bytes(buffer)
-    }
-}
-
 // ----- Format Registry -----
 // Allows 256 possible formats to be loaded at once for one byte.
 pub type FormatId = u8;
 
-impl BeBytes for FormatId {
+impl AsBytes for FormatId {
     const LEN: usize = 1;
 
-    fn to_be_bytes<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+    fn to_bytes<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
         writer.write_all(&u8::to_be_bytes(*self))
     }
 
-    fn from_be_bytes(buffer: &[u8]) -> Result<Self, HandleError> {
-        Ok(Self::from_be_bytes(buffer.try_into().map_err(|e| {
-            HandleError::Deserialization(format!("{e}"))
-        })?))
+    fn from_bytes(buffer: &[u8]) -> Result<Self, Box<dyn std::error::Error>> {
+        Ok(Self::from_be_bytes(buffer.try_into()?))
     }
 }
 
@@ -236,22 +199,46 @@ where
         Ok(None)
     }
 
+    fn write_headers(
+        &self,
+        format_id: FormatId,
+        type_id: TypeId,
+        mut writer: &mut dyn std::io::Write,
+    ) -> Result<Format<T>, HandleError> {
+        let format = self.inner.get(&I::Key::from(format_id))?.ok_or_else(|| {
+            HandleError::Custom(format!("No format found for the id '{format_id}'").into())
+        })?;
+        // Write `format_id, type_id` to writer
+        format_id.encode(&mut writer)?;
+        type_id.encode(&mut writer)?;
+        Ok(format)
+    }
+
     pub fn serialize<S: erased_serde::Serialize>(
         &self,
         format_id: FormatId,
         type_id: TypeId,
         value: &S,
-        mut writer: &mut dyn std::io::Write,
+        writer: &mut dyn std::io::Write,
     ) -> Result<(), HandleError> {
-        let format = self.inner.get(&I::Key::from(format_id))?.ok_or_else(|| {
-            HandleError::Custom(format!("No format found for the id '{format_id}'").into())
-        })?;
-        // Write with format `(format_id, type_id, payload_bytes)`
-        format_id.encode(&mut writer)?;
-        type_id.encode(&mut writer)?;
-        format
+        self.write_headers(format_id, type_id, writer)?
             .serialize(value, writer)
             .map_err(|e| HandleError::Serialization(e.to_string()))
+    }
+
+    pub fn serialize_registered<D: Deref<Target = R>, R: TypeDispatcher<T>>(
+        &self,
+        format_type_registry: D,
+        format_id: FormatId,
+        type_id: TypeId,
+        value: &T,
+        writer: &mut dyn std::io::Write,
+    ) -> Result<(), HandleError>
+    where
+        T: erased_serde::Serialize,
+    {
+        let format = self.write_headers(format_id, type_id, writer)?;
+        format_type_registry.serialize_registered(&format, type_id, value, writer)
     }
 
     pub fn deserialize_slice<D: Deref<Target = R>, R: TypeDispatcher<T>>(
@@ -260,8 +247,10 @@ where
         slice: &[u8],
     ) -> Result<T, HandleError> {
         let mut offset = 0;
-        let format_id = FormatId::decode_at(&mut offset, &slice)?;
-        let type_id = TypeId::decode_at(&mut offset, &slice)?;
+        let format_id = FormatId::decode_at(&mut offset, &slice)
+            .map_err(|e| HandleError::Deserialization(e.to_string()))?;
+        let type_id = TypeId::decode_at(&mut offset, &slice)
+            .map_err(|e| HandleError::Deserialization(e.to_string()))?;
         let format = self.get_format(format_id)?.ok_or_else(|| {
             HandleError::Deserialization(format!("No format found for id '{format_id}'"))
         })?;
@@ -278,8 +267,10 @@ where
         reader.read_exact(&mut header)?;
 
         let mut offset = 0;
-        let format_id = FormatId::decode_at(&mut offset, &header)?;
-        let type_id = TypeId::decode_at(&mut offset, &header)?;
+        let format_id = FormatId::decode_at(&mut offset, &header)
+            .map_err(|e| HandleError::Deserialization(e.to_string()))?;
+        let type_id = TypeId::decode_at(&mut offset, &header)
+            .map_err(|e| HandleError::Deserialization(e.to_string()))?;
         let format = self.get_format(format_id)?.ok_or_else(|| {
             HandleError::Deserialization(format!("No format found for id '{format_id}'"))
         })?;
@@ -331,7 +322,7 @@ where
         U: 'static,
         T: 'static,
     {
-        self.register_named(U::type_with_generics(), into_target)
+        self.serde.register(into_target)
     }
 
     pub fn register_named<U: for<'de> serde::Deserialize<'de>>(
@@ -344,6 +335,29 @@ where
         T: 'static,
     {
         self.serde.register_named(name, into_target)
+    }
+
+    pub fn register_with<U: TypeName + for<'de> serde::Deserialize<'de>>(
+        &self,
+        type_factory: SerdeFactory<T>,
+    ) -> Result<TypeId, HandleError>
+    where
+        U: 'static,
+        T: 'static,
+    {
+        self.serde.register_with::<U>(type_factory)
+    }
+
+    pub fn register_named_with<U: for<'de> serde::Deserialize<'de>>(
+        &self,
+        name: impl AsRef<str>,
+        type_factory: SerdeFactory<T>,
+    ) -> Result<TypeId, HandleError>
+    where
+        U: 'static,
+        T: 'static,
+    {
+        self.serde.register_named_with::<U>(name, type_factory)
     }
 
     pub fn get_serde_factory(
@@ -365,7 +379,7 @@ where
         format: &dyn ErasedDeserialize<T>,
         type_id: TypeId,
     ) -> Result<Option<DirectFactory<T>>, Box<dyn std::error::Error>> {
-        format.get_deserializer(type_id)
+        format.get_factory(type_id)
     }
 
     pub fn get_erased_factory_by_name(
@@ -378,7 +392,28 @@ where
         let type_id = self.type_registry.get_id_by_name(name)?.ok_or_else(|| {
             format!("Type '{name_clone}' not registered with the `TypeId` registry")
         })?;
-        format.get_deserializer(type_id)
+        format.get_factory(type_id)
+    }
+
+    pub fn serialize_registered(
+        &self,
+        format: &Format<T>,
+        type_id: TypeId,
+        value: &T,
+        writer: &mut dyn std::io::Write,
+    ) -> Result<(), HandleError>
+    where
+        T: erased_serde::Serialize,
+    {
+        match format {
+            Format::Serde(s) => self
+                .serde
+                .serialize_registered(s.as_ref(), type_id, value, writer),
+            Format::Erased(e) => self
+                .erased
+                .serialize_registered(e.as_ref(), type_id, value, writer)
+                .map_err(|e| HandleError::Serialization(e.to_string())),
+        }
     }
 
     pub fn deserialize_slice(
@@ -480,9 +515,35 @@ where
             },
         );
 
-        let factory_id = self
-            .registry
-            .push(TypeFactory::new(slice_factory, reader_factory))?;
+        let factory_id =
+            self.registry
+                .push(TypeFactory::new(slice_factory, reader_factory, None))?;
+        self.id_map.insert(type_id, factory_id)?;
+        Ok(type_id)
+    }
+
+    pub fn register_with<U: TypeName + for<'de> serde::Deserialize<'de>>(
+        &self,
+        type_factory: SerdeFactory<T>,
+    ) -> Result<TypeId, HandleError>
+    where
+        U: 'static,
+        T: 'static,
+    {
+        self.register_named_with::<U>(U::type_with_generics(), type_factory)
+    }
+
+    pub fn register_named_with<U: for<'de> serde::Deserialize<'de>>(
+        &self,
+        name: impl AsRef<str>,
+        type_factory: SerdeFactory<T>,
+    ) -> Result<TypeId, HandleError>
+    where
+        U: 'static,
+        T: 'static,
+    {
+        let type_id = self.type_registry.register_named(name)?;
+        let factory_id = self.registry.push(type_factory)?;
         self.id_map.insert(type_id, factory_id)?;
         Ok(type_id)
     }
@@ -502,6 +563,28 @@ where
             Some(id) => self.get_factory(id),
             None => Ok(None),
         }
+    }
+
+    pub fn serialize_registered(
+        &self,
+        format: &dyn SerdeFormat,
+        type_id: TypeId,
+        value: &T,
+        writer: &mut dyn std::io::Write,
+    ) -> Result<(), HandleError>
+    where
+        T: erased_serde::Serialize,
+    {
+        let factory = self.get_factory(type_id)?.ok_or_else(|| {
+            HandleError::Serialization(format!("Factory not found for {type_id}"))
+        })?;
+        if let Some(prelude) = factory.serialization_prelude {
+            prelude(value, writer).map_err(|e| HandleError::Serialization(e.to_string()))?;
+        }
+
+        format
+            .serialize(value, writer)
+            .map_err(|e| HandleError::Serialization(e.to_string()))
     }
 
     pub fn deserialize_slice(
@@ -530,7 +613,6 @@ where
 }
 
 // ----- Erased Registry -----
-pub type ErasedFactory<T> = TypeFactory<T, dyn ErasedDeserialize<T>>;
 pub type DirectFactory<T> = TypeFactory<T, dyn std::any::Any>;
 
 pub struct ErasedTypeRegistry<T: 'static> {
@@ -544,6 +626,25 @@ impl<T> ErasedTypeRegistry<T> {
         }
     }
 
+    pub fn serialize_registered(
+        &self,
+        format: &dyn ErasedDeserialize<T>,
+        type_id: TypeId,
+        value: &T,
+        writer: &mut dyn std::io::Write,
+    ) -> Result<(), Box<dyn std::error::Error>>
+    where
+        T: erased_serde::Serialize,
+    {
+        let factory = format
+            .get_factory(type_id)?
+            .ok_or_else(|| format!("No factory registered for type with id '{type_id}'"))?;
+        if let Some(prelude) = factory.serialization_prelude {
+            prelude(value, writer)?;
+        }
+        format.serialize(value, writer)
+    }
+
     pub fn deserialize_slice(
         &self,
         format: &dyn ErasedDeserialize<T>,
@@ -551,7 +652,7 @@ impl<T> ErasedTypeRegistry<T> {
         data: &[u8],
     ) -> Result<T, Box<dyn std::error::Error>> {
         let factory = format
-            .get_deserializer(type_id)?
+            .get_factory(type_id)?
             .ok_or_else(|| format!("No factory registered for type with id '{type_id}'"))?;
         (factory.slice)(format.as_any(), data)
     }
@@ -563,7 +664,7 @@ impl<T> ErasedTypeRegistry<T> {
         reader: &mut dyn std::io::Read,
     ) -> Result<T, Box<dyn std::error::Error>> {
         let factory = format
-            .get_deserializer(type_id)?
+            .get_factory(type_id)?
             .ok_or_else(|| format!("No factory registered for type with id '{type_id}'"))?;
         (factory.reader)(format.as_any(), reader)
     }
@@ -574,8 +675,6 @@ macro_rules! register_type {
     ($self:expr, $type_registry:expr, $into_target:expr, $name:expr, $concrete_type:ty, $error_msg:expr) => {{
         let into_target = std::sync::Arc::new($into_target);
         let into_target_clone = into_target.clone();
-        let type_id = $type_registry.register_named($name)?;
-
         let slice_deser_fn = move |fmt: &dyn std::any::Any, data: &[u8]| {
             let me = fmt
                 .downcast_ref::<$concrete_type>()
@@ -591,13 +690,24 @@ macro_rules! register_type {
             Ok(into_target_clone(value))
         };
 
-        $self.deserializers.try_insert(
-            type_id,
+        $crate::register_type_with!(
+            $self,
+            $type_registry,
             $crate::serde_utils::serde_registries::TypeFactory::new(
                 std::sync::Arc::new(slice_deser_fn),
                 std::sync::Arc::new(reader_deser_fn),
+                None
             ),
-        )?;
+            $name
+        )
+    }};
+}
+
+#[macro_export]
+macro_rules! register_type_with {
+    ($self:expr, $type_registry:expr, $type_factory:expr, $name:expr) => {{
+        let type_id = $type_registry.register_named($name)?;
+        $self.deserializers.try_insert(type_id, $type_factory)?;
         Ok(type_id)
     }};
 }
@@ -606,17 +716,15 @@ macro_rules! register_type {
 // Allows 4.92+ billion types to be loaded at once at the cost of 4 bytes.
 pub type TypeId = u32;
 
-impl BeBytes for TypeId {
+impl AsBytes for TypeId {
     const LEN: usize = 4;
 
-    fn to_be_bytes<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+    fn to_bytes<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
         writer.write_all(&u32::to_be_bytes(*self))
     }
 
-    fn from_be_bytes(buffer: &[u8]) -> Result<Self, HandleError> {
-        Ok(u32::from_be_bytes(buffer.try_into().map_err(|e| {
-            HandleError::Deserialization(format!("{e}"))
-        })?))
+    fn from_bytes(buffer: &[u8]) -> Result<Self, Box<dyn std::error::Error>> {
+        Ok(u32::from_be_bytes(buffer.try_into()?))
     }
 }
 
@@ -627,16 +735,27 @@ type TypeReaderFactory<T, F> = Arc<
         + Send
         + Sync,
 >;
+type TypeWriterFactory<T> = Arc<
+    dyn Fn(&T, &mut dyn std::io::Write) -> Result<(), Box<dyn std::error::Error>> + Send + Sync,
+>;
+//REVIEW: Switch to an enum like so to allow fully custom logic
+/*enum TypeWriter<T, F> {
+    Default,
+    Prelude(T),
+    Custom(T, F),
+}*/
 
 pub struct TypeFactory<T, F: ?Sized> {
     slice: TypeSliceFactory<T, F>,
     reader: TypeReaderFactory<T, F>,
+    serialization_prelude: Option<TypeWriterFactory<T>>,
 }
 
+//TODO: remove if unused
 impl<T, F: ?Sized> From<(TypeSliceFactory<T, F>, TypeReaderFactory<T, F>)> for TypeFactory<T, F> {
     fn from(value: (TypeSliceFactory<T, F>, TypeReaderFactory<T, F>)) -> Self {
         let (slice, reader) = value;
-        TypeFactory::new(slice, reader)
+        TypeFactory::new(slice, reader, None)
     }
 }
 
@@ -645,13 +764,22 @@ impl<T, F: ?Sized> Clone for TypeFactory<T, F> {
         Self {
             slice: self.slice.clone(),
             reader: self.reader.clone(),
+            serialization_prelude: self.serialization_prelude.clone(),
         }
     }
 }
 
 impl<T, F: ?Sized> TypeFactory<T, F> {
-    pub fn new(slice: TypeSliceFactory<T, F>, reader: TypeReaderFactory<T, F>) -> Self {
-        Self { slice, reader }
+    pub fn new(
+        slice: TypeSliceFactory<T, F>,
+        reader: TypeReaderFactory<T, F>,
+        serialization_prelude: Option<TypeWriterFactory<T>>,
+    ) -> Self {
+        Self {
+            slice,
+            reader,
+            serialization_prelude,
+        }
     }
 }
 
@@ -771,7 +899,10 @@ mod tests {
         #[default]
         A,
         B(u8),
-        C { name: String, age: u8 },
+        C {
+            name: String,
+            age: u8,
+        },
     }
 
     #[test]
@@ -896,18 +1027,12 @@ mod tests {
         let mut encoded = Vec::new();
 
         TEST_FORMATS()
-            .serialize(
-                format_id,
-                type_id,
-                &Test::default(),
-                &mut encoded,
-            )
+            .serialize(format_id, type_id, &Test::default(), &mut encoded)
             .unwrap();
 
         let unknown_format_id = (0..=u8::MAX)
             .find(|candidate| {
-                *candidate != format_id
-                    && TEST_FORMATS().get_format(*candidate).unwrap().is_none()
+                *candidate != format_id && TEST_FORMATS().get_format(*candidate).unwrap().is_none()
             })
             .expect("test registry should have an unused format id");
         encoded[0] = unknown_format_id;
@@ -923,12 +1048,7 @@ mod tests {
         let mut encoded = Vec::new();
 
         TEST_FORMATS()
-            .serialize(
-                format_id,
-                type_id,
-                &Test::default(),
-                &mut encoded,
-            )
+            .serialize(format_id, type_id, &Test::default(), &mut encoded)
             .unwrap();
 
         encoded[1..5].copy_from_slice(&u32::MAX.to_be_bytes());

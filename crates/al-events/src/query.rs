@@ -5,7 +5,8 @@ define_message_kind!(Query);
 /// The `Query` trait defines the required methods for query types to exist in the system
 /// along with trait bounds that dont interfere with trait object usage.
 pub trait Query: QueryHelpers + erased_serde::Serialize {
-    //fn execute(self: Box<Self>); //TODO: add context parameter?
+    //TODO: add response type
+    //type Response: Send + 'static;
 }
 
 #[cfg(test)]
@@ -35,22 +36,25 @@ mod tests {
             name: "slice".to_string(),
         };
         let boxed = original.clone().to_msg();
+        
+        let meta = boxed.as_query().and_then(|(_, m)| Some(m)).unwrap();
 
         // Serialize to `(format_id, type_id, JSON)`
         let mut encoded = Vec::new();
         MESSAGE_FORMATS()
-            .serialize(format_id, type_id, &boxed, &mut encoded)
+            .serialize_registered(MESSAGE_TYPE_REGISTRY(), format_id, type_id, &boxed, &mut encoded)
             .unwrap();
 
         // Deserialize back to DynMessage::Command
         let decoded = MESSAGE_FORMATS()
             .deserialize_slice(MESSAGE_TYPE_REGISTRY(), &encoded)
             .unwrap();
+        assert_eq!(meta, decoded.as_query().and_then(|(_, m)| Some(m)).unwrap());
 
         // Downcast to concrete type and compare
         let downcast = decoded
             .as_query()
-            .and_then(|q| q.downcast_ref::<TestQuery>())
+            .and_then(|(q, _)| q.downcast_ref::<TestQuery>())
             .unwrap();
         assert_eq!(downcast, &original);
     }
@@ -64,18 +68,22 @@ mod tests {
             name: "reader".to_string(),
         };
 
+        let boxed = original.clone().to_msg();
+        let meta = boxed.as_query().and_then(|(_, m)| Some(m)).unwrap();
+
         let mut encoded = Vec::new();
         MESSAGE_FORMATS()
-            .serialize(format_id, type_id, &original.clone().to_msg(), &mut encoded)
+            .serialize_registered(MESSAGE_TYPE_REGISTRY(),format_id, type_id, &boxed, &mut encoded)
             .unwrap();
 
         let decoded = MESSAGE_FORMATS()
             .deserialize_reader(MESSAGE_TYPE_REGISTRY(), &mut encoded.as_slice())
             .unwrap();
+        assert_eq!(meta, decoded.as_query().and_then(|(_, m)| Some(m)).unwrap());
 
         let downcast = decoded
             .as_query()
-            .and_then(|q| q.downcast_ref::<TestQuery>())
+            .and_then(|(q, _)| q.downcast_ref::<TestQuery>())
             .unwrap();
         assert_eq!(downcast, &original);
     }

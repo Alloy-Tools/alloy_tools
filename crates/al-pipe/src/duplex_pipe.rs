@@ -108,7 +108,8 @@ impl DuplexPipe {
         let queue_child_out = Arc::new(Queue::new());
         let last_error = Arc::new(Mutex::new(None));
 
-        let write_last_error = last_error.clone();
+        //REVIEW: Do something with the last error
+        let _write_last_error = last_error.clone();
         let write_queue = queue_child_in.clone();
         let write_thread: tokio::task::JoinHandle<Result<(), DuplexPipeError>> =
             tokio::spawn(async move {
@@ -218,7 +219,8 @@ impl DuplexPipe {
         let queue_child_out = Arc::new(Queue::new());
         let last_error = Arc::new(Mutex::new(None));
 
-        let read_last_error = last_error.clone();
+        //REVIEW: Do something with the last error
+        let _read_last_error = last_error.clone();
         let read_queue = queue_child_in.clone();
         let read_thread: tokio::task::JoinHandle<Result<(), DuplexPipeError>> =
             tokio::spawn(async move {

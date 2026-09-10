@@ -1,11 +1,17 @@
-use crate::{Command, Event, Query};
+use crate::{
+    metadata::{CommandMeta, EventMeta, QueryMeta},
+    Command, Event, Query,
+};
+use al_structures::traits::DynTypeName;
 #[cfg(feature = "serde")]
 use al_structures::{
     collections::storage::CowStorage,
     serde_utils::serde_registries::{FormatTypeRegistry, SerdeFactory, TypeId, TypeIdRegistry},
 };
+use std::time::Duration;
 #[cfg(feature = "serde")]
 use std::{collections::HashMap, sync::Arc};
+use uuid::Uuid;
 
 #[cfg(feature = "serde")]
 type CowVec<V> = CowStorage<Vec<V>>;
@@ -32,9 +38,27 @@ impl<Cmd: serde::Serialize, Evt: serde::Serialize, Qry: serde::Serialize> serde:
         S: serde::Serializer,
     {
         match self {
-            Message::Command(m) => m.serialize(serializer),
-            Message::Event(m) => m.serialize(serializer),
-            Message::Query(m) => m.serialize(serializer),
+            Message::Command(m, _) => m.serialize(serializer),
+            Message::Event(m, _) => m.serialize(serializer),
+            Message::Query(m, _) => m.serialize(serializer),
+        }
+    }
+}
+
+impl<Cmd: DynTypeName, Evt: DynTypeName, Qry: DynTypeName> DynTypeName for Message<Cmd, Evt, Qry> {
+    fn module_path(&self) -> &'static str {
+        match self {
+            Message::Command(c, _) => c.module_path(),
+            Message::Event(e, _) => e.module_path(),
+            Message::Query(q, _) => q.module_path(),
+        }
+    }
+
+    fn type_with_generics(&self) -> String {
+        match self {
+            Message::Command(c, _) => c.type_with_generics(),
+            Message::Event(e, _) => e.type_with_generics(),
+            Message::Query(q, _) => q.type_with_generics(),
         }
     }
 }
@@ -43,83 +67,91 @@ pub type DynMessage = Message<Box<dyn Command>, Box<dyn Event>, Box<dyn Query>>;
 
 #[derive(Debug)]
 pub enum Message<Cmd, Evt, Qry> {
-    Command(Cmd),
-    Event(Evt),
-    Query(Qry),
+    Command(Cmd, CommandMeta),
+    Event(Evt, EventMeta),
+    Query(Qry, QueryMeta),
 }
 
 impl<Cmd, Evt, Qry> Message<Cmd, Evt, Qry> {
-    pub fn command(cmd: Cmd) -> Self {
-        Self::Command(cmd)
-    }
-    pub fn event(evt: Evt) -> Self {
-        Self::Event(evt)
-    }
-    pub fn query(qry: Qry) -> Self {
-        Self::Query(qry)
-    }
-
-    pub fn into_command(self) -> Option<Cmd> {
-        if let Self::Command(c) = self {
-            Some(c)
-        } else {
-            None
-        }
-    }
-    pub fn into_event(self) -> Option<Evt> {
-        if let Self::Event(e) = self {
-            Some(e)
-        } else {
-            None
-        }
-    }
-    pub fn into_query(self) -> Option<Qry> {
-        if let Self::Query(q) = self {
-            Some(q)
-        } else {
-            None
+    pub fn as_string(&self) -> &str {
+        match self {
+            Message::Command(..) => "Command",
+            Message::Event(..) => "Event",
+            Message::Query(..) => "Query",
         }
     }
 
-    pub fn as_command(&self) -> Option<&Cmd> {
-        if let Self::Command(c) = self {
-            Some(c)
+    pub fn command(cmd: Cmd, correlation_id: Uuid, expected_version: Option<u64>) -> Self {
+        Self::Command(cmd, CommandMeta::new(correlation_id, expected_version))
+    }
+    pub fn event(evt: Evt, correlation_id: Uuid) -> Self {
+        Self::Event(evt, EventMeta::new(correlation_id))
+    }
+    pub fn query(qry: Qry, correlation_id: Uuid, timeout: Option<Duration>) -> Self {
+        Self::Query(qry, QueryMeta::new(correlation_id, timeout))
+    }
+
+    pub fn into_command(self) -> Option<(Cmd, CommandMeta)> {
+        if let Self::Command(c, m) = self {
+            Some((c, m))
         } else {
             None
         }
     }
-    pub fn as_event(&self) -> Option<&Evt> {
-        if let Self::Event(e) = self {
-            Some(e)
+    pub fn into_event(self) -> Option<(Evt, EventMeta)> {
+        if let Self::Event(e, m) = self {
+            Some((e, m))
         } else {
             None
         }
     }
-    pub fn as_query(&self) -> Option<&Qry> {
-        if let Self::Query(q) = self {
-            Some(q)
+    pub fn into_query(self) -> Option<(Qry, QueryMeta)> {
+        if let Self::Query(q, m) = self {
+            Some((q, m))
         } else {
             None
         }
     }
 
-    pub fn as_mut_command(&mut self) -> Option<&mut Cmd> {
-        if let Self::Command(c) = self {
-            Some(c)
+    pub fn as_command(&self) -> Option<(&Cmd, &CommandMeta)> {
+        if let Self::Command(c, m) = self {
+            Some((c, m))
         } else {
             None
         }
     }
-    pub fn as_mut_event(&mut self) -> Option<&mut Evt> {
-        if let Self::Event(e) = self {
-            Some(e)
+    pub fn as_event(&self) -> Option<(&Evt, &EventMeta)> {
+        if let Self::Event(e, m) = self {
+            Some((e, m))
         } else {
             None
         }
     }
-    pub fn as_mut_query(&mut self) -> Option<&mut Qry> {
-        if let Self::Query(q) = self {
-            Some(q)
+    pub fn as_query(&self) -> Option<(&Qry, &QueryMeta)> {
+        if let Self::Query(q, m) = self {
+            Some((q, m))
+        } else {
+            None
+        }
+    }
+
+    pub fn as_mut_command(&mut self) -> Option<(&mut Cmd, &mut CommandMeta)> {
+        if let Self::Command(c, m) = self {
+            Some((c, m))
+        } else {
+            None
+        }
+    }
+    pub fn as_mut_event(&mut self) -> Option<(&mut Evt, &mut EventMeta)> {
+        if let Self::Event(e, m) = self {
+            Some((e, m))
+        } else {
+            None
+        }
+    }
+    pub fn as_mut_query(&mut self) -> Option<(&mut Qry, &mut QueryMeta)> {
+        if let Self::Query(q, m) = self {
+            Some((q, m))
         } else {
             None
         }
@@ -127,32 +159,32 @@ impl<Cmd, Evt, Qry> Message<Cmd, Evt, Qry> {
 
     pub fn map_command<U, F>(self, f: F) -> Message<U, Evt, Qry>
     where
-        F: FnOnce(Cmd) -> U,
+        F: FnOnce(Cmd, &mut CommandMeta) -> U,
     {
         match self {
-            Message::Command(c) => Message::Command(f(c)),
-            Message::Event(e) => Message::Event(e),
-            Message::Query(q) => Message::Query(q),
+            Message::Command(c, mut meta) => Message::Command(f(c, &mut meta), meta),
+            Message::Event(e, meta) => Message::Event(e, meta),
+            Message::Query(q, meta) => Message::Query(q, meta),
         }
     }
     pub fn map_event<U, F>(self, f: F) -> Message<Cmd, U, Qry>
     where
-        F: FnOnce(Evt) -> U,
+        F: FnOnce(Evt, &mut EventMeta) -> U,
     {
         match self {
-            Message::Command(c) => Message::Command(c),
-            Message::Event(e) => Message::Event(f(e)),
-            Message::Query(q) => Message::Query(q),
+            Message::Command(c, meta) => Message::Command(c, meta),
+            Message::Event(e, mut meta) => Message::Event(f(e, &mut meta), meta),
+            Message::Query(q, meta) => Message::Query(q, meta),
         }
     }
     pub fn map_query<U, F>(self, f: F) -> Message<Cmd, Evt, U>
     where
-        F: FnOnce(Qry) -> U,
+        F: FnOnce(Qry, &mut QueryMeta) -> U,
     {
         match self {
-            Message::Command(c) => Message::Command(c),
-            Message::Event(e) => Message::Event(e),
-            Message::Query(q) => Message::Query(f(q)),
+            Message::Command(c, meta) => Message::Command(c, meta),
+            Message::Event(e, meta) => Message::Event(e, meta),
+            Message::Query(q, mut meta) => Message::Query(f(q, &mut meta), meta),
         }
     }
 }
@@ -160,9 +192,9 @@ impl<Cmd, Evt, Qry> Message<Cmd, Evt, Qry> {
 impl<Cmd: Clone, Evt: Clone, Qry: Clone> Clone for Message<Cmd, Evt, Qry> {
     fn clone(&self) -> Self {
         match self {
-            Message::Command(c) => Message::Command(c.clone()),
-            Message::Event(e) => Message::Event(e.clone()),
-            Message::Query(q) => Message::Query(q.clone()),
+            Message::Command(c, meta) => Message::Command(c.clone(), meta.clone()),
+            Message::Event(e, meta) => Message::Event(e.clone(), meta.clone()),
+            Message::Query(q, meta) => Message::Query(q.clone(), meta.clone()),
         }
     }
 }
@@ -170,9 +202,9 @@ impl<Cmd: Clone, Evt: Clone, Qry: Clone> Clone for Message<Cmd, Evt, Qry> {
 impl<Cmd: PartialEq, Evt: PartialEq, Qry: PartialEq> PartialEq for Message<Cmd, Evt, Qry> {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Message::Command(a), Message::Command(b)) => a == b,
-            (Message::Event(a), Message::Event(b)) => a == b,
-            (Message::Query(a), Message::Query(b)) => a == b,
+            (Message::Command(a, m_a), Message::Command(b, m_b)) => a == b && m_a == m_b,
+            (Message::Event(a, m_a), Message::Event(b, m_b)) => a == b && m_a == m_b,
+            (Message::Query(a, m_a), Message::Query(b, m_b)) => a == b && m_a == m_b,
             _ => false,
         }
     }
@@ -185,16 +217,25 @@ impl<Cmd: std::hash::Hash, Evt: std::hash::Hash, Qry: std::hash::Hash> std::hash
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         std::mem::discriminant(self).hash(state);
         match self {
-            Message::Command(c) => c.hash(state),
-            Message::Event(e) => e.hash(state),
-            Message::Query(q) => q.hash(state),
+            Message::Command(c, m) => {
+                c.hash(state);
+                m.hash(state);
+            }
+            Message::Event(e, m) => {
+                e.hash(state);
+                m.hash(state);
+            }
+            Message::Query(q, m) => {
+                q.hash(state);
+                m.hash(state);
+            }
         }
     }
 }
 
 impl<Cmd: Default, Evt, Qry> Default for Message<Cmd, Evt, Qry> {
     fn default() -> Self {
-        Message::Command(Cmd::default())
+        Message::Command(Cmd::default(), Default::default())
     }
 }
 
@@ -202,89 +243,92 @@ impl<Cmd: Default, Evt, Qry> Default for Message<Cmd, Evt, Qry> {
 pub use borrow::BorrowedMessage;
 #[cfg(feature = "borrow")]
 mod borrow {
-    use super::Message;
+    use super::{CommandMeta, EventMeta, Message, QueryMeta, Uuid};
     use std::marker::PhantomData;
 
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     #[derive(Debug)]
     pub enum BorrowedMessage<'a, Cmd, Evt, Qry> {
-        Command(Cmd, #[serde(skip)] PhantomData<&'a ()>),
-        Event(Evt, #[serde(skip)] PhantomData<&'a ()>),
-        Query(Qry, #[serde(skip)] PhantomData<&'a ()>),
+        Command(Cmd, CommandMeta, PhantomData<&'a ()>),
+        Event(Evt, EventMeta, PhantomData<&'a ()>),
+        Query(Qry, QueryMeta, PhantomData<&'a ()>),
     }
 
     impl<'de, Cmd, Evt, Qry> BorrowedMessage<'de, Cmd, Evt, Qry> {
-        pub fn command(cmd: Cmd) -> Self {
-            BorrowedMessage::Command(cmd, PhantomData)
+        pub fn command(cmd: Cmd, correlation_id: Uuid, expected_version: Option<u64>) -> Self {
+            BorrowedMessage::Command(
+                cmd,
+                CommandMeta::new(correlation_id, expected_version),
+                PhantomData,
+            )
         }
-        pub fn event(evt: Evt) -> Self {
-            BorrowedMessage::Event(evt, PhantomData)
+        pub fn event(evt: Evt, correlation_id: Uuid) -> Self {
+            BorrowedMessage::Event(evt, EventMeta::new(correlation_id), PhantomData)
         }
-        pub fn query(qry: Qry) -> Self {
-            BorrowedMessage::Query(qry, PhantomData)
-        }
-
-        pub fn into_command(self) -> Option<Cmd> {
-            if let Self::Command(c, ..) = self {
-                Some(c)
-            } else {
-                None
-            }
-        }
-        pub fn into_event(self) -> Option<Evt> {
-            if let Self::Event(e, ..) = self {
-                Some(e)
-            } else {
-                None
-            }
-        }
-        pub fn into_query(self) -> Option<Qry> {
-            if let Self::Query(q, ..) = self {
-                Some(q)
-            } else {
-                None
-            }
+        pub fn query(qry: Qry, correlation_id: Uuid, timeout: Option<std::time::Duration>) -> Self {
+            BorrowedMessage::Query(qry, QueryMeta::new(correlation_id, timeout), PhantomData)
         }
 
-        pub fn as_command(&self) -> Option<&Cmd> {
-            if let Self::Command(c, ..) = self {
-                Some(c)
+        pub fn into_command(self) -> Option<(Cmd, CommandMeta)> {
+            if let Self::Command(c, m, _) = self {
+                Some((c, m))
             } else {
                 None
             }
         }
-        pub fn as_event(&self) -> Option<&Evt> {
-            if let Self::Event(e, ..) = self {
-                Some(e)
+        pub fn into_event(self) -> Option<(Evt, EventMeta)> {
+            if let Self::Event(e, m, _) = self {
+                Some((e, m))
             } else {
                 None
             }
         }
-        pub fn as_query(&self) -> Option<&Qry> {
-            if let Self::Query(q, ..) = self {
-                Some(q)
+        pub fn into_query(self) -> Option<(Qry, QueryMeta)> {
+            if let Self::Query(q, m, _) = self {
+                Some((q, m))
             } else {
                 None
             }
         }
 
-        pub fn as_mut_command(&mut self) -> Option<&mut Cmd> {
-            if let Self::Command(c, ..) = self {
-                Some(c)
+        pub fn as_command(&self) -> Option<(&Cmd, &CommandMeta)> {
+            if let Self::Command(c, m, _) = self {
+                Some((c, m))
             } else {
                 None
             }
         }
-        pub fn as_mut_event(&mut self) -> Option<&mut Evt> {
-            if let Self::Event(e, ..) = self {
-                Some(e)
+        pub fn as_event(&self) -> Option<(&Evt, &EventMeta)> {
+            if let Self::Event(e, m, _) = self {
+                Some((e, m))
             } else {
                 None
             }
         }
-        pub fn as_mut_query(&mut self) -> Option<&mut Qry> {
-            if let Self::Query(q, ..) = self {
-                Some(q)
+        pub fn as_query(&self) -> Option<(&Qry, &QueryMeta)> {
+            if let Self::Query(q, m, _) = self {
+                Some((q, m))
+            } else {
+                None
+            }
+        }
+
+        pub fn as_mut_command(&mut self) -> Option<(&mut Cmd, &mut CommandMeta)> {
+            if let Self::Command(c, m, _) = self {
+                Some((c, m))
+            } else {
+                None
+            }
+        }
+        pub fn as_mut_event(&mut self) -> Option<(&mut Evt, &mut EventMeta)> {
+            if let Self::Event(e, m, _) = self {
+                Some((e, m))
+            } else {
+                None
+            }
+        }
+        pub fn as_mut_query(&mut self) -> Option<(&mut Qry, &mut QueryMeta)> {
+            if let Self::Query(q, m, _) = self {
+                Some((q, m))
             } else {
                 None
             }
@@ -292,32 +336,34 @@ mod borrow {
 
         pub fn map_command<U, F>(self, f: F) -> BorrowedMessage<'de, U, Evt, Qry>
         where
-            F: FnOnce(Cmd) -> U,
+            F: FnOnce(Cmd, &mut CommandMeta) -> U,
         {
             match self {
-                BorrowedMessage::Command(c, p) => BorrowedMessage::Command(f(c), p),
-                BorrowedMessage::Event(e, p) => BorrowedMessage::Event(e, p),
-                BorrowedMessage::Query(q, p) => BorrowedMessage::Query(q, p),
+                BorrowedMessage::Command(c, mut m, p) => {
+                    BorrowedMessage::Command(f(c, &mut m), m, p)
+                }
+                BorrowedMessage::Event(e, m, p) => BorrowedMessage::Event(e, m, p),
+                BorrowedMessage::Query(q, m, p) => BorrowedMessage::Query(q, m, p),
             }
         }
         pub fn map_event<U, F>(self, f: F) -> BorrowedMessage<'de, Cmd, U, Qry>
         where
-            F: FnOnce(Evt) -> U,
+            F: FnOnce(Evt, &mut EventMeta) -> U,
         {
             match self {
-                BorrowedMessage::Command(c, p) => BorrowedMessage::Command(c, p),
-                BorrowedMessage::Event(e, p) => BorrowedMessage::Event(f(e), p),
-                BorrowedMessage::Query(q, p) => BorrowedMessage::Query(q, p),
+                BorrowedMessage::Command(c, m, p) => BorrowedMessage::Command(c, m, p),
+                BorrowedMessage::Event(e, mut m, p) => BorrowedMessage::Event(f(e, &mut m), m, p),
+                BorrowedMessage::Query(q, m, p) => BorrowedMessage::Query(q, m, p),
             }
         }
         pub fn map_query<U, F>(self, f: F) -> BorrowedMessage<'de, Cmd, Evt, U>
         where
-            F: FnOnce(Qry) -> U,
+            F: FnOnce(Qry, &mut QueryMeta) -> U,
         {
             match self {
-                BorrowedMessage::Command(c, p) => BorrowedMessage::Command(c, p),
-                BorrowedMessage::Event(e, p) => BorrowedMessage::Event(e, p),
-                BorrowedMessage::Query(q, p) => BorrowedMessage::Query(f(q), p),
+                BorrowedMessage::Command(c, m, p) => BorrowedMessage::Command(c, m, p),
+                BorrowedMessage::Event(e, m, p) => BorrowedMessage::Event(e, m, p),
+                BorrowedMessage::Query(q, mut m, p) => BorrowedMessage::Query(f(q, &mut m), m, p),
             }
         }
     }
@@ -325,9 +371,15 @@ mod borrow {
     impl<'de, Cmd: Clone, Evt: Clone, Qry: Clone> Clone for BorrowedMessage<'de, Cmd, Evt, Qry> {
         fn clone(&self) -> Self {
             match self {
-                BorrowedMessage::Command(c, p) => BorrowedMessage::Command(c.clone(), p.clone()),
-                BorrowedMessage::Event(e, p) => BorrowedMessage::Event(e.clone(), p.clone()),
-                BorrowedMessage::Query(q, p) => BorrowedMessage::Query(q.clone(), p.clone()),
+                BorrowedMessage::Command(c, m, p) => {
+                    BorrowedMessage::Command(c.clone(), m.clone(), p.clone())
+                }
+                BorrowedMessage::Event(e, m, p) => {
+                    BorrowedMessage::Event(e.clone(), m.clone(), p.clone())
+                }
+                BorrowedMessage::Query(q, m, p) => {
+                    BorrowedMessage::Query(q.clone(), m.clone(), p.clone())
+                }
             }
         }
     }
@@ -337,9 +389,15 @@ mod borrow {
     {
         fn eq(&self, other: &Self) -> bool {
             match (self, other) {
-                (BorrowedMessage::Command(a, ..), BorrowedMessage::Command(b, ..)) => a == b,
-                (BorrowedMessage::Event(a, ..), BorrowedMessage::Event(b, ..)) => a == b,
-                (BorrowedMessage::Query(a, ..), BorrowedMessage::Query(b, ..)) => a == b,
+                (BorrowedMessage::Command(a, m_a, _), BorrowedMessage::Command(b, m_b, _)) => {
+                    a == b && m_a == m_b
+                }
+                (BorrowedMessage::Event(a, m_a, _), BorrowedMessage::Event(b, m_b, _)) => {
+                    a == b && m_a == m_b
+                }
+                (BorrowedMessage::Query(a, m_a, _), BorrowedMessage::Query(b, m_b, _)) => {
+                    a == b && m_a == m_b
+                }
                 _ => false,
             }
         }
@@ -352,16 +410,25 @@ mod borrow {
         fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
             std::mem::discriminant(self).hash(state);
             match self {
-                BorrowedMessage::Command(c, ..) => c.hash(state),
-                BorrowedMessage::Event(e, ..) => e.hash(state),
-                BorrowedMessage::Query(q, ..) => q.hash(state),
+                BorrowedMessage::Command(c, m, _) => {
+                    c.hash(state);
+                    m.hash(state);
+                }
+                BorrowedMessage::Event(e, m, _) => {
+                    e.hash(state);
+                    m.hash(state);
+                }
+                BorrowedMessage::Query(q, m, _) => {
+                    q.hash(state);
+                    m.hash(state);
+                }
             }
         }
     }
 
     impl<'de, Cmd: Default, Evt, Qry> Default for BorrowedMessage<'de, Cmd, Evt, Qry> {
         fn default() -> Self {
-            BorrowedMessage::command(Cmd::default())
+            BorrowedMessage::Command(Cmd::default(), Default::default(), PhantomData)
         }
     }
 
@@ -373,9 +440,9 @@ mod borrow {
     {
         fn from(val: BorrowedMessage<'de, Cmd, Evt, Qry>) -> Self {
             match val {
-                BorrowedMessage::Command(cmd, ..) => Message::Command(cmd.to_owned()),
-                BorrowedMessage::Event(evt, ..) => Message::Event(evt.to_owned()),
-                BorrowedMessage::Query(qry, ..) => Message::Query(qry.to_owned()),
+                BorrowedMessage::Command(cmd, m, _) => Message::Command(cmd.to_owned(), m),
+                BorrowedMessage::Event(evt, m, _) => Message::Event(evt.to_owned(), m),
+                BorrowedMessage::Query(qry, m, _) => Message::Query(qry.to_owned(), m),
             }
         }
     }
@@ -420,7 +487,7 @@ macro_rules! define_message_kind {
                 where
                     Self: Sized,
                 {
-                    DynMessage::$kind(Box::new(self))
+                    DynMessage::$kind(Box::new(self), Default::default())
                 }
                 fn [<clone_ $kind:snake>](&self) -> Box<dyn $kind> {
                     Box::new(self.clone())
@@ -438,6 +505,7 @@ macro_rules! define_message_kind {
             impl<T: [<$kind Marker>] + crate::ObjectTraits> $kind for T {}
 
             impl dyn $kind {
+                //TODO: Remove these and add the `Downcast` trait
                 #[doc = concat!("Downcast `&dyn ", stringify!($kind), "` to a concrete `&T`.")]
                 pub fn downcast_ref<T: $kind>(&self) -> Option<&T> {
                     self.as_any().downcast_ref::<T>()
@@ -501,7 +569,27 @@ macro_rules! define_message_kind {
                 pub fn [<try_register_ $kind:snake _with>]<K: $kind + [<$kind Marker>] + for<'de> serde::Deserialize<'de> + 'static>(
                     registry: &[<$kind Registry>],
                 ) -> Result<al_structures::serde_utils::serde_registries::TypeId, al_structures::collections::storage::utils::HandleError> {
-                    registry.register::<K>(<K as [<$kind Helpers>]>::to_msg)
+                    let slice_factory = std::sync::Arc::new(move |fmt: &dyn $crate::SerdeFormat, data: &[u8]| {
+                        let (meta, offset) = crate::metadata::[<$kind Meta>]::decode_slice(data)?;
+                        let mut de = fmt.deserialize_slice(&data[offset..])?;
+                        Ok(DynMessage::$kind(Box::new(K::deserialize(&mut *de)?), meta))
+                    });
+                    let reader_factory = std::sync::Arc::new(
+                        move |fmt: &dyn $crate::SerdeFormat, reader: &mut dyn std::io::Read| {
+                            let meta = crate::metadata::[<$kind Meta>]::decode_reader(reader)?;
+                            let mut de = fmt.deserialize_reader(reader)?;
+                            Ok(DynMessage::$kind(Box::new(K::deserialize(&mut *de)?), meta))
+                        },
+                    );
+                    let prelude_factory = std::sync::Arc::new(move |value: &DynMessage, writer: &mut dyn std::io::Write| {
+                        let meta = value.[<as_ $kind:snake>]().and_then(|(_, m)| Some(m)).ok_or_else(||
+                            al_structures::collections::storage::utils::HandleError::Serialization(
+                                format!("Expexcted type {} but found type {}", stringify!($kind), value.as_string())
+                            )
+                        )?;
+                        meta.encode(writer).map_err(Into::into)
+                    });
+                    registry.register_with::<K>($crate::TypeFactory::new(slice_factory, reader_factory, Some(prelude_factory)))
                 }
 
                 ::paste::paste! {

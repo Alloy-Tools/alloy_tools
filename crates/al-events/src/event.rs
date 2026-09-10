@@ -33,22 +33,24 @@ mod tests {
             name: "slice".to_string(),
         };
         let boxed = original.clone().to_msg();
+        let meta = boxed.as_event().and_then(|(_, m)| Some(m)).unwrap();
 
         // Serialize to `(format_id, type_id, JSON)`
         let mut encoded = Vec::new();
         MESSAGE_FORMATS()
-            .serialize(format_id, type_id, &boxed, &mut encoded)
+            .serialize_registered(MESSAGE_TYPE_REGISTRY(), format_id, type_id, &boxed, &mut encoded)
             .unwrap();
 
         // Deserialize back to DynMessage::Command
         let decoded = MESSAGE_FORMATS()
             .deserialize_slice(MESSAGE_TYPE_REGISTRY(), &encoded)
             .unwrap();
+        assert_eq!(meta, decoded.as_event().and_then(|(_, m)| Some(m)).unwrap());
 
         // Downcast to concrete type and compare
         let downcast = decoded
             .as_event()
-            .and_then(|e| e.downcast_ref::<TestEvent>())
+            .and_then(|(e, _)| e.downcast_ref::<TestEvent>())
             .unwrap();
         assert_eq!(downcast, &original);
     }
@@ -62,18 +64,22 @@ mod tests {
             name: "reader".to_string(),
         };
 
+        let boxed = original.clone().to_msg();
+        let meta = boxed.as_event().and_then(|(_, m)| Some(m)).unwrap();
+
         let mut encoded = Vec::new();
         MESSAGE_FORMATS()
-            .serialize(format_id, type_id, &original.clone().to_msg(), &mut encoded)
+            .serialize_registered(MESSAGE_TYPE_REGISTRY(), format_id, type_id, &boxed, &mut encoded)
             .unwrap();
 
         let decoded = MESSAGE_FORMATS()
             .deserialize_reader(MESSAGE_TYPE_REGISTRY(), &mut encoded.as_slice())
             .unwrap();
+        assert_eq!(meta, decoded.as_event().and_then(|(_, m)| Some(m)).unwrap());
 
         let downcast = decoded
             .as_event()
-            .and_then(|e| e.downcast_ref::<TestEvent>())
+            .and_then(|(e, _)| e.downcast_ref::<TestEvent>())
             .unwrap();
         assert_eq!(downcast, &original);
     }

@@ -4,9 +4,7 @@ define_message_kind! { Command }
 
 /// The `Command` trait defines the required methods for command types to exist in the system
 /// along with trait bounds that dont interfere with trait object usage.
-pub trait Command: CommandHelpers + erased_serde::Serialize {
-    //fn execute(self: Box<Self>); //TODO: add context parameter?
-}
+pub trait Command: CommandHelpers + erased_serde::Serialize {}
 
 #[cfg(test)]
 mod tests {
@@ -35,22 +33,27 @@ mod tests {
             name: "slice".to_string(),
         };
         let boxed = original.clone().to_msg();
+        let meta = boxed.as_command().and_then(|(_, m)| Some(m)).unwrap();
 
         // Serialize to `(format_id, type_id, JSON)`
         let mut encoded = Vec::new();
         MESSAGE_FORMATS()
-            .serialize(format_id, type_id, &boxed, &mut encoded)
+            .serialize_registered(MESSAGE_TYPE_REGISTRY(), format_id, type_id, &boxed, &mut encoded)
             .unwrap();
 
         // Deserialize back to DynMessage::Command
         let decoded = MESSAGE_FORMATS()
             .deserialize_slice(MESSAGE_TYPE_REGISTRY(), &encoded)
             .unwrap();
+        assert_eq!(
+            meta,
+            decoded.as_command().and_then(|(_, m)| Some(m)).unwrap()
+        );
 
         // Downcast to concrete type and compare
         let downcast = decoded
             .as_command()
-            .and_then(|c| c.downcast_ref::<TestCommand>())
+            .and_then(|(c, _)| c.downcast_ref::<TestCommand>())
             .unwrap();
         assert_eq!(downcast, &original);
     }
@@ -64,18 +67,25 @@ mod tests {
             name: "reader".to_string(),
         };
 
+        let boxed = original.clone().to_msg();
+        let meta = boxed.as_command().and_then(|(_, m)| Some(m)).unwrap();
+
         let mut encoded = Vec::new();
         MESSAGE_FORMATS()
-            .serialize(format_id, type_id, &original.clone().to_msg(), &mut encoded)
+            .serialize_registered(MESSAGE_TYPE_REGISTRY(), format_id, type_id, &boxed, &mut encoded)
             .unwrap();
 
         let decoded = MESSAGE_FORMATS()
             .deserialize_reader(MESSAGE_TYPE_REGISTRY(), &mut encoded.as_slice())
             .unwrap();
+        assert_eq!(
+            meta,
+            decoded.as_command().and_then(|(_, m)| Some(m)).unwrap()
+        );
 
         let downcast = decoded
             .as_command()
-            .and_then(|c| c.downcast_ref::<TestCommand>())
+            .and_then(|(c, _)| c.downcast_ref::<TestCommand>())
             .unwrap();
         assert_eq!(downcast, &original);
     }
