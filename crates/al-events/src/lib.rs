@@ -22,6 +22,8 @@ pub type FormatId = al_structures::serde_utils::serde_registries::FormatId;
 #[cfg(feature = "serde")]
 pub type TypeFactory<T, F> = al_structures::serde_utils::serde_registries::TypeFactory<T, F>;
 #[cfg(feature = "serde")]
+pub use al_structures::serde_utils::serde_format::DeserializeInto;
+#[cfg(feature = "serde")]
 pub use al_structures::serde_utils::serde_format::SerdeFormat;
 
 #[cfg(feature = "serde")]

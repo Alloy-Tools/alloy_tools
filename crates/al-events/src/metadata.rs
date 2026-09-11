@@ -1,60 +1,27 @@
-use al_structures::traits::AsBytes;
-use std::time::{Duration, SystemTime};
+use al_structures::traits::{AsAny, AsBytes};
+use std::{fmt::Debug, time::{Duration, SystemTime}};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct TimeStamp(u64);
+//REVIEW: Merge into `al-structures` Header trait to allow variable sized headers?
+pub trait MetaData: AsAny + Debug {
+    fn eq_dyn(&self, other: &dyn MetaData) -> bool;
 
-impl TimeStamp {
-    pub fn now() -> Self {
-        Self::from_system_time(SystemTime::now())
-    }
+    fn buf_len(&self) -> usize;
 
-    pub fn from_system_time(system_time: SystemTime) -> Self {
-        Self(
-            system_time
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_micros() as u64)
-                .unwrap_or(0),
-        )
-    }
+    fn encode(&self, writer: &mut dyn std::io::Write) -> std::io::Result<()>;
 
-    pub fn to_system_time(&self) -> SystemTime {
-        std::time::UNIX_EPOCH + Duration::from_micros(self.0)
-    }
+    fn decode_slice(buffer: &[u8]) -> Result<(Self, usize), Box<dyn std::error::Error>>
+    where
+        Self: Sized;
 
-    pub fn from_micros(micros: u64) -> Self {
-        Self(micros)
-    }
-
-    pub fn to_micros(self) -> u64 {
-        self.0
-    }
-
-    pub fn as_micros(&self) -> &u64 {
-        &self.0
-    }
-
-    pub fn is_stale(&self, timeout: Duration) -> bool {
-        let curr = Self::now();
-        if *self < curr {
-            false
-        } else {
-            let age = curr.as_micros() - self.as_micros();
-            age > timeout.as_micros() as u64
-        }
-    }
+    fn decode_reader(reader: &mut dyn std::io::Read) -> Result<Self, Box<dyn std::error::Error>>
+    where
+        Self: Sized;
 }
 
-impl AsBytes for TimeStamp {
-    const LEN: usize = 8;
-
-    fn to_bytes<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-        writer.write_all(&self.0.to_be_bytes())
-    }
-
-    fn from_bytes(buffer: &[u8]) -> Result<Self, Box<dyn std::error::Error>> {
-        Ok(Self::from_micros(u64::from_be_bytes(buffer.try_into()?)))
+impl PartialEq for dyn MetaData {
+    fn eq(&self, other: &Self) -> bool {
+        self.eq_dyn(other)
     }
 }
 
@@ -130,16 +97,25 @@ impl CommandMeta {
     pub fn set_expected_version(&mut self, expected_version: Option<u64>) {
         self.expected_version = expected_version;
     }
+}
 
-    pub fn buf_len(&self) -> usize {
-        let mut len = Self::LOW_LEN;
-        if self.expected_version.is_some() {
-            len += 8;
-        }
-        len
+impl MetaData for CommandMeta {
+    fn eq_dyn(&self, other: &dyn MetaData) -> bool {
+        other
+            .as_any()
+            .downcast_ref::<Self>()
+            .map_or(false, |o| self == o)
     }
 
-    pub fn encode<W: std::io::Write + ?Sized>(&self, writer: &mut W) -> std::io::Result<()> {
+    fn buf_len(&self) -> usize {
+        if self.expected_version.is_some() {
+            Self::HIGH_LEN
+        } else {
+            Self::LOW_LEN
+        }
+    }
+
+    fn encode(&self, writer: &mut dyn std::io::Write) -> std::io::Result<()> {
         let copy = |buf: &mut [u8], flag: u8| {
             buf[..16].copy_from_slice(self.id.as_bytes());
             buf[16..32].copy_from_slice(self.correlation_id.as_bytes());
@@ -158,7 +134,7 @@ impl CommandMeta {
         }
     }
 
-    pub fn decode_slice(buffer: &[u8]) -> Result<(Self, usize), Box<dyn std::error::Error>> {
+    fn decode_slice(buffer: &[u8]) -> Result<(Self, usize), Box<dyn std::error::Error>> {
         if buffer.len() < Self::LOW_LEN {
             return Err(format!(
                 "Metadata requires at least {} bytes, got {}",
@@ -191,9 +167,7 @@ impl CommandMeta {
         ))
     }
 
-    pub fn decode_reader(
-        reader: &mut dyn std::io::Read,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    fn decode_reader(reader: &mut dyn std::io::Read) -> Result<Self, Box<dyn std::error::Error>> {
         let mut buffer = [0u8; Self::HIGH_LEN];
         reader.read_exact(&mut buffer[..Self::LOW_LEN])?;
         if buffer[40] == 1 {
@@ -259,12 +233,21 @@ impl EventMeta {
     pub fn set_timestamp(&mut self, timestamp: TimeStamp) {
         self.timestamp = timestamp;
     }
+}
 
-    pub fn buf_len(&self) -> usize {
+impl MetaData for EventMeta {
+    fn eq_dyn(&self, other: &dyn MetaData) -> bool {
+        other
+            .as_any()
+            .downcast_ref::<Self>()
+            .map_or(false, |o| self == o)
+    }
+
+    fn buf_len(&self) -> usize {
         Self::BUF_LEN
     }
 
-    pub fn encode<W: std::io::Write + ?Sized>(&self, writer: &mut W) -> std::io::Result<()> {
+    fn encode(&self, writer: &mut dyn std::io::Write) -> std::io::Result<()> {
         let mut buf = [0u8; Self::BUF_LEN];
         buf[..16].copy_from_slice(self.id.as_bytes());
         buf[16..32].copy_from_slice(self.correlation_id.as_bytes());
@@ -272,7 +255,7 @@ impl EventMeta {
         writer.write_all(&buf)
     }
 
-    pub fn decode_slice(buffer: &[u8]) -> Result<(Self, usize), Box<dyn std::error::Error>> {
+    fn decode_slice(buffer: &[u8]) -> Result<(Self, usize), Box<dyn std::error::Error>> {
         if buffer.len() < Self::BUF_LEN {
             return Err(format!(
                 "Metadata requires at least {} bytes, got {}",
@@ -287,9 +270,7 @@ impl EventMeta {
         Ok((Self::from(id, correlation_id, timestamp), Self::BUF_LEN))
     }
 
-    pub fn decode_reader(
-        reader: &mut dyn std::io::Read,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    fn decode_reader(reader: &mut dyn std::io::Read) -> Result<Self, Box<dyn std::error::Error>> {
         let mut buffer = [0u8; Self::BUF_LEN];
         reader.read_exact(&mut buffer)?;
         let (meta, _) = Self::decode_slice(&buffer)?;
@@ -369,16 +350,25 @@ impl QueryMeta {
     pub fn set_timeout(&mut self, timeout: Option<Duration>) {
         self.timeout = timeout;
     }
+}
 
-    pub fn buf_len(&self) -> usize {
-        let mut len = Self::LOW_LEN;
-        if self.timeout.is_some() {
-            len += 8;
-        }
-        len
+impl MetaData for QueryMeta {
+    fn eq_dyn(&self, other: &dyn MetaData) -> bool {
+        other
+            .as_any()
+            .downcast_ref::<Self>()
+            .map_or(false, |o| self == o)
     }
 
-    pub fn encode<W: std::io::Write + ?Sized>(&self, writer: &mut W) -> std::io::Result<()> {
+    fn buf_len(&self) -> usize {
+        if self.timeout.is_some() {
+            Self::HIGH_LEN
+        } else {
+            Self::LOW_LEN
+        }
+    }
+
+    fn encode(&self, writer: &mut dyn std::io::Write) -> std::io::Result<()> {
         let copy = |buf: &mut [u8], flag: u8| {
             buf[..16].copy_from_slice(self.id.as_bytes());
             buf[16..32].copy_from_slice(self.correlation_id.as_bytes());
@@ -398,7 +388,7 @@ impl QueryMeta {
         }
     }
 
-    pub fn decode_slice(buffer: &[u8]) -> Result<(Self, usize), Box<dyn std::error::Error>> {
+    fn decode_slice(buffer: &[u8]) -> Result<(Self, usize), Box<dyn std::error::Error>> {
         if buffer.len() < Self::LOW_LEN {
             return Err(format!(
                 "Metadata requires at least {} bytes, got {}",
@@ -430,9 +420,7 @@ impl QueryMeta {
         Ok((Self::from(id, correlation_id, timestamp, timeout), offset))
     }
 
-    pub fn decode_reader(
-        reader: &mut dyn std::io::Read,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    fn decode_reader(reader: &mut dyn std::io::Read) -> Result<Self, Box<dyn std::error::Error>> {
         let mut buffer = [0u8; Self::HIGH_LEN];
         reader.read_exact(&mut buffer[..Self::LOW_LEN])?;
         if buffer[40] == 1 {
@@ -440,5 +428,62 @@ impl QueryMeta {
         }
         let (meta, _) = Self::decode_slice(&buffer)?;
         Ok(meta)
+    }
+}
+
+// ----- Timestamp -----
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct TimeStamp(u64);
+
+impl TimeStamp {
+    pub fn now() -> Self {
+        Self::from_system_time(SystemTime::now())
+    }
+
+    pub fn from_system_time(system_time: SystemTime) -> Self {
+        Self(
+            system_time
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_micros() as u64)
+                .unwrap_or(0),
+        )
+    }
+
+    pub fn to_system_time(&self) -> SystemTime {
+        std::time::UNIX_EPOCH + Duration::from_micros(self.0)
+    }
+
+    pub fn from_micros(micros: u64) -> Self {
+        Self(micros)
+    }
+
+    pub fn to_micros(self) -> u64 {
+        self.0
+    }
+
+    pub fn as_micros(&self) -> &u64 {
+        &self.0
+    }
+
+    pub fn is_stale(&self, timeout: Duration) -> bool {
+        let curr = Self::now();
+        if *self < curr {
+            false
+        } else {
+            let age = curr.as_micros() - self.as_micros();
+            age > timeout.as_micros() as u64
+        }
+    }
+}
+
+impl AsBytes for TimeStamp {
+    const LEN: usize = 8;
+
+    fn to_bytes<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        writer.write_all(&self.0.to_be_bytes())
+    }
+
+    fn from_bytes(buffer: &[u8]) -> Result<Self, Box<dyn std::error::Error>> {
+        Ok(Self::from_micros(u64::from_be_bytes(buffer.try_into()?)))
     }
 }

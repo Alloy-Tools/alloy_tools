@@ -613,6 +613,7 @@ where
 }
 
 // ----- Erased Registry -----
+//TODO: Can this take `dyn ErasedDeserialize<T>` instead to avoid the `as_any()` and internal downcasting
 pub type DirectFactory<T> = TypeFactory<T, dyn std::any::Any>;
 
 pub struct ErasedTypeRegistry<T: 'static> {
@@ -985,7 +986,7 @@ mod tests {
         let mut json_encoded = Vec::new();
         json_format.serialize(&test, &mut json_encoded).unwrap();
 
-        let type_id = type_reg.register(|u: Test| Box::new(u)).unwrap();
+        let type_id = type_reg.register::<Test>(|u: Test| Box::new(u)).unwrap();
 
         let json_decoded = type_reg
             .deserialize_slice(&json_format, type_id, &json_encoded)
@@ -1002,7 +1003,7 @@ mod tests {
 
         let b_fmt = BinaryFormat::<Box<dyn Any>, _>::new(RwLockStorage::new(HashMap::new()));
         let binary_format_name = b_fmt.type_with_generics();
-        let binary_type_id = b_fmt.register(&id_reg, |u: Test| Box::new(u)).unwrap();
+        let binary_type_id = b_fmt.register::<Test, _, _, _>(&id_reg, |u: Test| Box::new(u)).unwrap();
         assert_eq!(binary_type_id, type_id);
         let binary_format_id = format_reg.register(b_fmt).unwrap();
         let binary_format = format_reg.get_format(binary_format_id).unwrap().unwrap();
@@ -1020,6 +1021,7 @@ mod tests {
             .is_some());
     }
 
+    //TODO: Add binary/erased path to tests
     #[test]
     fn rejects_unknown_format_id() {
         let format_id = TEST_FORMATS().register(JsonFormat).unwrap();

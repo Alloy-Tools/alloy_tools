@@ -1,5 +1,5 @@
 use crate::{
-    metadata::{CommandMeta, EventMeta, QueryMeta},
+    metadata::{CommandMeta, EventMeta, MetaData, QueryMeta},
     Command, Event, Query,
 };
 use al_structures::traits::DynTypeName;
@@ -73,11 +73,19 @@ pub enum Message<Cmd, Evt, Qry> {
 }
 
 impl<Cmd, Evt, Qry> Message<Cmd, Evt, Qry> {
-    pub fn as_string(&self) -> &str {
+    pub fn variant_string(&self) -> &str {
         match self {
             Message::Command(..) => "Command",
             Message::Event(..) => "Event",
             Message::Query(..) => "Query",
+        }
+    }
+
+    pub fn meta(&self) -> &dyn MetaData {
+        match self {
+            Message::Command(_, m) => m,
+            Message::Event(_, m) => m,
+            Message::Query(_, m) => m,
         }
     }
 
@@ -448,6 +456,37 @@ mod borrow {
     }
 }
 
+#[macro_export]
+macro_rules! erase_message_factory {
+    ($type:ty, $variant:ident, $format_type:ty, $error_msg:expr) => {{
+        ::paste::paste! {
+            use $crate::{TypeFactory, DeserializeInto, metadata::{MetaData, [<$variant Meta>]}};
+            use std::{any::Any, sync::Arc};
+            let slice_factory = Arc::new(|fmt: &dyn Any, data: &[u8]| {
+                let (meta, offset) = [<$variant Meta>]::decode_slice(data)?;
+                let decoded: $type = fmt
+                    .downcast_ref::<$format_type>()
+                    .ok_or_else(|| $error_msg)?
+                    .deserialize_slice_into(&data[offset..])?;
+                Ok(DynMessage::$variant(Box::new(decoded), meta))
+            });
+            let reader_factory = Arc::new(|fmt: &dyn Any, reader: &mut dyn std::io::Read| {
+                let meta = [<$variant Meta>]::decode_reader(reader)?;
+                let decoded: $type = fmt
+                    .downcast_ref::<$format_type>()
+                    .ok_or_else(|| $error_msg)?
+                    .deserialize_reader_into(reader)?;
+                Ok(DynMessage::$variant(Box::new(decoded), meta))
+            });
+            let prelude_factory =
+                Arc::new(|value: &DynMessage, writer: &mut dyn std::io::Write| {
+                    value.meta().encode(writer).map_err(Into::into)
+                });
+            TypeFactory::new(slice_factory, reader_factory, Some(prelude_factory))
+        }
+    }};
+}
+
 macro_rules! define_message_kind {
     ($kind:ident) => {
         ::paste::paste! {
@@ -558,6 +597,7 @@ macro_rules! define_message_kind {
             #[cfg(feature = "serde")]
             pub(crate) mod [< $kind:snake _serde >] {
                 use super::*;
+                use crate::metadata::MetaData;
 
                 type [<$kind Registry>]<'a> = crate::message::MessageRegistryType<'a>;
 
@@ -582,12 +622,7 @@ macro_rules! define_message_kind {
                         },
                     );
                     let prelude_factory = std::sync::Arc::new(move |value: &DynMessage, writer: &mut dyn std::io::Write| {
-                        let meta = value.[<as_ $kind:snake>]().and_then(|(_, m)| Some(m)).ok_or_else(||
-                            al_structures::collections::storage::utils::HandleError::Serialization(
-                                format!("Expexcted type {} but found type {}", stringify!($kind), value.as_string())
-                            )
-                        )?;
-                        meta.encode(writer).map_err(Into::into)
+                        value.meta().encode(writer).map_err(Into::into)
                     });
                     registry.register_with::<K>($crate::TypeFactory::new(slice_factory, reader_factory, Some(prelude_factory)))
                 }
