@@ -102,6 +102,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "al-secure"
+version = "0.1.0"
+dependencies = [
+ "al-crypto",
+ "al-vault",
+ "x25519-dalek",
+ "zeroize",
+]
+
+[[package]]
 name = "al-structures"
 version = "0.1.0"
 dependencies = [

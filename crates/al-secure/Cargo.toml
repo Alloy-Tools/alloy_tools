@@ -1,0 +1,22 @@
+[package]
+name = "al-secure"
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+edition.workspace = true
+
+[dependencies]
+al-crypto = { path = "../al-crypto", optional = true }
+al-vault = { path = "../al-vault", optional = true }
+zeroize = { version = "1.8.2", features = ["alloc"], optional = true }
+x25519-dalek = { version = "2.0.1", features = [
+    "static_secrets",
+    "zeroize",
+], optional = true }
+
+
+[features]
+#TODO: Remove all from default
+default = ["all"]
+all = ["noise"]
+noise = ["dep:al-crypto", "dep:al-vault", "dep:zeroize", "dep:x25519-dalek"]
