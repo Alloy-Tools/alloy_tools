@@ -456,6 +456,7 @@ mod borrow {
     }
 }
 
+#[cfg(feature = "serde")]
 #[macro_export]
 macro_rules! erase_message_factory {
     ($type:ty, $variant:ident, $format_type:ty, $error_msg:expr) => {{

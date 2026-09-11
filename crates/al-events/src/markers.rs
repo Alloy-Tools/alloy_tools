@@ -22,6 +22,9 @@ mod sealed {
     impl<T: serde::Serialize + for<'de> serde::Deserialize<'de>> SerdeFeature for T {}
 }
 
+pub trait SerdeFeature: sealed::SerdeFeature {}
+impl<T: sealed::SerdeFeature> SerdeFeature for T {}
+
 /// Shared traits required for Command, Event, and Query traits
 pub trait ObjectTraits: Send + Sync + Debug + Any + DynTypeName + 'static {}
 

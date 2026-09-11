@@ -22,9 +22,8 @@ bitcode = { version = "0.6.9", features = ["serde"], optional = true }
 paste = { version = "1.0.15", optional = true }
 
 [features]
-#TODO: remove test default
-default = ["test"]
-test = [
+default = []
+all = [
     "noop_waker",
     "enums",
     "traits",
@@ -46,3 +45,6 @@ serde = ["dep:serde"]
 serde_utils = ["serde", "dep:erased-serde"]
 json = ["serde_utils", "dep:serde_json"]
 binary = ["serde_utils", "dep:bitcode"]
+
+[dev-dependencies]
+serde_json = "1.0.15"

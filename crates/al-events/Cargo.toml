@@ -15,14 +15,13 @@ paste = "1.0.15"
 uuid = { version = "1.26", features = ["v4"] }
 
 [features]
-default = ["json", "binary"]
+default = []
 serde = [
     "dep:serde",
     "dep:erased-serde",
     "al-derive/serde",
     "al-structures/serde_utils",
     "al-structures/collections",
-    #REVIEW: can traits feature be optional?
 ]
 json = ["serde", "al-structures/json"]
 binary = ["serde", "al-structures/binary"]

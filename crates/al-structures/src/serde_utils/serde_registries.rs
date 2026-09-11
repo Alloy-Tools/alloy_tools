@@ -877,6 +877,7 @@ macro_rules! init_registries {
     };
 }
 
+#[cfg(all(feature = "json", feature = "binary"))]
 #[cfg(test)]
 mod tests {
     use std::{any::Any, collections::HashMap};

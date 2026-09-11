@@ -11,27 +11,16 @@ macro_rules! erase_query_factory {
 
 /// The `Query` trait defines the required methods for query types to exist in the system
 /// along with trait bounds that dont interfere with trait object usage.
-pub trait Query: QueryHelpers + erased_serde::Serialize {
+pub trait Query: QueryHelpers + crate::markers::SerdeFeature {
     //TODO: add response type
     //type Response: Send + 'static;
 }
 
+#[cfg(any(feature = "json", feature = "binary"))]
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use super::*;
-    use crate::{
-        query, FormatId, TypeId, MESSAGE_FORMATS, MESSAGE_TYPE_IDS, MESSAGE_TYPE_REGISTRY,
-    };
-    use al_structures::{
-        collections::storage::RwLockStorage,
-        serde_utils::{
-            formats::{BinaryFormat, JsonFormat},
-            serde_format::ErasedDeserialize,
-            serde_registries::DirectFactory,
-        },
-    };
+    use crate::{query, FormatId, TypeId, MESSAGE_FORMATS, MESSAGE_TYPE_REGISTRY};
 
     #[query]
     struct TestQuery {
@@ -87,8 +76,10 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "json")]
     #[test]
     fn serde_reoundtrip() {
+        use al_structures::serde_utils::formats::JsonFormat;
         // Register the format
         let format_id = MESSAGE_FORMATS().register(JsonFormat).unwrap();
         // Register the type
@@ -96,8 +87,19 @@ mod tests {
         test_slice_reader(format_id, type_id);
     }
 
+    #[cfg(feature = "binary")]
     #[test]
     fn erased_roundtrip() {
+        use crate::MESSAGE_TYPE_IDS;
+        use al_structures::{
+            collections::storage::RwLockStorage,
+            serde_utils::{
+                formats::BinaryFormat, serde_format::ErasedDeserialize,
+                serde_registries::DirectFactory,
+            },
+        };
+        use std::collections::HashMap;
+
         type BinaryInner = RwLockStorage<HashMap<TypeId, DirectFactory<DynMessage>>>;
         let type_factory = erase_query_factory!(
             TestQuery,
