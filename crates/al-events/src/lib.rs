@@ -13,6 +13,7 @@ pub use al_derive::CommandMarker as DeriveCommandMarker;
 pub use al_derive::EventMarker as DeriveEventMarker;
 pub use al_derive::QueryMarker as DeriveQueryMarker;
 pub use al_derive::TypeName as DeriveTypeName;
+pub use al_derive::{command, event, query};
 
 // Expose `TypeId`, `FormatId`, `TypeFactory`, and `SerdeFormat` here
 #[cfg(feature = "serde")]

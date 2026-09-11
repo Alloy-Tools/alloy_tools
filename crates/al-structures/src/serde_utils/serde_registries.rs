@@ -614,6 +614,7 @@ where
 
 // ----- Erased Registry -----
 //TODO: Can this take `dyn ErasedDeserialize<T>` instead to avoid the `as_any()` and internal downcasting
+// It would need to be passed the type id registry as well?
 pub type DirectFactory<T> = TypeFactory<T, dyn std::any::Any>;
 
 pub struct ErasedTypeRegistry<T: 'static> {

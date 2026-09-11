@@ -16,8 +16,9 @@ pub trait Command: CommandHelpers + erased_serde::Serialize {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{FormatId, MESSAGE_FORMATS, MESSAGE_TYPE_IDS, MESSAGE_TYPE_REGISTRY, TypeId};
-    use al_derive::command;
+    use crate::{
+        command, FormatId, TypeId, MESSAGE_FORMATS, MESSAGE_TYPE_IDS, MESSAGE_TYPE_REGISTRY,
+    };
     use al_structures::{
         collections::storage::RwLockStorage,
         serde_utils::{
@@ -25,7 +26,6 @@ mod tests {
             serde_format::ErasedDeserialize,
             serde_registries::DirectFactory,
         },
-        traits::DynTypeName,
     };
     use std::collections::HashMap;
 
@@ -106,9 +106,9 @@ mod tests {
             .register_with::<TestCommand, _, _, _>(MESSAGE_TYPE_IDS(), type_factory)
             .unwrap();
         let format_id = MESSAGE_FORMATS()
-            .register_named(b_fmt.type_with_generics(), b_fmt)
+            .register_named("command-binary-test", b_fmt)
             .unwrap();
-        
+
         test_slice_reader(format_id, type_id);
     }
 }

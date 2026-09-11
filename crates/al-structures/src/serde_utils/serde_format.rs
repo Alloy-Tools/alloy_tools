@@ -183,6 +183,8 @@ pub trait DeserializeInto: SerializeFormat {
     ) -> Result<T, Box<dyn Error>>;
 }
 
+//REVIEW: If the type id registry could get passed to the `ErasedDeserialize`,
+// could it deserialize without downcasting?
 #[cfg(any(feature = "collections", doc))]
 pub trait ErasedDeserialize<T>:
     SerializeFormat + AsAny + DynTypeName + Send + Sync + 'static

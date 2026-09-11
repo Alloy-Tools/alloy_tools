@@ -18,12 +18,16 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
-    use crate::{FormatId, TypeId, MESSAGE_FORMATS, MESSAGE_TYPE_IDS, MESSAGE_TYPE_REGISTRY};
-    use al_derive::event;
+    use crate::{
+        event, FormatId, TypeId, MESSAGE_FORMATS, MESSAGE_TYPE_IDS, MESSAGE_TYPE_REGISTRY,
+    };
     use al_structures::{
-        collections::storage::RwLockStorage, serde_utils::{
-            formats::{BinaryFormat, JsonFormat}, serde_format::ErasedDeserialize, serde_registries::DirectFactory,
-        }, traits::DynTypeName,
+        collections::storage::RwLockStorage,
+        serde_utils::{
+            formats::{BinaryFormat, JsonFormat},
+            serde_format::ErasedDeserialize,
+            serde_registries::DirectFactory,
+        },
     };
 
     #[event]
@@ -103,7 +107,7 @@ mod tests {
             .register_with::<TestEvent, _, _, _>(MESSAGE_TYPE_IDS(), type_factory)
             .unwrap();
         let format_id = MESSAGE_FORMATS()
-            .register_named(b_fmt.type_with_generics(), b_fmt)
+            .register_named("event-binary-test", b_fmt)
             .unwrap();
 
         test_slice_reader(format_id, type_id);

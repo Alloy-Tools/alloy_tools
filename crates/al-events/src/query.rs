@@ -21,8 +21,9 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
-    use crate::{FormatId, TypeId, MESSAGE_FORMATS, MESSAGE_TYPE_IDS, MESSAGE_TYPE_REGISTRY};
-    use al_derive::query;
+    use crate::{
+        query, FormatId, TypeId, MESSAGE_FORMATS, MESSAGE_TYPE_IDS, MESSAGE_TYPE_REGISTRY,
+    };
     use al_structures::{
         collections::storage::RwLockStorage,
         serde_utils::{
@@ -30,7 +31,6 @@ mod tests {
             serde_format::ErasedDeserialize,
             serde_registries::DirectFactory,
         },
-        traits::DynTypeName,
     };
 
     #[query]
@@ -110,7 +110,7 @@ mod tests {
             .register_with::<TestQuery, _, _, _>(MESSAGE_TYPE_IDS(), type_factory)
             .unwrap();
         let format_id = MESSAGE_FORMATS()
-            .register_named(b_fmt.type_with_generics(), b_fmt)
+            .register_named("query-binary-test", b_fmt)
             .unwrap();
 
         test_slice_reader(format_id, type_id);
