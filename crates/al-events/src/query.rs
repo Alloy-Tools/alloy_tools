@@ -16,11 +16,13 @@ pub trait Query: QueryHelpers + crate::markers::SerdeFeature {
     //type Response: Send + 'static;
 }
 
-#[cfg(any(feature = "json", feature = "binary"))]
+#[cfg(feature = "serde")]
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{query, FormatId, TypeId, MESSAGE_FORMATS, MESSAGE_TYPE_REGISTRY};
+    use crate::query;
+    #[cfg(any(feature = "json", feature = "binary"))]
+    use crate::{FormatId, TypeId, MESSAGE_FORMATS, MESSAGE_TYPE_REGISTRY};
 
     #[query]
     struct TestQuery {
@@ -28,6 +30,7 @@ mod tests {
         pub name: String,
     }
 
+    #[cfg(any(feature = "json", feature = "binary"))]
     fn test_slice_reader(format_id: FormatId, type_id: TypeId) {
         // Create an instance and box it as a trait object
         let original = TestQuery {
@@ -78,7 +81,7 @@ mod tests {
 
     #[cfg(feature = "json")]
     #[test]
-    fn serde_reoundtrip() {
+    fn serde_roundtrip() {
         use al_structures::serde_utils::formats::JsonFormat;
         // Register the format
         let format_id = MESSAGE_FORMATS().register(JsonFormat).unwrap();
@@ -116,5 +119,11 @@ mod tests {
             .unwrap();
 
         test_slice_reader(format_id, type_id);
+    }
+
+    #[test]
+    fn message_id() {
+        let type_id = try_register_query::<TestQuery>().unwrap();
+        assert_eq!(type_id, TestQuery::type_message_id().unwrap())
     }
 }

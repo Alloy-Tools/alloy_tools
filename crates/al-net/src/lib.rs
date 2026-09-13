@@ -6,53 +6,52 @@
     - [] Setup simple TCP VOIP with `al-core` events.
 */
 
-// Following the Noise protocol specification: noiseprotocol.org/noise.html
-
-const KEY_SIZE: usize = al_crypto::KEY_SIZE;
-const DOUBLE_KEY_SIZE: usize = 2 * KEY_SIZE;
-const TRIPLE_KEY_SIZE: usize = 3 * KEY_SIZE;
-const DHLEN: usize = al_crypto::DHLEN; // Must be 32 or greater
-const HASHLEN: usize = 32; // Noise has HASHLEN 32 for BLAKE2s
-const MAX_MSG_BYTE_LEN: usize = 65535; // Noise message sizes are capped at 65,535 bytes
-
-mod command_dispatcher;
+/*mod command_dispatcher;
 mod connection_manager;
-mod noise;
 mod router;
 mod tcp;
-mod udp;
+mod udp;*/
 
-pub use command_dispatcher::CommandDispatcher;
-pub use connection_manager::ConnectionManager;
-pub use noise::{
+/*pub use al_secure::noise::{
     cipher_state::{CipherState, CipherStateReturn},
     handshake_pattern::{HandshakePattern, HandshakeToken},
     handshake_state::{HandshakeResult, HandshakeState},
-    key_pair::{KeyPair, PublicKey},
-    noise_builder::NoiseBuilder as Noise,
-    noise_error::NoiseError,
     symmetric_state::{SplitResult, SymmetricState},
+    KeyPair, Noise, NoiseError, PublicKey,
 };
+pub use command_dispatcher::CommandDispatcher;
+pub use connection_manager::ConnectionManager;
 pub use router::Router;
 pub use tcp::{tcp::Tcp, tcp_error::TcpError};
-pub use udp::udp::UDP;
+pub use udp::udp::UDP;*/
+
+use al_events::{event, DynMessage, IdCache, MESSAGE_FORMATS, MESSAGE_TYPE_REGISTRY};
+use al_structures::serde_utils::serde_registries::FormatId;
 
 /// A wrapper to hold any serialized `dyn Event` data for transport without needing the inner type
-#[al_core::old_event]
+#[event]
 pub struct NetworkEvent {
-    type_name: String,
     data: Vec<u8>,
 }
 
 impl NetworkEvent {
-    pub fn new<F: al_core::SerdeFormat>(event: &dyn al_core::Event) -> Result<Self, F::Error> {
-        Ok(Self {
-            type_name: event.type_with_generics(),
-            data: F::default().serialize_event(event)?,
-        })
+    pub fn new(
+        format_id: FormatId,
+        message: &DynMessage,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let mut data = Vec::new();
+        let type_id = message.message_id()?;
+        MESSAGE_FORMATS().serialize_registered(
+            MESSAGE_TYPE_REGISTRY(),
+            format_id,
+            type_id,
+            message,
+            &mut data,
+        )?;
+        Ok(Self { data })
     }
 
-    pub fn to_inner<F: al_core::SerdeFormat>(&self) -> Result<Box<dyn al_core::Event>, F::Error> {
+    /*pub fn to_inner<F: al_core::SerdeFormat>(&self) -> Result<Box<dyn al_core::Event>, F::Error> {
         Ok(F::default().deserialize_event_dyn(&self.data)?)
-    }
+    }*/
 }

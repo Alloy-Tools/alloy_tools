@@ -14,11 +14,13 @@ macro_rules! erase_event_factory {
 /// along with trait bounds that dont interfere with trait object usage.
 pub trait Event: EventHelpers + crate::markers::SerdeFeature {}
 
-#[cfg(any(feature = "json", feature = "binary"))]
+#[cfg(feature = "serde")]
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{event, FormatId, TypeId, MESSAGE_FORMATS, MESSAGE_TYPE_REGISTRY};
+    use crate::event;
+    #[cfg(any(feature = "json", feature = "binary"))]
+    use crate::{FormatId, TypeId, MESSAGE_FORMATS, MESSAGE_TYPE_REGISTRY};
 
     #[event]
     struct TestEvent {
@@ -77,7 +79,7 @@ mod tests {
 
     #[cfg(feature = "json")]
     #[test]
-    fn serde_reoundtrip() {
+    fn serde_roundtrip() {
         use al_structures::serde_utils::formats::JsonFormat;
         // Register the format
         let format_id = MESSAGE_FORMATS().register(JsonFormat).unwrap();
@@ -115,5 +117,11 @@ mod tests {
             .unwrap();
 
         test_slice_reader(format_id, type_id);
+    }
+
+    #[test]
+    fn message_id() {
+        let type_id = try_register_event::<TestEvent>().unwrap();
+        assert_eq!(type_id, TestEvent::type_message_id().unwrap())
     }
 }

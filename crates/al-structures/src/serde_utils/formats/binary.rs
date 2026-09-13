@@ -1,7 +1,3 @@
-use std::{ops::Deref, sync::Arc};
-
-use al_derive::TypeName;
-
 use crate::{
     collections::storage::utils::{indexed::IndexedHandle, keyed::KeyedHandle},
     serde_utils::{
@@ -9,6 +5,8 @@ use crate::{
         serde_registries::{DirectFactory, TypeId, TypeIdRegistry},
     },
 };
+use al_derive::TypeName;
+use std::{ops::Deref, sync::Arc};
 
 //REVIEW: Also add a `bincode` format for performance testing
 #[derive(Copy, Default, PartialEq, Eq, Hash, TypeName)]

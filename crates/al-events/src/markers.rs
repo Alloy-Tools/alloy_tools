@@ -26,9 +26,12 @@ pub trait SerdeFeature: sealed::SerdeFeature {}
 impl<T: sealed::SerdeFeature> SerdeFeature for T {}
 
 /// Shared traits required for Command, Event, and Query traits
-pub trait ObjectTraits: Send + Sync + Debug + Any + DynTypeName + 'static {}
+pub trait ObjectTraits: Send + Sync + Debug + Any + DynTypeName + sealed::SerdeFeature + 'static {}
 
-impl<T: Send + Sync + Debug + Any + DynTypeName + 'static> ObjectTraits for T {}
+impl<T: Send + Sync + Debug + Any + DynTypeName + sealed::SerdeFeature + 'static> ObjectTraits
+    for T
+{
+}
 
 //REVIEW: Do I really need Default and Hash? Transport only needs `Debug + Clone + Send`
 /// Required traits for a message type to be used in the message system

@@ -16,7 +16,6 @@ x25519-dalek = { version = "2.0.1", features = [
 
 
 [features]
-#TODO: Remove all from default
-default = ["all"]
+default = []
 all = ["noise"]
 noise = ["dep:al-crypto", "dep:al-vault", "dep:zeroize", "dep:x25519-dalek"]

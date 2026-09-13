@@ -13,11 +13,14 @@ macro_rules! erase_command_factory {
 /// along with trait bounds that dont interfere with trait object usage.
 pub trait Command: CommandHelpers + crate::markers::SerdeFeature {}
 
-#[cfg(any(feature = "json", feature = "binary"))]
+
+#[cfg(feature = "serde")]
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{command, FormatId, TypeId, MESSAGE_FORMATS, MESSAGE_TYPE_REGISTRY};
+    use crate::command;
+    #[cfg(any(feature = "json", feature = "binary"))]
+    use crate::{FormatId, TypeId, MESSAGE_FORMATS, MESSAGE_TYPE_REGISTRY};
 
     #[command]
     struct TestCommand {
@@ -76,7 +79,7 @@ mod tests {
 
     #[cfg(feature = "json")]
     #[test]
-    fn serde_reoundtrip() {
+    fn serde_roundtrip() {
         use al_structures::serde_utils::formats::JsonFormat;
         // Register the format
         let format_id = MESSAGE_FORMATS().register(JsonFormat).unwrap();
@@ -114,5 +117,11 @@ mod tests {
             .unwrap();
 
         test_slice_reader(format_id, type_id);
+    }
+
+    #[test]
+    fn message_id() {
+        let type_id = try_register_command::<TestCommand>().unwrap();
+        assert_eq!(type_id, TestCommand::type_message_id().unwrap())
     }
 }

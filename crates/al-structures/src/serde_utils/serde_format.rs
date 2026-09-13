@@ -27,9 +27,10 @@
 //! Both paths are used through a single `deserialize` call on the appropriate registry,
 //! so the rest of the application is agnostic to which kind of format is in use.
 
-use crate::traits::{AsAny, DynTypeName, TypeName};
+use crate::traits::{AsAny, DynTypeName};
 #[cfg(any(feature = "collections", doc))]
 use crate::{
+    traits::TypeName,
     collections::storage::utils::{indexed::IndexedHandle, keyed::KeyedHandle},
     serde_utils::serde_registries::{DirectFactory, TypeId, TypeIdRegistry},
 };
@@ -269,6 +270,7 @@ pub trait ErasedDeserialize<T>:
     ) -> Result<Option<DirectFactory<T>>, Box<dyn std::error::Error>>;
 }
 
+#[cfg(any(feature = "collections", doc))]
 impl<T: 'static> Clone for Box<dyn ErasedDeserialize<T>> {
     fn clone(&self) -> Self {
         self.clone_format()
