@@ -6,6 +6,7 @@ mod markers;
 mod message;
 pub mod metadata;
 mod query;
+mod message_error;
 
 use message::define_message_kind;
 
@@ -43,3 +44,4 @@ pub use message::{DynMessage, Message};
 #[cfg(feature = "serde")]
 pub use query::{try_register_query, try_register_query_with};
 pub use query::{Query, QueryHelpers, QueryMarker};
+pub use message_error::MessageError;

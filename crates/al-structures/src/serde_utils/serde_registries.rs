@@ -43,8 +43,8 @@
 //! 4. Register each concrete type you want to deserialize with the `FormatTypeRegistry`.
 //! 5. At runtime, call `registry.deserialize(data)` which will pull out the `(FormatId, TypeId, &[u8])`, deserialize the type, and return it as a homogenous `T`.
 use crate::{
-    collections::storage::utils::{indexed::IndexedHandle, keyed::KeyedHandle, HandleError},
-    serde_utils::serde_format::{ErasedDeserialize, Format, SerdeFormat, SerializeFormat},
+    collections::storage::utils::{indexed::IndexedHandle, keyed::KeyedHandle},
+    serde_utils::{RegistryError, serde_format::{ErasedDeserialize, Format, SerdeFormat, SerializeFormat}},
     traits::{AsBytes, DynTypeName, Header, TypeName},
 };
 use std::{
@@ -54,83 +54,6 @@ use std::{
 };
 //REVIEW: when the type is owned, use the inner storage type rather than a handle
 // a handle should be used when shared but the inner storage when owned.
-
-#[derive(Debug)]
-pub enum RegistryError {
-    HandleError(HandleError),
-    LockPoisoned(String),
-    InitializationFailed(String),
-    IoError(std::io::Error),
-    ConversionFailed(Box<dyn std::error::Error + Send + Sync>),
-    InvalidId(String),
-    Serialization(String),
-    Deserialization(String),
-    Custom(Box<dyn std::error::Error + Send + Sync + 'static>),
-}
-
-impl std::fmt::Display for RegistryError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::HandleError(err) => err.fmt(f),
-            Self::LockPoisoned(str) => write!(f, "Regitry lock poisoned: {str}"),
-            Self::InitializationFailed(str) => write!(f, "Initialization failed: {str}"),
-            Self::IoError(err) => err.fmt(f),
-            Self::ConversionFailed(err) => err.fmt(f),
-            Self::InvalidId(str) => write!(f, "Invalid Id: {str}"),
-            Self::Serialization(str) => write!(f, "Serialization failed: {str}"),
-            Self::Deserialization(str) => write!(f, "Deserialization failed: {str}"),
-            Self::Custom(err) => err.fmt(f),
-        }
-    }
-}
-
-impl std::error::Error for RegistryError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Custom(err) => Some(err.as_ref()),
-            Self::HandleError(err) => err.source(),
-            Self::IoError(err) => err.source(),
-            Self::ConversionFailed(err) => err.source(),
-            _ => None,
-        }
-    }
-}
-
-impl From<HandleError> for RegistryError {
-    fn from(value: HandleError) -> Self {
-        Self::HandleError(value)
-    }
-}
-
-impl From<std::io::Error> for RegistryError {
-    fn from(value: std::io::Error) -> Self {
-        Self::IoError(value)
-    }
-}
-
-impl<'a, T> From<std::sync::PoisonError<std::sync::MutexGuard<'a, T>>> for RegistryError {
-    fn from(value: std::sync::PoisonError<std::sync::MutexGuard<'a, T>>) -> Self {
-        Self::LockPoisoned(format!("Mutex poisoned: {value}"))
-    }
-}
-
-impl From<Box<dyn std::error::Error + Send + Sync + 'static>> for RegistryError {
-    fn from(err: Box<dyn std::error::Error + Send + Sync + 'static>) -> Self {
-        Self::Custom(err)
-    }
-}
-
-impl From<String> for RegistryError {
-    fn from(msg: String) -> Self {
-        Self::Custom(msg.into())
-    }
-}
-
-impl From<&str> for RegistryError {
-    fn from(msg: &str) -> Self {
-        Self::Custom(msg.to_owned().into())
-    }
-}
 
 pub trait TypeDispatcher<T> {
     fn serialize_registered(
@@ -634,7 +557,7 @@ where
         let _guard = self.write_mutex.lock()?;
         let type_id = self.type_registry.register_named(name)?;
         if self.id_map.contains_key(&type_id)? {
-            return Err(RegistryError::InitializationFailed(format!(
+            return Err(RegistryError::AlreadyRegistered(format!(
                 "Factory already registered for type with id '{type_id}'"
             )));
         }
