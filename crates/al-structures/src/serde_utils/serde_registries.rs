@@ -47,7 +47,90 @@ use crate::{
     serde_utils::serde_format::{ErasedDeserialize, Format, SerdeFormat, SerializeFormat},
     traits::{AsBytes, DynTypeName, Header, TypeName},
 };
-use std::{marker::PhantomData, ops::Deref, sync::Arc};
+use std::{
+    marker::PhantomData,
+    ops::Deref,
+    sync::{Arc, Mutex},
+};
+//REVIEW: when the type is owned, use the inner storage type rather than a handle
+// a handle should be used when shared but the inner storage when owned.
+
+#[derive(Debug)]
+pub enum RegistryError {
+    HandleError(HandleError),
+    LockPoisoned(String),
+    InitializationFailed(String),
+    IoError(std::io::Error),
+    ConversionFailed(Box<dyn std::error::Error + Send + Sync>),
+    InvalidId(String),
+    Serialization(String),
+    Deserialization(String),
+    Custom(Box<dyn std::error::Error + Send + Sync + 'static>),
+}
+
+impl std::fmt::Display for RegistryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::HandleError(err) => err.fmt(f),
+            Self::LockPoisoned(str) => write!(f, "Regitry lock poisoned: {str}"),
+            Self::InitializationFailed(str) => write!(f, "Initialization failed: {str}"),
+            Self::IoError(err) => err.fmt(f),
+            Self::ConversionFailed(err) => err.fmt(f),
+            Self::InvalidId(str) => write!(f, "Invalid Id: {str}"),
+            Self::Serialization(str) => write!(f, "Serialization failed: {str}"),
+            Self::Deserialization(str) => write!(f, "Deserialization failed: {str}"),
+            Self::Custom(err) => err.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for RegistryError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Custom(err) => Some(err.as_ref()),
+            Self::HandleError(err) => err.source(),
+            Self::IoError(err) => err.source(),
+            Self::ConversionFailed(err) => err.source(),
+            _ => None,
+        }
+    }
+}
+
+impl From<HandleError> for RegistryError {
+    fn from(value: HandleError) -> Self {
+        Self::HandleError(value)
+    }
+}
+
+impl From<std::io::Error> for RegistryError {
+    fn from(value: std::io::Error) -> Self {
+        Self::IoError(value)
+    }
+}
+
+impl<'a, T> From<std::sync::PoisonError<std::sync::MutexGuard<'a, T>>> for RegistryError {
+    fn from(value: std::sync::PoisonError<std::sync::MutexGuard<'a, T>>) -> Self {
+        Self::LockPoisoned(format!("Mutex poisoned: {value}"))
+    }
+}
+
+impl From<Box<dyn std::error::Error + Send + Sync + 'static>> for RegistryError {
+    fn from(err: Box<dyn std::error::Error + Send + Sync + 'static>) -> Self {
+        Self::Custom(err)
+    }
+}
+
+impl From<String> for RegistryError {
+    fn from(msg: String) -> Self {
+        Self::Custom(msg.into())
+    }
+}
+
+impl From<&str> for RegistryError {
+    fn from(msg: &str) -> Self {
+        Self::Custom(msg.to_owned().into())
+    }
+}
 
 pub trait TypeDispatcher<T> {
     fn serialize_registered(
@@ -56,7 +139,7 @@ pub trait TypeDispatcher<T> {
         type_id: TypeId,
         value: &T,
         writer: &mut dyn std::io::Write,
-    ) -> Result<(), HandleError>
+    ) -> Result<(), RegistryError>
     where
         T: erased_serde::Serialize;
     fn deserialize_slice(
@@ -64,13 +147,13 @@ pub trait TypeDispatcher<T> {
         format: &Format<T>,
         type_id: TypeId,
         data: &[u8],
-    ) -> Result<T, HandleError>;
+    ) -> Result<T, RegistryError>;
     fn deserialize_reader(
         &self,
         format: &Format<T>,
         type_id: TypeId,
         reader: &mut dyn std::io::Read,
-    ) -> Result<T, HandleError>;
+    ) -> Result<T, RegistryError>;
 }
 
 impl<
@@ -83,7 +166,7 @@ impl<
     > TypeDispatcher<T> for FormatTypeRegistry<T, R, K, I, M, S>
 where
     S::Key: Eq + Clone,
-    I::Key: TryInto<TypeId> + TryFrom<TypeId> + Eq,
+    I::Key: TryInto<TypeId> + TryFrom<TypeId> + Eq + Clone,
     <I::Key as TryFrom<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
     <I::Key as TryInto<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
 {
@@ -93,7 +176,7 @@ where
         type_id: TypeId,
         value: &T,
         writer: &mut dyn std::io::Write,
-    ) -> Result<(), HandleError>
+    ) -> Result<(), RegistryError>
     where
         T: erased_serde::Serialize,
     {
@@ -105,9 +188,9 @@ where
         format: &Format<T>,
         type_id: TypeId,
         data: &[u8],
-    ) -> Result<T, HandleError> {
+    ) -> Result<T, RegistryError> {
         FormatTypeRegistry::deserialize_slice(self, format, type_id, data)
-            .map_err(|error| HandleError::Deserialization(error.to_string()))
+            .map_err(|error| RegistryError::Deserialization(error.to_string()))
     }
 
     fn deserialize_reader(
@@ -115,9 +198,9 @@ where
         format: &Format<T>,
         type_id: TypeId,
         reader: &mut dyn std::io::Read,
-    ) -> Result<T, HandleError> {
+    ) -> Result<T, RegistryError> {
         FormatTypeRegistry::deserialize_reader(self, format, type_id, reader)
-            .map_err(|error| HandleError::Deserialization(error.to_string()))
+            .map_err(|error| RegistryError::Deserialization(error.to_string()))
     }
 }
 
@@ -140,6 +223,7 @@ impl AsBytes for FormatId {
 pub struct FormatRegistry<T, I: IndexedHandle<Format<T>>, M: KeyedHandle<String, I::Key>> {
     inner: I,
     id_map: M,
+    write_mutex: Mutex<()>,
     _phantom: PhantomData<T>,
 }
 
@@ -153,6 +237,7 @@ where
         Self {
             inner,
             id_map,
+            write_mutex: Mutex::new(()),
             _phantom: PhantomData,
         }
     }
@@ -160,7 +245,7 @@ where
     pub fn register(
         &self,
         format: impl Into<Format<T>> + 'static,
-    ) -> Result<FormatId, HandleError> {
+    ) -> Result<FormatId, RegistryError> {
         let format = format.into();
         self.register_named(format.type_with_generics(), format)
     }
@@ -169,32 +254,33 @@ where
         &self,
         name: impl Into<String>,
         format: impl Into<Format<T>> + 'static,
-    ) -> Result<FormatId, HandleError> {
+    ) -> Result<FormatId, RegistryError> {
         let name = name.into();
+        let _guard = self.write_mutex.lock()?;
         if let Some(id) = self.id_map.get(&name)? {
             return Ok(id
                 .try_into()
-                .map_err(|e| HandleError::ConversionFailed(e.into()))?);
+                .map_err(|e| RegistryError::ConversionFailed(e.into()))?);
         }
 
         let id = self.inner.push(format.into())?;
         self.id_map.insert(name, id.clone())?;
         Ok(id
             .try_into()
-            .map_err(|e| HandleError::ConversionFailed(e.into()))?)
+            .map_err(|e| RegistryError::ConversionFailed(e.into()))?)
     }
 
-    pub fn get_format(&self, id: FormatId) -> Result<Option<Format<T>>, HandleError> {
-        self.inner.get(&I::Key::from(id))
+    pub fn get_format(&self, id: FormatId) -> Result<Option<Format<T>>, RegistryError> {
+        Ok(self.inner.get(&I::Key::from(id))?)
     }
 
     pub fn get_format_by_name(
         &self,
         name: impl Into<String>,
-    ) -> Result<Option<Format<T>>, HandleError> {
+    ) -> Result<Option<Format<T>>, RegistryError> {
         let name = name.into();
         if let Some(id) = self.id_map.get(&name)? {
-            return self.inner.get(&id);
+            return Ok(self.inner.get(&id)?);
         }
         Ok(None)
     }
@@ -204,9 +290,9 @@ where
         format_id: FormatId,
         type_id: TypeId,
         mut writer: &mut dyn std::io::Write,
-    ) -> Result<Format<T>, HandleError> {
+    ) -> Result<Format<T>, RegistryError> {
         let format = self.inner.get(&I::Key::from(format_id))?.ok_or_else(|| {
-            HandleError::Custom(format!("No format found for the id '{format_id}'").into())
+            RegistryError::Custom(format!("No format found for the id '{format_id}'").into())
         })?;
         // Write `format_id, type_id` to writer
         format_id.encode(&mut writer)?;
@@ -220,10 +306,10 @@ where
         type_id: TypeId,
         value: &S,
         writer: &mut dyn std::io::Write,
-    ) -> Result<(), HandleError> {
+    ) -> Result<(), RegistryError> {
         self.write_headers(format_id, type_id, writer)?
             .serialize(value, writer)
-            .map_err(|e| HandleError::Serialization(e.to_string()))
+            .map_err(|e| RegistryError::Serialization(e.to_string()))
     }
 
     pub fn serialize_registered<D: Deref<Target = R>, R: TypeDispatcher<T>>(
@@ -233,7 +319,7 @@ where
         type_id: TypeId,
         value: &T,
         writer: &mut dyn std::io::Write,
-    ) -> Result<(), HandleError>
+    ) -> Result<(), RegistryError>
     where
         T: erased_serde::Serialize,
     {
@@ -245,14 +331,14 @@ where
         &self,
         format_type_registry: D,
         slice: &[u8],
-    ) -> Result<T, HandleError> {
+    ) -> Result<T, RegistryError> {
         let mut offset = 0;
         let format_id = FormatId::decode_at(&mut offset, &slice)
-            .map_err(|e| HandleError::Deserialization(e.to_string()))?;
+            .map_err(|e| RegistryError::Deserialization(e.to_string()))?;
         let type_id = TypeId::decode_at(&mut offset, &slice)
-            .map_err(|e| HandleError::Deserialization(e.to_string()))?;
+            .map_err(|e| RegistryError::Deserialization(e.to_string()))?;
         let format = self.get_format(format_id)?.ok_or_else(|| {
-            HandleError::Deserialization(format!("No format found for id '{format_id}'"))
+            RegistryError::Deserialization(format!("No format found for id '{format_id}'"))
         })?;
 
         format_type_registry.deserialize_slice(&format, type_id, &slice[offset..])
@@ -262,17 +348,17 @@ where
         &self,
         format_type_registry: D,
         reader: &mut dyn std::io::Read,
-    ) -> Result<T, HandleError> {
+    ) -> Result<T, RegistryError> {
         let mut header = [0u8; FormatId::BUF_LEN + TypeId::BUF_LEN];
         reader.read_exact(&mut header)?;
 
         let mut offset = 0;
         let format_id = FormatId::decode_at(&mut offset, &header)
-            .map_err(|e| HandleError::Deserialization(e.to_string()))?;
+            .map_err(|e| RegistryError::Deserialization(e.to_string()))?;
         let type_id = TypeId::decode_at(&mut offset, &header)
-            .map_err(|e| HandleError::Deserialization(e.to_string()))?;
+            .map_err(|e| RegistryError::Deserialization(e.to_string()))?;
         let format = self.get_format(format_id)?.ok_or_else(|| {
-            HandleError::Deserialization(format!("No format found for id '{format_id}'"))
+            RegistryError::Deserialization(format!("No format found for id '{format_id}'"))
         })?;
 
         format_type_registry.deserialize_reader(&format, type_id, reader)
@@ -302,7 +388,7 @@ impl<
     > FormatTypeRegistry<T, R, K, I, M, S>
 where
     S::Key: Eq + Clone,
-    I::Key: TryInto<TypeId> + TryFrom<TypeId> + Eq,
+    I::Key: TryInto<TypeId> + TryFrom<TypeId> + Eq + Clone,
     <I::Key as TryFrom<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
     <I::Key as TryInto<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
 {
@@ -317,7 +403,7 @@ where
     pub fn register<U: TypeName + for<'de> serde::Deserialize<'de>>(
         &self,
         into_target: impl Fn(U) -> T + Send + Sync + 'static,
-    ) -> Result<TypeId, HandleError>
+    ) -> Result<TypeId, RegistryError>
     where
         U: 'static,
         T: 'static,
@@ -329,7 +415,7 @@ where
         &self,
         name: impl AsRef<str>,
         into_target: impl Fn(U) -> T + Send + Sync + 'static,
-    ) -> Result<TypeId, HandleError>
+    ) -> Result<TypeId, RegistryError>
     where
         U: 'static,
         T: 'static,
@@ -340,7 +426,7 @@ where
     pub fn register_with<U: TypeName + for<'de> serde::Deserialize<'de>>(
         &self,
         type_factory: SerdeFactory<T>,
-    ) -> Result<TypeId, HandleError>
+    ) -> Result<TypeId, RegistryError>
     where
         U: 'static,
         T: 'static,
@@ -352,7 +438,7 @@ where
         &self,
         name: impl AsRef<str>,
         type_factory: SerdeFactory<T>,
-    ) -> Result<TypeId, HandleError>
+    ) -> Result<TypeId, RegistryError>
     where
         U: 'static,
         T: 'static,
@@ -363,14 +449,14 @@ where
     pub fn get_serde_factory(
         &self,
         type_id: TypeId,
-    ) -> Result<Option<SerdeFactory<T>>, HandleError> {
+    ) -> Result<Option<SerdeFactory<T>>, RegistryError> {
         self.serde.get_factory(type_id)
     }
 
     pub fn get_serde_factory_by_name(
         &self,
         name: impl AsRef<str>,
-    ) -> Result<Option<SerdeFactory<T>>, HandleError> {
+    ) -> Result<Option<SerdeFactory<T>>, RegistryError> {
         self.serde.get_factory_by_name(name)
     }
 
@@ -401,7 +487,7 @@ where
         type_id: TypeId,
         value: &T,
         writer: &mut dyn std::io::Write,
-    ) -> Result<(), HandleError>
+    ) -> Result<(), RegistryError>
     where
         T: erased_serde::Serialize,
     {
@@ -412,7 +498,7 @@ where
             Format::Erased(e) => self
                 .erased
                 .serialize_registered(e.as_ref(), type_id, value, writer)
-                .map_err(|e| HandleError::Serialization(e.to_string())),
+                .map_err(|e| RegistryError::Serialization(e.to_string())),
         }
     }
 
@@ -454,6 +540,7 @@ pub struct SerdeTypeRegistry<
     type_registry: R,
     id_map: M,
     registry: U,
+    write_mutex: Mutex<()>,
     _phantom: PhantomData<T>,
 }
 
@@ -467,7 +554,7 @@ impl<
     > SerdeTypeRegistry<T, R, K, I, M, _U>
 where
     _U::Key: Eq + Clone,
-    I::Key: TryInto<TypeId> + TryFrom<TypeId> + Eq,
+    I::Key: TryInto<TypeId> + TryFrom<TypeId> + Eq + Clone,
     <I::Key as TryFrom<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
     <I::Key as TryInto<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
 {
@@ -476,6 +563,7 @@ where
             type_registry,
             id_map,
             registry,
+            write_mutex: Mutex::new(()),
             _phantom: PhantomData,
         }
     }
@@ -483,7 +571,7 @@ where
     pub fn register<U: TypeName + for<'de> serde::Deserialize<'de>>(
         &self,
         into_target: impl Fn(U) -> T + Send + Sync + 'static,
-    ) -> Result<TypeId, HandleError>
+    ) -> Result<TypeId, RegistryError>
     where
         U: 'static,
         T: 'static,
@@ -495,15 +583,15 @@ where
         &self,
         name: impl AsRef<str>,
         into_target: impl Fn(U) -> T + Send + Sync + 'static,
-    ) -> Result<TypeId, HandleError>
+    ) -> Result<TypeId, RegistryError>
     where
         U: 'static,
         T: 'static,
     {
+        let _guard = self.write_mutex.lock()?;
+        let type_id = self.type_registry.register_named(name)?;
         let into_target = Arc::new(into_target);
         let into_target_clone = into_target.clone();
-        let type_id = self.type_registry.register_named(name)?;
-
         let slice_factory = Arc::new(move |fmt: &dyn SerdeFormat, data: &[u8]| {
             let mut de = fmt.deserialize_slice(data)?;
             Ok(into_target(U::deserialize(&mut *de)?))
@@ -514,18 +602,19 @@ where
                 Ok(into_target_clone(U::deserialize(&mut *de)?))
             },
         );
-
-        let factory_id =
-            self.registry
-                .push(TypeFactory::new(slice_factory, reader_factory, None))?;
-        self.id_map.insert(type_id, factory_id)?;
+        if !self.id_map.contains_key(&type_id)? {
+            let factory_id =
+                self.registry
+                    .push(TypeFactory::new(slice_factory, reader_factory, None))?;
+            self.id_map.insert(type_id, factory_id)?;
+        }
         Ok(type_id)
     }
 
     pub fn register_with<U: TypeName + for<'de> serde::Deserialize<'de>>(
         &self,
         type_factory: SerdeFactory<T>,
-    ) -> Result<TypeId, HandleError>
+    ) -> Result<TypeId, RegistryError>
     where
         U: 'static,
         T: 'static,
@@ -537,20 +626,26 @@ where
         &self,
         name: impl AsRef<str>,
         type_factory: SerdeFactory<T>,
-    ) -> Result<TypeId, HandleError>
+    ) -> Result<TypeId, RegistryError>
     where
         U: 'static,
         T: 'static,
     {
+        let _guard = self.write_mutex.lock()?;
         let type_id = self.type_registry.register_named(name)?;
+        if self.id_map.contains_key(&type_id)? {
+            return Err(RegistryError::InitializationFailed(format!(
+                "Factory already registered for type with id '{type_id}'"
+            )));
+        }
         let factory_id = self.registry.push(type_factory)?;
         self.id_map.insert(type_id, factory_id)?;
         Ok(type_id)
     }
 
-    pub fn get_factory(&self, id: TypeId) -> Result<Option<SerdeFactory<T>>, HandleError> {
+    pub fn get_factory(&self, id: TypeId) -> Result<Option<SerdeFactory<T>>, RegistryError> {
         match self.id_map.get(&id)? {
-            Some(f_id) => self.registry.get(&f_id),
+            Some(f_id) => Ok(self.registry.get(&f_id)?),
             None => Ok(None),
         }
     }
@@ -558,7 +653,7 @@ where
     pub fn get_factory_by_name(
         &self,
         name: impl AsRef<str>,
-    ) -> Result<Option<SerdeFactory<T>>, HandleError> {
+    ) -> Result<Option<SerdeFactory<T>>, RegistryError> {
         match self.type_registry.get_id_by_name(name)? {
             Some(id) => self.get_factory(id),
             None => Ok(None),
@@ -571,20 +666,22 @@ where
         type_id: TypeId,
         value: &T,
         writer: &mut dyn std::io::Write,
-    ) -> Result<(), HandleError>
+    ) -> Result<(), RegistryError>
     where
         T: erased_serde::Serialize,
     {
         let factory = self.get_factory(type_id)?.ok_or_else(|| {
-            HandleError::Serialization(format!("Factory not found for {type_id}"))
+            RegistryError::Serialization(format!(
+                "Serialization factory not found for type with id '{type_id}'"
+            ))
         })?;
         if let Some(prelude) = factory.serialization_prelude {
-            prelude(value, writer).map_err(|e| HandleError::Serialization(e.to_string()))?;
+            prelude(value, writer).map_err(|e| RegistryError::Serialization(e.to_string()))?;
         }
 
         format
             .serialize(value, writer)
-            .map_err(|e| HandleError::Serialization(e.to_string()))
+            .map_err(|e| RegistryError::Serialization(e.to_string()))
     }
 
     pub fn deserialize_slice(
@@ -593,9 +690,9 @@ where
         type_id: TypeId,
         data: &[u8],
     ) -> Result<T, Box<dyn std::error::Error>> {
-        let factory = self
-            .get_factory(type_id)?
-            .ok_or_else(|| format!("Factory not found for {type_id}"))?;
+        let factory = self.get_factory(type_id)?.ok_or_else(|| {
+            format!("Deserialization factory not found for type with id '{type_id}'")
+        })?;
         (factory.slice)(format, data)
     }
 
@@ -605,9 +702,9 @@ where
         type_id: TypeId,
         reader: &mut dyn std::io::Read,
     ) -> Result<T, Box<dyn std::error::Error>> {
-        let factory = self
-            .get_factory(type_id)?
-            .ok_or_else(|| format!("Factory not found for {type_id}"))?;
+        let factory = self.get_factory(type_id)?.ok_or_else(|| {
+            format!("Deserialization factory not found for type with id '{type_id}'")
+        })?;
         (factory.reader)(format, reader)
     }
 }
@@ -788,24 +885,30 @@ impl<T, F: ?Sized> TypeFactory<T, F> {
 pub struct TypeIdRegistry<M: KeyedHandle<Arc<str>, TypeId>, R: IndexedHandle<Arc<str>>> {
     id_map: M,
     registry: R,
+    write_mutex: Mutex<()>,
 }
 
 impl<M: KeyedHandle<Arc<str>, TypeId>, R: IndexedHandle<Arc<str>>> TypeIdRegistry<M, R>
 where
-    R::Key: TryInto<TypeId> + TryFrom<TypeId> + Eq,
+    R::Key: TryInto<TypeId> + TryFrom<TypeId> + Eq + Clone,
     <R::Key as TryFrom<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
     <R::Key as TryInto<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
 {
     pub fn new(id_map: M, registry: R) -> Self {
-        Self { id_map, registry }
+        Self {
+            id_map,
+            registry,
+            write_mutex: Mutex::new(()),
+        }
     }
 
-    pub fn register<U: TypeName>(&self) -> Result<TypeId, HandleError> {
+    pub fn register<U: TypeName>(&self) -> Result<TypeId, RegistryError> {
         self.register_named(U::type_with_generics())
     }
 
-    pub fn register_named(&self, name: impl AsRef<str>) -> Result<TypeId, HandleError> {
+    pub fn register_named(&self, name: impl AsRef<str>) -> Result<TypeId, RegistryError> {
         let name = name.as_ref();
+        let _guard = self.write_mutex.lock()?;
         let id = match self.id_map.get(name)? {
             Some(id) => id,
             None => {
@@ -813,7 +916,7 @@ where
                     .registry
                     .push(name.into())?
                     .try_into()
-                    .map_err(|e| HandleError::ConversionFailed(Box::new(e)))?;
+                    .map_err(|e| RegistryError::ConversionFailed(Box::new(e)))?;
                 self.id_map.insert(name.into(), id)?;
                 id
             }
@@ -821,17 +924,18 @@ where
         Ok(id)
     }
 
-    pub fn get_id<U: TypeName>(&self) -> Result<Option<TypeId>, HandleError> {
-        self.get_id_by_name(&U::type_with_generics())
+    pub fn get_id<U: TypeName>(&self) -> Result<Option<TypeId>, RegistryError> {
+        Ok(self.get_id_by_name(&U::type_with_generics())?)
     }
 
-    pub fn get_id_by_name(&self, name: impl AsRef<str>) -> Result<Option<TypeId>, HandleError> {
-        self.id_map.get(name.as_ref())
+    pub fn get_id_by_name(&self, name: impl AsRef<str>) -> Result<Option<TypeId>, RegistryError> {
+        Ok(self.id_map.get(name.as_ref())?)
     }
 
-    pub fn get_name_by_id(&self, id: TypeId) -> Result<Option<Arc<str>>, HandleError> {
-        self.registry
-            .get(&R::Key::try_from(id).map_err(|e| HandleError::ConversionFailed(Box::new(e)))?)
+    pub fn get_name_by_id(&self, id: TypeId) -> Result<Option<Arc<str>>, RegistryError> {
+        Ok(self.registry.get(
+            &R::Key::try_from(id).map_err(|e| RegistryError::ConversionFailed(Box::new(e)))?,
+        )?)
     }
 }
 
@@ -1005,7 +1109,9 @@ mod tests {
 
         let b_fmt = BinaryFormat::<Box<dyn Any>, _>::new(RwLockStorage::new(HashMap::new()));
         let binary_format_name = b_fmt.type_with_generics();
-        let binary_type_id = b_fmt.register::<Test, _, _, _>(&id_reg, |u: Test| Box::new(u)).unwrap();
+        let binary_type_id = b_fmt
+            .register::<Test, _, _, _>(&id_reg, |u: Test| Box::new(u))
+            .unwrap();
         assert_eq!(binary_type_id, type_id);
         let binary_format_id = format_reg.register(b_fmt).unwrap();
         let binary_format = format_reg.get_format(binary_format_id).unwrap().unwrap();

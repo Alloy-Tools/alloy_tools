@@ -11,13 +11,13 @@ pub use noise_error::NoiseError;
 pub use noise_builder::NoiseBuilder as Noise;
 
 // Following the Noise protocol specification: noiseprotocol.org/noise.html
-const KEY_SIZE: usize = al_crypto::KEY_SIZE;
-const DOUBLE_KEY_SIZE: usize = 2 * KEY_SIZE;
-const TRIPLE_KEY_SIZE: usize = 3 * KEY_SIZE;
-const DHLEN: usize = al_crypto::DHLEN; // Must be 32 or greater
-const HASHLEN: usize = 32; // Noise has HASHLEN 32 for BLAKE2s
+pub const KEY_SIZE: usize = al_crypto::KEY_SIZE;
+pub const DOUBLE_KEY_SIZE: usize = 2 * KEY_SIZE;
+pub const TRIPLE_KEY_SIZE: usize = 3 * KEY_SIZE;
+pub const DHLEN: usize = al_crypto::DHLEN; // Must be 32 or greater
+pub const HASHLEN: usize = 32; // Noise has HASHLEN 32 for BLAKE2s
 #[allow(unused)]
-const MAX_MSG_BYTE_LEN: usize = 65535; // Noise message sizes are capped at 65,535 bytes
+pub const MAX_MSG_BYTE_LEN: usize = 65535; // Noise message sizes are capped at 65,535 bytes
 
 #[cfg(test)]
 mod tests {

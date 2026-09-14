@@ -13,8 +13,8 @@ pub use al_derive::CommandMarker as DeriveCommandMarker;
 pub use al_derive::EventMarker as DeriveEventMarker;
 pub use al_derive::QueryMarker as DeriveQueryMarker;
 pub use al_derive::TypeName as DeriveTypeName;
-pub use al_structures::traits::TypeName as TypeName;
 pub use al_derive::{command, event, query};
+pub use al_structures::traits::TypeName;
 
 // Expose `TypeId`, `FormatId`, `TypeFactory`, and `SerdeFormat` here
 #[cfg(feature = "serde")]
@@ -37,9 +37,9 @@ pub use event::{Event, EventHelpers, EventMarker};
 pub use markers::{MessageMarker, MessageRequirements, ObjectTraits};
 #[cfg(feature = "borrow")]
 pub use message::BorrowedMessage;
-pub use message::{DynMessage, Message};
 #[cfg(feature = "serde")]
-pub use message::{MESSAGE_FORMATS, MESSAGE_TYPE_IDS, MESSAGE_TYPE_REGISTRY, IdCache};
+pub use message::{DynIdCache, IdCache, MESSAGE_FORMATS, MESSAGE_TYPE_IDS, MESSAGE_TYPE_REGISTRY};
+pub use message::{DynMessage, Message};
 #[cfg(feature = "serde")]
 pub use query::{try_register_query, try_register_query_with};
 pub use query::{Query, QueryHelpers, QueryMarker};

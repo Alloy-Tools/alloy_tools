@@ -109,7 +109,7 @@ impl<T: 'static, D: KeyedHandle<TypeId, DirectFactory<T>> + Clone + Send + Sync 
     ) -> Result<TypeId, Box<dyn std::error::Error>>
     where
         Self: Sized,
-        I::Key: TryInto<TypeId> + TryFrom<TypeId> + Eq,
+        I::Key: TryInto<TypeId> + TryFrom<TypeId> + Eq + Clone,
         <I::Key as TryFrom<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
         <I::Key as TryInto<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
     {
@@ -129,7 +129,7 @@ impl<T: 'static, D: KeyedHandle<TypeId, DirectFactory<T>> + Clone + Send + Sync 
     ) -> Result<TypeId, Box<dyn std::error::Error>>
     where
         Self: Sized,
-        I::Key: TryInto<TypeId> + TryFrom<TypeId> + Eq,
+        I::Key: TryInto<TypeId> + TryFrom<TypeId> + Eq + Clone,
         <I::Key as TryFrom<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
         <I::Key as TryInto<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
     {

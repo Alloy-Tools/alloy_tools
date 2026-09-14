@@ -1,12 +1,18 @@
+#[cfg(feature = "serde")]
+use crate::FormatId;
 use crate::{
     metadata::{CommandMeta, EventMeta, MetaData, QueryMeta},
     Command, Event, Query,
 };
 use al_structures::traits::DynTypeName;
 #[cfg(feature = "serde")]
+use al_structures::traits::TypeName;
+#[cfg(feature = "serde")]
 use al_structures::{
-    collections::storage::{utils::HandleError, CowStorage},
-    serde_utils::serde_registries::{FormatTypeRegistry, SerdeFactory, TypeId, TypeIdRegistry},
+    collections::storage::CowStorage,
+    serde_utils::serde_registries::{
+        FormatTypeRegistry, RegistryError, SerdeFactory, TypeId, TypeIdRegistry,
+    },
 };
 use std::time::Duration;
 #[cfg(feature = "serde")]
@@ -46,15 +52,15 @@ impl<Cmd: serde::Serialize, Evt: serde::Serialize, Qry: serde::Serialize> serde:
 }
 
 #[cfg(feature = "serde")]
-pub trait IdCache: DynTypeName {
-    fn message_id(&self) -> Result<TypeId, HandleError>;
+pub trait IdCache: TypeName {
+    fn message_id() -> Result<TypeId, RegistryError>;
 }
 
 #[cfg(feature = "serde")]
 impl<T: crate::MessageMarker> IdCache for T {
-    fn message_id(&self) -> Result<TypeId, HandleError> {
+    fn message_id() -> Result<TypeId, RegistryError> {
         MESSAGE_TYPE_IDS().get_id::<T>()?.ok_or_else(|| {
-            HandleError::InitializationFailed(format!(
+            RegistryError::InitializationFailed(format!(
                 "Message type '{}' is not registered",
                 T::type_with_generics()
             ))
@@ -63,8 +69,20 @@ impl<T: crate::MessageMarker> IdCache for T {
 }
 
 #[cfg(feature = "serde")]
-impl<Cmd: IdCache, Evt: IdCache, Qry: IdCache> IdCache for Message<Cmd, Evt, Qry> {
-    fn message_id(&self) -> Result<TypeId, HandleError> {
+pub trait DynIdCache: DynTypeName {
+    fn message_id(&self) -> Result<TypeId, RegistryError>;
+}
+
+#[cfg(feature = "serde")]
+impl<T: IdCache> DynIdCache for T {
+    fn message_id(&self) -> Result<TypeId, RegistryError> {
+        T::message_id()
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<Cmd: DynIdCache, Evt: DynIdCache, Qry: DynIdCache> DynIdCache for Message<Cmd, Evt, Qry> {
+    fn message_id(&self) -> Result<TypeId, RegistryError> {
         match self {
             Message::Command(c, _) => c.message_id(),
             Message::Event(e, _) => e.message_id(),
@@ -92,6 +110,32 @@ impl<Cmd: DynTypeName, Evt: DynTypeName, Qry: DynTypeName> DynTypeName for Messa
 }
 
 pub type DynMessage = Message<Box<dyn Command>, Box<dyn Event>, Box<dyn Query>>;
+
+#[cfg(feature = "serde")]
+impl DynMessage {
+    pub fn to_format(
+        &self,
+        format_id: FormatId,
+        writer: &mut dyn std::io::Write,
+    ) -> Result<(), RegistryError> {
+        self.to_format_with(format_id, self.message_id()?, writer)
+    }
+
+    pub fn to_format_with(
+        &self,
+        format_id: FormatId,
+        type_id: TypeId,
+        writer: &mut dyn std::io::Write,
+    ) -> Result<(), RegistryError> {
+        MESSAGE_FORMATS().serialize_registered(
+            MESSAGE_TYPE_REGISTRY(),
+            format_id,
+            type_id,
+            self,
+            writer,
+        )
+    }
+}
 
 #[derive(Debug)]
 pub enum Message<Cmd, Evt, Qry> {
@@ -529,14 +573,14 @@ macro_rules! define_message_kind {
             #[doc = concat!("Object-safe helper methods for `dyn ", stringify!($kind), "`.")]
             pub trait [<$kind Helpers>]: crate::ObjectTraits + al_structures::traits::AsAny {
                 #[cfg(feature = "serde")]
-                fn register(self) -> Result<al_structures::serde_utils::serde_registries::TypeId, al_structures::collections::storage::utils::HandleError>
+                fn register(self) -> Result<al_structures::serde_utils::serde_registries::TypeId, al_structures::serde_utils::serde_registries::RegistryError>
                 where
                     Self: for<'de> serde::Deserialize<'de>;
 
                 #[cfg(feature = "serde")]
                 fn type_message_id() -> Result<
                     al_structures::serde_utils::serde_registries::TypeId,
-                    al_structures::collections::storage::utils::HandleError,
+                    al_structures::serde_utils::serde_registries::RegistryError,
                 > where Self: Sized;
 
                 #[cfg(feature = "serde")]
@@ -544,7 +588,7 @@ macro_rules! define_message_kind {
                     &self,
                 ) -> Result<
                     al_structures::serde_utils::serde_registries::TypeId,
-                    al_structures::collections::storage::utils::HandleError,
+                    al_structures::serde_utils::serde_registries::RegistryError,
                 >;
 
                 fn to_msg(self) -> DynMessage
@@ -559,7 +603,7 @@ macro_rules! define_message_kind {
             // ----- Blanket impl -----
             impl<T: [<$kind Marker>] + crate::ObjectTraits> [<$kind Helpers>] for T {
                 #[cfg(feature = "serde")]
-                fn register(self) -> Result<al_structures::serde_utils::serde_registries::TypeId, al_structures::collections::storage::utils::HandleError>
+                fn register(self) -> Result<al_structures::serde_utils::serde_registries::TypeId, al_structures::serde_utils::serde_registries::RegistryError>
                 where
                     Self: for<'de> serde::Deserialize<'de>,
                 {
@@ -568,10 +612,10 @@ macro_rules! define_message_kind {
                 #[cfg(feature = "serde")]
                 fn type_message_id() -> Result<
                     al_structures::serde_utils::serde_registries::TypeId,
-                    al_structures::collections::storage::utils::HandleError,
+                    al_structures::serde_utils::serde_registries::RegistryError,
                 > where Self: Sized {
                     crate::MESSAGE_TYPE_IDS().get_id::<T>()?.ok_or_else(|| {
-                        al_structures::collections::storage::utils::HandleError::InitializationFailed(format!(
+                        al_structures::serde_utils::serde_registries::RegistryError::InitializationFailed(format!(
                             "Message type '{}' is not registered",
                             <T as crate::TypeName>::type_with_generics(),
                         ))
@@ -582,7 +626,7 @@ macro_rules! define_message_kind {
                     &self,
                 ) -> Result<
                     al_structures::serde_utils::serde_registries::TypeId,
-                    al_structures::collections::storage::utils::HandleError,
+                    al_structures::serde_utils::serde_registries::RegistryError,
                 > {
                     Self::type_message_id()
                 }
@@ -675,26 +719,38 @@ macro_rules! define_message_kind {
 
                 type [<$kind Registry>]<'a> = crate::message::MessageRegistryType<'a>;
 
-                impl crate::IdCache for dyn $kind {
-                    fn message_id(&self) -> Result<al_structures::serde_utils::serde_registries::TypeId, al_structures::collections::storage::utils::HandleError> {
+                impl crate::DynIdCache for dyn $kind {
+                    fn message_id(&self) -> Result<al_structures::serde_utils::serde_registries::TypeId, al_structures::serde_utils::serde_registries::RegistryError> {
                         [<$kind Helpers>]::message_id(self)
                     }
                 }
 
-                impl crate::IdCache for Box<dyn $kind> {
-                    fn message_id(&self) -> Result<al_structures::serde_utils::serde_registries::TypeId, al_structures::collections::storage::utils::HandleError> {
+                impl crate::DynIdCache for Box<dyn $kind> {
+                    fn message_id(&self) -> Result<al_structures::serde_utils::serde_registries::TypeId, al_structures::serde_utils::serde_registries::RegistryError> {
                         [<$kind Helpers>]::message_id(self.as_ref())
                     }
                 }
 
                 pub fn [<try_register_ $kind:snake>]<K: $kind + [<$kind Marker>] + for<'de> serde::Deserialize<'de> + 'static>(
-                ) -> Result<al_structures::serde_utils::serde_registries::TypeId, al_structures::collections::storage::utils::HandleError> {
-                    [<try_register_ $kind:snake _with>]::<K>(crate::MESSAGE_TYPE_REGISTRY())
+                ) -> Result<al_structures::serde_utils::serde_registries::TypeId, al_structures::serde_utils::serde_registries::RegistryError> {
+                    use al_structures::serde_utils::serde_registries::RegistryError;
+                    Ok(match [<try_register_ $kind:snake _with>]::<K>(crate::MESSAGE_TYPE_REGISTRY()) {
+                        Ok(id) => id,
+                        Err(e) => if let RegistryError::InitializationFailed(s) = e {
+                            if s.contains("Factory already registered for type with id '") {
+                                K::type_message_id()?
+                            } else {
+                                Err(RegistryError::InitializationFailed(s))?
+                            }
+                        } else {
+                            Err(e)?
+                        }
+                    })
                 }
 
                 pub fn [<try_register_ $kind:snake _with>]<K: $kind + [<$kind Marker>] + for<'de> serde::Deserialize<'de> + 'static>(
                     registry: &[<$kind Registry>],
-                ) -> Result<al_structures::serde_utils::serde_registries::TypeId, al_structures::collections::storage::utils::HandleError> {
+                ) -> Result<al_structures::serde_utils::serde_registries::TypeId, al_structures::serde_utils::serde_registries::RegistryError> {
                     let slice_factory = std::sync::Arc::new(move |fmt: &dyn $crate::SerdeFormat, data: &[u8]| {
                         let (meta, offset) = crate::metadata::[<$kind Meta>]::decode_slice(data)?;
                         let mut de = fmt.deserialize_slice(&data[offset..])?;

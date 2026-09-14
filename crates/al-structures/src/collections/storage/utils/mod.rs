@@ -64,11 +64,6 @@ impl From<&str> for StorageError {
 pub enum HandleError {
     Storage(StorageError),
     LockPoisoned(String),
-    InitializationFailed(String),
-    ConversionFailed(Box<dyn std::error::Error + Send + Sync>),
-    Serialization(String),
-    Deserialization(String),
-    IoError(std::io::Error),
     Custom(Box<dyn std::error::Error + Send + Sync + 'static>),
 }
 
@@ -76,12 +71,7 @@ impl std::fmt::Display for HandleError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::LockPoisoned(msg) => write!(f, "Handle lock poisoned: {msg}"),
-            Self::InitializationFailed(msg) => write!(f, "Initialization failed: {msg}"),
-            Self::Serialization(msg) => write!(f, "Serialization failed: {msg}"),
-            Self::Deserialization(msg) => write!(f, "Deserialization failed: {msg}"),
             Self::Storage(err) => err.fmt(f),
-            Self::ConversionFailed(err) => err.fmt(f),
-            Self::IoError(err) => err.fmt(f),
             Self::Custom(err) => err.fmt(f),
         }
     }
@@ -92,8 +82,6 @@ impl std::error::Error for HandleError {
         match self {
             Self::Custom(err) => Some(err.as_ref()),
             Self::Storage(err) => err.source(),
-            Self::ConversionFailed(err) => err.source(),
-            Self::IoError(err) => err.source(),
             _ => None,
         }
     }
@@ -102,12 +90,6 @@ impl std::error::Error for HandleError {
 impl From<StorageError> for HandleError {
     fn from(value: StorageError) -> Self {
         HandleError::Storage(value)
-    }
-}
-
-impl From<std::io::Error> for HandleError {
-    fn from(value: std::io::Error) -> Self {
-        HandleError::IoError(value)
     }
 }
 
