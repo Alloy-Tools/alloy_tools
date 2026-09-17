@@ -44,7 +44,10 @@
 //! 5. At runtime, call `registry.deserialize(data)` which will pull out the `(FormatId, TypeId, &[u8])`, deserialize the type, and return it as a homogenous `T`.
 use crate::{
     collections::storage::utils::{indexed::IndexedHandle, keyed::KeyedHandle},
-    serde_utils::{RegistryError, serde_format::{ErasedDeserialize, Format, SerdeFormat, SerializeFormat}},
+    serde_utils::{
+        serde_format::{ErasedDeserialize, Format, SerdeFormat, SerializeFormat},
+        RegistryError,
+    },
     traits::{AsBytes, DynTypeName, Header, TypeName},
 };
 use std::{
@@ -90,8 +93,8 @@ impl<
 where
     S::Key: Eq + Clone,
     I::Key: TryInto<TypeId> + TryFrom<TypeId> + Eq + Clone,
-    <I::Key as TryFrom<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
-    <I::Key as TryInto<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
+    <I::Key as TryFrom<TypeId>>::Error: std::error::Error + Eq + Clone + Send + Sync + 'static,
+    <I::Key as TryInto<TypeId>>::Error: std::error::Error + Eq + Clone + Send + Sync + 'static,
 {
     fn serialize_registered(
         &self,
@@ -154,7 +157,7 @@ impl<T: 'static, I: IndexedHandle<Format<T>>, M: KeyedHandle<String, I::Key>>
     FormatRegistry<T, I, M>
 where
     I::Key: Eq + Clone + TryInto<FormatId> + From<FormatId>,
-    <I::Key as TryInto<FormatId>>::Error: std::error::Error + Send + Sync + 'static,
+    <I::Key as TryInto<FormatId>>::Error: std::error::Error + Eq + Clone + Send + Sync + 'static,
 {
     pub fn new(inner: I, id_map: M) -> Self {
         Self {
@@ -183,14 +186,14 @@ where
         if let Some(id) = self.id_map.get(&name)? {
             return Ok(id
                 .try_into()
-                .map_err(|e| RegistryError::ConversionFailed(e.into()))?);
+                .map_err(|e| RegistryError::ConversionFailed(Box::new(e)))?);
         }
 
         let id = self.inner.push(format.into())?;
         self.id_map.insert(name, id.clone())?;
         Ok(id
             .try_into()
-            .map_err(|e| RegistryError::ConversionFailed(e.into()))?)
+            .map_err(|e| RegistryError::ConversionFailed(Box::new(e)))?)
     }
 
     pub fn get_format(&self, id: FormatId) -> Result<Option<Format<T>>, RegistryError> {
@@ -214,9 +217,10 @@ where
         type_id: TypeId,
         mut writer: &mut dyn std::io::Write,
     ) -> Result<Format<T>, RegistryError> {
-        let format = self.inner.get(&I::Key::from(format_id))?.ok_or_else(|| {
-            RegistryError::Custom(format!("No format found for the id '{format_id}'").into())
-        })?;
+        let format = self
+            .inner
+            .get(&I::Key::from(format_id))?
+            .ok_or_else(|| format!("No format found for the id '{format_id}'"))?;
         // Write `format_id, type_id` to writer
         format_id.encode(&mut writer)?;
         type_id.encode(&mut writer)?;
@@ -312,8 +316,8 @@ impl<
 where
     S::Key: Eq + Clone,
     I::Key: TryInto<TypeId> + TryFrom<TypeId> + Eq + Clone,
-    <I::Key as TryFrom<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
-    <I::Key as TryInto<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
+    <I::Key as TryFrom<TypeId>>::Error: std::error::Error + Eq + Clone + Send + Sync + 'static,
+    <I::Key as TryInto<TypeId>>::Error: std::error::Error + Eq + Clone + Send + Sync + 'static,
 {
     pub fn new(type_registry: R, id_map: M, serde_inner: S) -> Self {
         Self {
@@ -478,8 +482,8 @@ impl<
 where
     _U::Key: Eq + Clone,
     I::Key: TryInto<TypeId> + TryFrom<TypeId> + Eq + Clone,
-    <I::Key as TryFrom<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
-    <I::Key as TryInto<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
+    <I::Key as TryFrom<TypeId>>::Error: std::error::Error + Eq + Clone + Send + Sync + 'static,
+    <I::Key as TryInto<TypeId>>::Error: std::error::Error + Eq + Clone + Send + Sync + 'static,
 {
     pub fn new(type_registry: R, id_map: M, registry: _U) -> Self {
         Self {
@@ -814,8 +818,8 @@ pub struct TypeIdRegistry<M: KeyedHandle<Arc<str>, TypeId>, R: IndexedHandle<Arc
 impl<M: KeyedHandle<Arc<str>, TypeId>, R: IndexedHandle<Arc<str>>> TypeIdRegistry<M, R>
 where
     R::Key: TryInto<TypeId> + TryFrom<TypeId> + Eq + Clone,
-    <R::Key as TryFrom<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
-    <R::Key as TryInto<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
+    <R::Key as TryFrom<TypeId>>::Error: std::error::Error + Eq + Clone + Send + Sync + 'static,
+    <R::Key as TryInto<TypeId>>::Error: std::error::Error + Eq + Clone + Send + Sync + 'static,
 {
     pub fn new(id_map: M, registry: R) -> Self {
         Self {

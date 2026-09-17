@@ -14,20 +14,20 @@ impl From<argon2::Error> for CryptoError {
 }
 
 impl From<digest::InvalidLength> for CryptoError {
-    fn from(_: digest::InvalidLength) -> Self {
-        CryptoError::InvalidKeyLength
+    fn from(value: digest::InvalidLength) -> Self {
+        CryptoError::InvalidKeyLength(value)
     }
 }
 
 impl From<rand::rand_core::OsError> for CryptoError {
-    fn from(_: rand::rand_core::OsError) -> Self {
-        CryptoError::OsRngError
+    fn from(value: rand::rand_core::OsError) -> Self {
+        CryptoError::OsRngError(value)
     }
 }
 
 impl From<hex::FromHexError> for CryptoError {
-    fn from(_: hex::FromHexError) -> Self {
-        CryptoError::HexError
+    fn from(value: hex::FromHexError) -> Self {
+        CryptoError::HexError(value)
     }
 }
 
@@ -91,15 +91,15 @@ pub fn encrypt(
 ) -> Result<(), CryptoError> {
     let p_len = plaintext.len();
     if dest.len() < p_len + TAG_SIZE {
-        return Err(CryptoError::DestTooSmall);
+        return Err(CryptoError::DestTooSmall(dest.len(), p_len + TAG_SIZE));
     }
     let mut cipher = <ChaCha20Poly1305 as digest::KeyInit>::new_from_slice(key)?;
     dest[..p_len].copy_from_slice(plaintext);
     let tag = cipher
         .encrypt_in_place_detached(nonce.into(), associated_data, &mut dest[..p_len])
-        .map_err(|_| {
+        .map_err(|e| {
             dest.zeroize();
-            CryptoError::EncryptionError
+            CryptoError::EncryptionError(e)
         })?;
     dest[p_len..p_len + TAG_SIZE].copy_from_slice(&tag);
     Ok(())
@@ -115,7 +115,7 @@ pub fn decrypt(
 ) -> Result<(), CryptoError> {
     let p_len = ciphertext.len() - TAG_SIZE;
     if dest.len() < p_len {
-        return Err(CryptoError::DestTooSmall);
+        return Err(CryptoError::DestTooSmall(dest.len(), p_len));
     }
     let mut cipher = <ChaCha20Poly1305 as digest::KeyInit>::new_from_slice(key)?;
 
@@ -124,9 +124,9 @@ pub fn decrypt(
 
     cipher
         .decrypt_in_place_detached(nonce.into(), associated_data, dest, tag.into())
-        .map_err(|_| {
+        .map_err(|e| {
             dest.zeroize();
-            CryptoError::DecryptionError
+            CryptoError::DecryptionError(e)
         })?;
     Ok(())
 }

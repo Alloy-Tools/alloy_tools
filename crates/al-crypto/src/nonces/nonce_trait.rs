@@ -52,11 +52,9 @@ impl NonceTrait for Monotonic {
 
     fn to_next(nonce: &mut Nonce<Self>) -> Result<(), NonceError> {
         Self::needs_rotation(nonce)?;
-        let num = u64::from_be_bytes(
-            nonce.as_bytes()[4..12]
-                .try_into()
-                .or_else(|_| Err(NonceError::U64ConvertError))?,
-        );
+        let num = u64::from_be_bytes(nonce.as_bytes()[4..12].try_into().or_else(
+            |e: std::array::TryFromSliceError| Err(NonceError::U64ConvertError(e.to_string())),
+        )?);
         nonce.as_bytes_mut()[4..12].copy_from_slice(&(num + 1).to_be_bytes());
         Ok(())
     }
@@ -88,7 +86,7 @@ impl<G: Granularity> NonceTrait for MonotonicTimeStamp<G> {
         let num = u32::from_be_bytes(
             nonce.as_bytes()[8..12]
                 .try_into()
-                .or_else(|_| Err(NonceError::U32ConvertError))?,
+                .or_else(|e: std::array::TryFromSliceError| Err(NonceError::U32ConvertError(e.to_string())))?,
         );
         nonce.as_bytes_mut()[8..12].copy_from_slice(&(num + 1).to_be_bytes());
 
@@ -122,6 +120,6 @@ impl<G: Granularity> NonceTrait for RandomTimeStamp<G> {
         let epoch = nonce.get_epoch();
         nonce.as_bytes_mut()[4..8].copy_from_slice(&G::get_timestamp(epoch));
         Ok(fill_random(&mut nonce.as_bytes_mut()[8..12])
-            .map_err(|_| NonceError::FillRandomError)?)
+            .map_err(|e| NonceError::FillRandomError(e))?)
     }
 }

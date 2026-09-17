@@ -1,3 +1,5 @@
+use std::fmt::{Debug, Display};
+
 // ----- AsAny -----
 pub trait AsAny: 'static {
     fn as_any(&self) -> &dyn std::any::Any;
@@ -138,5 +140,65 @@ impl<T: AsBytes> Header for T {
             ))?;
         }
         Self::from_bytes(buffer)
+    }
+}
+
+// ----- CloneEqError -----
+pub trait CloneEqError: Debug + Display + Send + Sync + AsAny {
+    fn clone_box(&self) -> Box<dyn CloneEqError>;
+    fn eq_box(&self, other: &dyn CloneEqError) -> bool;
+    fn error_source(&self) -> Option<&(dyn std::error::Error + 'static)>;
+}
+
+impl<T: std::error::Error + Clone + PartialEq + Eq + Send + Sync + 'static> CloneEqError for T {
+    fn clone_box(&self) -> Box<dyn CloneEqError> {
+        Box::new(self.clone())
+    }
+
+    fn eq_box(&self, other: &dyn CloneEqError) -> bool {
+        if let Some(o) = other.as_any().downcast_ref::<T>() {
+            self == o
+        } else {
+            false
+        }
+    }
+
+    fn error_source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        std::error::Error::source(self)
+    }
+}
+
+impl std::error::Error for dyn CloneEqError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.error_source()
+    }
+}
+
+impl Clone for Box<dyn CloneEqError> {
+    fn clone(&self) -> Self {
+        self.clone_box()
+    }
+}
+
+impl PartialEq for Box<dyn CloneEqError> {
+    fn eq(&self, other: &Self) -> bool {
+        self.eq_box(other.as_ref())
+    }
+}
+
+impl Eq for Box<dyn CloneEqError> {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StringError(pub String);
+
+impl Display for StringError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for StringError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        None
     }
 }

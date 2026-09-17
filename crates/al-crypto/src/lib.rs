@@ -23,16 +23,46 @@ use zeroize::Zeroize;
 
 pub type HkdfBlake2s<const N: usize> = Hkdf<hmac::SimpleHmac<blake2::Blake2s256>, N>;
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum CryptoError {
-    HexError,
+    HexError(hex::FromHexError),
     Argon2Error(argon2::Error),
-    InvalidKeyLength,
-    OsRngError,
-    DestTooSmall,
+    InvalidKeyLength(digest::InvalidLength),
+    OsRngError(rand::rand_core::OsError),
+    DestTooSmall(usize, usize),
     HkdfExpandTooLong,
-    EncryptionError,
-    DecryptionError,
+    EncryptionError(chacha20poly1305::aead::Error),
+    DecryptionError(chacha20poly1305::aead::Error),
+}
+
+// `FromHexError` doesn't impl `Eq` but should.
+impl Eq for CryptoError {}
+
+impl std::fmt::Display for CryptoError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::HexError(err) => err.fmt(f),
+            Self::Argon2Error(err) => err.fmt(f),
+            Self::InvalidKeyLength(err) => err.fmt(f),
+            Self::OsRngError(err) => err.fmt(f),
+            Self::DestTooSmall(actual, expected) => write!(f, "Destination too small, expected {expected} but found {actual}."),
+            Self::HkdfExpandTooLong => write!(f, "HKDF expansion is too long."),
+            Self::EncryptionError(err) => err.fmt(f),
+            Self::DecryptionError(err) => err.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for CryptoError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::HexError(err) => err.source(),
+            Self::Argon2Error(err) => err.source(),
+            Self::InvalidKeyLength(err) => err.source(),
+            Self::OsRngError(err) => err.source(),
+            _ => None,
+        }
+    }
 }
 
 pub fn hash<const N: usize>(data: &[u8]) -> [u8; N] {

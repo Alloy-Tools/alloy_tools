@@ -3,6 +3,8 @@
 //! - `KeyedHandle` / `KeyedStorage` are for map-like, key/value backends.
 //! - `OrderedHandle` / `OrderedStorage` are for order-sensitive keyed backends.
 //! - `IndexedHandle` / `IndexedStorage` are for array-like, index-keyed backends.
+
+use crate::traits::{CloneEqError, StringError};
 pub mod indexed;
 pub mod keyed;
 pub mod ordered;
@@ -11,11 +13,11 @@ pub mod ordered;
 /// Errors returned by storage operations.
 ///
 /// Includes a `Custom` variant for any boxed `Error`
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StorageError {
     OutOfBounds(usize, usize),
     MissingValue(String),
-    Custom(Box<dyn std::error::Error + Send + Sync + 'static>),
+    Custom(Box<dyn CloneEqError>),
 }
 
 impl std::fmt::Display for StorageError {
@@ -33,38 +35,38 @@ impl std::fmt::Display for StorageError {
 impl std::error::Error for StorageError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Custom(err) => Some(err.as_ref()),
+            Self::Custom(err) => err.source(),
             _ => None,
         }
     }
 }
 
-impl From<Box<dyn std::error::Error + Send + Sync + 'static>> for StorageError {
-    fn from(err: Box<dyn std::error::Error + Send + Sync + 'static>) -> Self {
+impl From<Box<dyn CloneEqError>> for StorageError {
+    fn from(err: Box<dyn CloneEqError>) -> Self {
         Self::Custom(err)
     }
 }
 
 impl From<String> for StorageError {
     fn from(msg: String) -> Self {
-        Self::Custom(msg.into())
+        Self::Custom(Box::new(StringError(msg)))
     }
 }
 
 impl From<&str> for StorageError {
     fn from(msg: &str) -> Self {
-        Self::Custom(msg.to_owned().into())
+        Self::Custom(Box::new(StringError(msg.to_owned())))
     }
 }
 
 /// Errors returned by storage handle operations.
 ///
 /// Includes a `Custom` variant for any boxed `Error`.
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HandleError {
     Storage(StorageError),
     LockPoisoned(String),
-    Custom(Box<dyn std::error::Error + Send + Sync + 'static>),
+    Custom(Box<dyn CloneEqError>),
 }
 
 impl std::fmt::Display for HandleError {
@@ -80,7 +82,7 @@ impl std::fmt::Display for HandleError {
 impl std::error::Error for HandleError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Custom(err) => Some(err.as_ref()),
+            Self::Custom(err) => err.source(),
             Self::Storage(err) => err.source(),
             _ => None,
         }
@@ -99,21 +101,21 @@ impl<'a, T> From<std::sync::PoisonError<std::sync::MutexGuard<'a, T>>> for Handl
     }
 }
 
-impl From<Box<dyn std::error::Error + Send + Sync + 'static>> for HandleError {
-    fn from(err: Box<dyn std::error::Error + Send + Sync + 'static>) -> Self {
+impl From<Box<dyn CloneEqError>> for HandleError {
+    fn from(err: Box<dyn CloneEqError>) -> Self {
         Self::Custom(err)
     }
 }
 
 impl From<String> for HandleError {
     fn from(msg: String) -> Self {
-        Self::Custom(msg.into())
+        Self::Custom(Box::new(StringError(msg)))
     }
 }
 
 impl From<&str> for HandleError {
     fn from(msg: &str) -> Self {
-        Self::Custom(msg.to_owned().into())
+        Self::Custom(Box::new(StringError(msg.to_owned())))
     }
 }
 

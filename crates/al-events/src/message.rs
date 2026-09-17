@@ -130,6 +130,14 @@ impl DynMessage {
             writer,
         )?)
     }
+
+    pub fn from_format_slice(slice: &[u8]) -> Result<DynMessage, MessageError> {
+        Ok(MESSAGE_FORMATS().deserialize_slice(MESSAGE_TYPE_REGISTRY(), slice)?)
+    }
+
+    pub fn from_format_reader(reader: &mut dyn std::io::Read) -> Result<DynMessage, MessageError> {
+        Ok(MESSAGE_FORMATS().deserialize_reader(MESSAGE_TYPE_REGISTRY(), reader)?)
+    }
 }
 
 #[derive(Debug)]

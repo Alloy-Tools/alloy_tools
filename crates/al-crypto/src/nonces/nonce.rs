@@ -10,13 +10,34 @@ use std::{
 
 pub const NONCE_SIZE: usize = 12;
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NonceError {
-    U64ConvertError,
-    U32ConvertError,
+    U64ConvertError(String),
+    U32ConvertError(String),
     CounterExpired,
     TimestampExpired,
-    FillRandomError,
+    FillRandomError(crate::CryptoError),
+}
+
+impl std::fmt::Display for NonceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::U64ConvertError(str) => write!(f, "Failed to convert bytes to u64: {str}"),
+            Self::U32ConvertError(str) => write!(f, "Failed to convert bytes to u32: {str}"),
+            Self::CounterExpired => write!(f, "Nonce needs rotation, the counter has expired."),
+            Self::TimestampExpired => write!(f, "Nonce needs rotation, the timestamp has expired."),
+            Self::FillRandomError(err) => err.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for NonceError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::FillRandomError(err) => err.source(),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -63,7 +84,7 @@ impl<G: Granularity> Nonce<RandomTimeStamp<G>> {
         let mut bytes = [0u8; NONCE_SIZE];
         bytes[..4].copy_from_slice(context);
         bytes[4..8].copy_from_slice(&G::get_timestamp(Self::epoch_from(created_at)));
-        fill_random(&mut bytes[8..]).map_err(|_| NonceError::FillRandomError)?;
+        fill_random(&mut bytes[8..]).map_err(|e| NonceError::FillRandomError(e))?;
         Ok(Self {
             bytes,
             created_at,

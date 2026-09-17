@@ -205,8 +205,8 @@ pub trait ErasedDeserialize<T>:
     where
         Self: Sized,
         I::Key: TryInto<TypeId> + TryFrom<TypeId> + Eq + Clone,
-        <I::Key as TryFrom<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
-        <I::Key as TryInto<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
+        <I::Key as TryFrom<TypeId>>::Error: std::error::Error + Eq + Clone + Send + Sync + 'static,
+        <I::Key as TryInto<TypeId>>::Error: std::error::Error + Eq + Clone + Send + Sync + 'static,
     {
         self.register_named(U::type_with_generics(), type_registry, into_target)
     }
@@ -225,8 +225,8 @@ pub trait ErasedDeserialize<T>:
     where
         Self: Sized,
         I::Key: TryInto<TypeId> + TryFrom<TypeId> + Eq + Clone,
-        <I::Key as TryFrom<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
-        <I::Key as TryInto<TypeId>>::Error: std::error::Error + Send + Sync + 'static;
+        <I::Key as TryFrom<TypeId>>::Error: std::error::Error + Eq + Clone + Send + Sync + 'static,
+        <I::Key as TryInto<TypeId>>::Error: std::error::Error + Eq + Clone + Send + Sync + 'static;
 
     fn register_with<
         U: TypeName + for<'de> serde::Deserialize<'de>,
@@ -241,8 +241,8 @@ pub trait ErasedDeserialize<T>:
     where
         Self: Sized,
         I::Key: TryInto<TypeId> + TryFrom<TypeId> + Eq + Clone,
-        <I::Key as TryFrom<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
-        <I::Key as TryInto<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
+        <I::Key as TryFrom<TypeId>>::Error: std::error::Error + Eq + Clone + Send + Sync + 'static,
+        <I::Key as TryInto<TypeId>>::Error: std::error::Error + Eq + Clone + Send + Sync + 'static,
     {
         self.register_named_with::<U, R, K, I>(U::type_with_generics(), type_registry, type_factory)
     }
@@ -261,8 +261,8 @@ pub trait ErasedDeserialize<T>:
     where
         Self: Sized,
         I::Key: TryInto<TypeId> + TryFrom<TypeId> + Eq + Clone,
-        <I::Key as TryFrom<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
-        <I::Key as TryInto<TypeId>>::Error: std::error::Error + Send + Sync + 'static;
+        <I::Key as TryFrom<TypeId>>::Error: std::error::Error + Eq + Clone + Send + Sync + 'static,
+        <I::Key as TryInto<TypeId>>::Error: std::error::Error + Eq + Clone + Send + Sync + 'static;
 
     fn get_factory(
         &self,

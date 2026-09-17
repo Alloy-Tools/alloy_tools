@@ -53,7 +53,7 @@ impl PublicKey {
 
     pub fn from_bytes(public: &[u8]) -> Result<Self, NoiseError> {
         Ok(Self(x25519_dalek::PublicKey::from(
-            <[u8; DHLEN]>::try_from(public).map_err(|_| NoiseError::InvalidKeyLength)?,
+            <[u8; DHLEN]>::try_from(public).map_err(|e| NoiseError::InvalidKeyLength(public.len(), e.to_string()))?,
         )))
     }
 

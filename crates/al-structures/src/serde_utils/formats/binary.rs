@@ -110,8 +110,8 @@ impl<T: 'static, D: KeyedHandle<TypeId, DirectFactory<T>> + Clone + Send + Sync 
     where
         Self: Sized,
         I::Key: TryInto<TypeId> + TryFrom<TypeId> + Eq + Clone,
-        <I::Key as TryFrom<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
-        <I::Key as TryInto<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
+        <I::Key as TryFrom<TypeId>>::Error: std::error::Error + Eq + Clone + Send + Sync + 'static,
+        <I::Key as TryInto<TypeId>>::Error: std::error::Error + Eq + Clone + Send + Sync + 'static,
     {
         crate::register_type!(self, type_registry, into_target, name, BinaryFormat<T, D>, "Failed to downcast to BinaryFormat")
     }
@@ -130,8 +130,8 @@ impl<T: 'static, D: KeyedHandle<TypeId, DirectFactory<T>> + Clone + Send + Sync 
     where
         Self: Sized,
         I::Key: TryInto<TypeId> + TryFrom<TypeId> + Eq + Clone,
-        <I::Key as TryFrom<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
-        <I::Key as TryInto<TypeId>>::Error: std::error::Error + Send + Sync + 'static,
+        <I::Key as TryFrom<TypeId>>::Error: std::error::Error + Eq + Clone + Send + Sync + 'static,
+        <I::Key as TryInto<TypeId>>::Error: std::error::Error + Eq + Clone + Send + Sync + 'static,
     {
         crate::register_type_with!(self, type_registry, type_factory, name)
     }

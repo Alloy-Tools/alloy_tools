@@ -106,11 +106,9 @@ impl<H: Mac + KeyInit, const N: usize> Hkdf<H, N> {
         initial_key_material: &[u8],
         context: &[u8],
     ) -> Result<(), CryptoError> {
-        Self::derive::<L>(
-            dest.try_into().map_err(|_| CryptoError::DestTooSmall)?,
-            salt,
-            initial_key_material,
-            context,
-        )
+        match dest.try_into() {
+            Ok(arr) => Self::derive::<L>(arr, salt, initial_key_material, context),
+            Err(_) => Err(CryptoError::DestTooSmall(dest.len(), L)),
+        }
     }
 }

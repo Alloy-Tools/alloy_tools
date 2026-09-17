@@ -10,6 +10,26 @@ pub enum CipherStateReturn {
     Ciphertext(Vec<u8>),
 }
 
+impl std::fmt::Display for CipherStateReturn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SecretError(err) => err.fmt(f),
+            //TODO: What should these do?
+            Self::Plaintext(_) => write!(f, "Plaintext"),
+            Self::Ciphertext(_) => write!(f, "Ciphertext"),
+        }
+    }
+}
+
+impl std::error::Error for CipherStateReturn {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::SecretError(err) => err.source(),
+            _ => None,
+        }
+    }
+}
+
 impl From<SecretError> for CipherStateReturn {
     fn from(value: SecretError) -> Self {
         CipherStateReturn::SecretError(value)
@@ -45,10 +65,10 @@ impl<N: NonceTrait> CipherState<N> {
     ) -> Result<Vec<u8>, NoiseError> {
         if let Some(key) = &self.0 {
             let data = Data::from_slice(plaintext, "Cipher State Handshake Msg Send")
-                .map_err(|e| CipherStateReturn::SecretError(e))?;
+                .map_err(CipherStateReturn::SecretError)?;
             let data = data
                 .encrypt_authenticated(key, associated_data)
-                .map_err(|e| CipherStateReturn::SecretError(e))?;
+                .map_err(CipherStateReturn::SecretError)?;
             Ok(data.as_packet()?)
         } else {
             Ok(plaintext.to_vec())
@@ -62,10 +82,10 @@ impl<N: NonceTrait> CipherState<N> {
     ) -> Result<Vec<u8>, NoiseError> {
         if let Some(key) = &self.0 {
             let data = Data::from_packet(ciphertext_packet, "Cipher State Handshake Msg Recv")
-                .map_err(|e| CipherStateReturn::SecretError(e))?;
+                .map_err(CipherStateReturn::SecretError)?;
             let data = data
                 .decrypt_verified(key, associated_data)
-                .map_err(|e| CipherStateReturn::SecretError(e))?;
+                .map_err(CipherStateReturn::SecretError)?;
             match key.nonce().write() {
                 Ok(n) => n,
                 Err(poisoned) => poisoned.into_inner(),
