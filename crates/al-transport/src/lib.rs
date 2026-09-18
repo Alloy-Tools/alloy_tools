@@ -105,7 +105,9 @@ pub use driver::{Driver, DriverError};
 pub use marker::TransportItemRequirements;
 #[cfg(test)]
 pub use test_counting::{CountingConsumer, CountingProducer};
-pub use transport::{Action, Transport, TransportID, TransportIDError};
+pub use transport::{
+    Action, Backpressure, Transport, TransportError, TransportID, TransportIDError, Vacancy,
+};
 
 #[cfg(test)]
 mod test_counting {
@@ -118,11 +120,16 @@ mod test_counting {
         }
     }
     impl Transport<u64> for CountingProducer {
-        fn handle_incoming(&mut self, _: u64) {}
+        fn handle_incoming(&mut self, _: u64) -> Result<(), Backpressure> {
+            Ok(())
+        }
         fn poll_action(&mut self, _: &mut std::task::Context<'_>) -> std::task::Poll<Action<u64>> {
             let val = self.0;
             self.0 = self.0.saturating_add(1);
             std::task::Poll::Ready(Action::Data(val))
+        }
+        fn has_space(&self) -> Vacancy {
+            Vacancy::Unbounded
         }
         fn status(&self) -> String {
             format!("Next Value: {}", self.0)
@@ -146,11 +153,15 @@ mod test_counting {
         }
     }
     impl Transport<u64> for CountingConsumer {
-        fn handle_incoming(&mut self, _: u64) {
+        fn handle_incoming(&mut self, _: u64) -> Result<(), Backpressure> {
             self.0 += 1;
+            Ok(())
         }
         fn poll_action(&mut self, _: &mut std::task::Context<'_>) -> std::task::Poll<Action<u64>> {
             std::task::Poll::Pending
+        }
+        fn has_space(&self) -> Vacancy {
+            Vacancy::Unbounded
         }
         fn status(&self) -> String {
             format!("Items received: {}", self.0)

@@ -67,13 +67,14 @@ impl<T: TransportItemRequirements, F: Fn(&T) -> bool + Send + 'static> Transport
     ///
     /// If the predicate function panics, the calling code will panic and the data item will be lost.
     /// Ensure your predicate is panic-free, or catch panics at a higher level if filtering may fail.
-    fn handle_incoming(&mut self, data: T) {
+    fn handle_incoming(&mut self, data: T) -> Result<(), crate::Backpressure> {
         if (self.predicate)(&data) {
             self.queue.push_back(data);
             if let Some(w) = self.waker.take() {
                 w.wake();
             }
         }
+        Ok(())
     }
 
     fn poll_action(
@@ -86,6 +87,10 @@ impl<T: TransportItemRequirements, F: Fn(&T) -> bool + Send + 'static> Transport
             self.waker = Some(cx.waker().clone());
             std::task::Poll::Pending
         }
+    }
+
+    fn has_space(&self) -> crate::Vacancy {
+        crate::Vacancy::Unbounded
     }
 
     fn status(&self) -> String {
@@ -102,10 +107,10 @@ mod tests {
     fn filter_passes_matching_items() {
         let mut filter = Filter::new(|x: &i32| x > &5);
 
-        filter.handle_incoming(3); // Filtered out
-        filter.handle_incoming(7); // Passes
-        filter.handle_incoming(2); // Filtered out
-        filter.handle_incoming(10); // Passes
+        filter.handle_incoming(3).unwrap(); // Filtered out
+        filter.handle_incoming(7).unwrap(); // Passes
+        filter.handle_incoming(2).unwrap(); // Filtered out
+        filter.handle_incoming(10).unwrap(); // Passes
 
         let waker = noop_waker().clone();
         let mut cx = std::task::Context::from_waker(&waker);
@@ -127,10 +132,10 @@ mod tests {
     fn filter_rejects_non_matching_items() {
         let mut filter = Filter::new(|x: &i32| x % 2 == 0); // Only even numbers
 
-        filter.handle_incoming(1);
-        filter.handle_incoming(2);
-        filter.handle_incoming(3);
-        filter.handle_incoming(4);
+        filter.handle_incoming(1).unwrap();
+        filter.handle_incoming(2).unwrap();
+        filter.handle_incoming(3).unwrap();
+        filter.handle_incoming(4).unwrap();
 
         let waker = noop_waker().clone();
         let mut cx = std::task::Context::from_waker(&waker);
@@ -152,9 +157,9 @@ mod tests {
     fn filter_all_rejected_returns_pending() {
         let mut filter = Filter::new(|x: &i32| x > &100);
 
-        filter.handle_incoming(1);
-        filter.handle_incoming(2);
-        filter.handle_incoming(3);
+        filter.handle_incoming(1).unwrap();
+        filter.handle_incoming(2).unwrap();
+        filter.handle_incoming(3).unwrap();
 
         let waker = noop_waker().clone();
         let mut cx = std::task::Context::from_waker(&waker);
@@ -171,9 +176,9 @@ mod tests {
     fn filter_status_reports_buffer_length() {
         let mut filter = Filter::new(|x: &i32| x > &5);
 
-        filter.handle_incoming(1);
-        filter.handle_incoming(10);
-        filter.handle_incoming(20);
+        filter.handle_incoming(1).unwrap();
+        filter.handle_incoming(10).unwrap();
+        filter.handle_incoming(20).unwrap();
 
         assert_eq!(filter.status(), "Filter Buffer Length: 2");
     }
@@ -182,7 +187,7 @@ mod tests {
     fn filter_empty_then_pending() {
         let mut filter = Filter::new(|_: &i32| true);
 
-        filter.handle_incoming(42);
+        filter.handle_incoming(42).unwrap();
 
         let waker = noop_waker().clone();
         let mut cx = std::task::Context::from_waker(&waker);
@@ -203,10 +208,10 @@ mod tests {
     fn filter_with_string_predicate() {
         let mut filter = Filter::new(|s: &String| s.len() > 3);
 
-        filter.handle_incoming("hi".to_string()); // Filtered out
-        filter.handle_incoming("hello".to_string()); // Passes
-        filter.handle_incoming("ok".to_string()); // Filtered out
-        filter.handle_incoming("rust".to_string()); // Passes
+        filter.handle_incoming("hi".to_string()).unwrap(); // Filtered out
+        filter.handle_incoming("hello".to_string()).unwrap(); // Passes
+        filter.handle_incoming("ok".to_string()).unwrap(); // Filtered out
+        filter.handle_incoming("rust".to_string()).unwrap(); // Passes
 
         let waker = noop_waker().clone();
         let mut cx = std::task::Context::from_waker(&waker);

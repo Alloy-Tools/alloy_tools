@@ -46,12 +46,12 @@
 //! `BoundaryQueue<T>` is `Send + Sync` for all `T: Send + Sync`, allowing safe use across
 //! thread boundaries. The internal `Arc<Mutex<...>>` ensures exclusive access to the queue.
 
-use crate::{Transport, TransportItemRequirements};
+use crate::{Backpressure, Transport, TransportItemRequirements};
 use al_structures::cancellation::CancellationToken;
 use std::{
     collections::VecDeque,
     sync::{Arc, Condvar, Mutex, PoisonError},
-    task::Waker,
+    task::{Poll, Waker},
 };
 
 /// Error type for BoundaryQueue operations
@@ -142,12 +142,30 @@ impl<T: TransportItemRequirements> BoundaryQueue<T> {
         self.push_batch(data)
     }
 
+    /// Try to pop an item. If empty, register `cx`'s waker under the same
+    /// lock, so no wakeup can be lost between the drain and the register.
+    ///
+    /// Returns `Poll::Ready(None)` if the mutex is poisoned (queue unusable).
+    pub fn poll_recv(&self, cx: &mut std::task::Context<'_>) -> Poll<Option<T>> {
+        let mut inner = match self.inner.lock() {
+            Ok(i) => i,
+            Err(_) => return Poll::Ready(None),
+        };
+        if let Some(data) = inner.queue.pop_front() {
+            Poll::Ready(Some(data))
+        } else {
+            inner.async_waker = Some(cx.waker().clone());
+            Poll::Pending
+        }
+    }
+    //REVIEW: Redo the other `recv` functions in the poll style?
+
     /// Non-blocking attempt to receive data from the queue
     pub fn try_recv(&self) -> Result<Option<T>, BoundaryQueueError> {
         Ok(self
             .inner
             .lock()
-            .map_err(|_: PoisonError<_>| BoundaryQueueError::PoisonedMutex)?
+            .map_err(|_| BoundaryQueueError::PoisonedMutex)?
             .queue
             .pop_front())
     }
@@ -157,7 +175,7 @@ impl<T: TransportItemRequirements> BoundaryQueue<T> {
         Ok(self
             .inner
             .lock()
-            .map_err(|_: PoisonError<_>| BoundaryQueueError::PoisonedMutex)?
+            .map_err(|_| BoundaryQueueError::PoisonedMutex)?
             .queue
             .drain(..)
             .collect())
@@ -231,21 +249,12 @@ struct RecvFuture<T: TransportItemRequirements> {
 impl<T: TransportItemRequirements> std::future::Future for RecvFuture<T> {
     type Output = Result<T, BoundaryQueueError>;
 
-    fn poll(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        let mut inner = self
-            .queue
-            .inner
-            .lock()
-            .map_err(|_| BoundaryQueueError::PoisonedMutex)?;
-        if let Some(data) = inner.queue.pop_front() {
-            return std::task::Poll::Ready(Ok(data));
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        match self.queue.poll_recv(cx) {
+            Poll::Ready(Some(v)) => Poll::Ready(Ok(v)),
+            Poll::Ready(None) => Poll::Ready(Err(BoundaryQueueError::PoisonedMutex)),
+            Poll::Pending => Poll::Pending,
         }
-        // Store waker for later wake-up from handle_incoming
-        inner.async_waker = Some(cx.waker().clone());
-        std::task::Poll::Pending
     }
 }
 
@@ -261,28 +270,24 @@ impl<T: TransportItemRequirements> BoundaryQueueTransport<T> {
 }
 
 impl<T: TransportItemRequirements> Transport<T> for BoundaryQueueTransport<T> {
-    fn handle_incoming(&mut self, data: T) {
-        // TODO: handle possible error
-        self.inner
-            .push(data)
-            .expect("BoundaryQueue mutex poisoned in handle_incoming");
+    fn handle_incoming(&mut self, data: T) -> Result<(), Backpressure> {
+        self.inner.push(data).map_err(|_| Backpressure::Closed)
     }
 
-    fn poll_action(
-        &mut self,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<crate::Action<T>> {
-        // TODO: handle possible error
-        let mut inner = self
-            .inner
-            .inner
-            .lock()
-            .expect("BoundaryQueue mutex poisoned in poll_action");
-        if let Some(data) = inner.queue.pop_front() {
-            std::task::Poll::Ready(crate::Action::Data(data))
-        } else {
-            inner.async_waker = Some(cx.waker().clone());
-            std::task::Poll::Pending
+    fn poll_action(&mut self, cx: &mut std::task::Context<'_>) -> Poll<crate::Action<T>> {
+        match self.inner.poll_recv(cx) {
+            Poll::Ready(Some(v)) => Poll::Ready(crate::Action::Data(v)),
+            Poll::Ready(None) => Poll::Ready(crate::Action::Error(
+                crate::TransportError::Backpressure(Backpressure::Closed),
+            )),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+
+    fn has_space(&self) -> crate::Vacancy {
+        match self.inner.inner.lock() {
+            Ok(_) => crate::Vacancy::Unbounded,
+            Err(_) => crate::Vacancy::Backpressure(Backpressure::Closed),
         }
     }
 
@@ -292,7 +297,7 @@ impl<T: TransportItemRequirements> Transport<T> for BoundaryQueueTransport<T> {
             .inner
             .lock()
             .map(|inner| inner.queue.len())
-            .unwrap_or_else(|_| 0);
+            .unwrap_or(0);
         format!("Boundary Queue Length: {}", queue_len)
     }
 }
@@ -388,7 +393,7 @@ mod tests {
         let queue = BoundaryQueue::new();
         let mut transport = BoundaryQueueTransport::new(queue.clone());
 
-        transport.handle_incoming(123);
+        transport.handle_incoming(123).unwrap();
 
         let result = queue.try_recv().unwrap();
         assert_eq!(result, Some(123));
@@ -405,7 +410,7 @@ mod tests {
         let mut cx = std::task::Context::from_waker(&waker);
         let result = transport.poll_action(&mut cx);
 
-        if let std::task::Poll::Ready(crate::Action::Data(data)) = result {
+        if let Poll::Ready(crate::Action::Data(data)) = result {
             assert_eq!(data, 456);
         } else {
             panic!("Expected Ready with data");
@@ -421,7 +426,7 @@ mod tests {
         let mut cx = std::task::Context::from_waker(&waker);
         let result = transport.poll_action(&mut cx);
 
-        if let std::task::Poll::Pending = result {
+        if let Poll::Pending = result {
             // Expected
         } else {
             panic!("Expected Pending");

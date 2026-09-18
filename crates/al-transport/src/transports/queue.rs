@@ -58,11 +58,12 @@ impl<T> Queue<T> {
 }
 
 impl<T: TransportItemRequirements> Transport<T> for Queue<T> {
-    fn handle_incoming(&mut self, data: T) {
+    fn handle_incoming(&mut self, data: T) -> Result<(), crate::Backpressure> {
         self.queue.push_back(data);
         if let Some(w) = self.waker.take() {
             w.wake();
         }
+        Ok(())
     }
 
     fn poll_action(
@@ -75,6 +76,10 @@ impl<T: TransportItemRequirements> Transport<T> for Queue<T> {
             self.waker = Some(cx.waker().clone());
             std::task::Poll::Pending
         }
+    }
+
+    fn has_space(&self) -> crate::Vacancy {
+        crate::Vacancy::Unbounded
     }
 
     fn status(&self) -> String {
@@ -104,7 +109,7 @@ mod tests {
     #[test]
     fn handle_incoming_then_poll() {
         let mut queue = Queue::new();
-        queue.handle_incoming(42);
+        queue.handle_incoming(42).unwrap();
 
         let waker = noop_waker().clone();
         let mut cx = std::task::Context::from_waker(&waker);
@@ -120,9 +125,9 @@ mod tests {
     #[test]
     fn multiple_items_fifo_order() {
         let mut queue = Queue::new();
-        queue.handle_incoming(1);
-        queue.handle_incoming(2);
-        queue.handle_incoming(3);
+        queue.handle_incoming(1).unwrap();
+        queue.handle_incoming(2).unwrap();
+        queue.handle_incoming(3).unwrap();
 
         let waker = noop_waker().clone();
         let mut cx = std::task::Context::from_waker(&waker);
@@ -142,8 +147,8 @@ mod tests {
     #[test]
     fn poll_empty_after_drain() {
         let mut queue = Queue::new();
-        queue.handle_incoming(1);
-        queue.handle_incoming(2);
+        queue.handle_incoming(1).unwrap();
+        queue.handle_incoming(2).unwrap();
 
         let waker = noop_waker().clone();
         let mut cx = std::task::Context::from_waker(&waker);
@@ -166,11 +171,11 @@ mod tests {
         let mut queue = Queue::new();
         assert_eq!(queue.status(), "Queue Length: 0");
 
-        queue.handle_incoming(1);
+        queue.handle_incoming(1).unwrap();
         assert_eq!(queue.status(), "Queue Length: 1");
 
-        queue.handle_incoming(2);
-        queue.handle_incoming(3);
+        queue.handle_incoming(2).unwrap();
+        queue.handle_incoming(3).unwrap();
         assert_eq!(queue.status(), "Queue Length: 3");
 
         let waker = noop_waker().clone();
@@ -191,7 +196,7 @@ mod tests {
         let _ = queue.poll_action(&mut cx);
 
         // Incoming data should wake it
-        queue.handle_incoming(42);
+        queue.handle_incoming(42).unwrap();
 
         // After waking, poll should return data
         let result = queue.poll_action(&mut cx);

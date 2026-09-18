@@ -77,11 +77,12 @@ impl<T: TransportItemRequirements, F: Fn(T) -> T + Send + 'static> Transport<T> 
     /// If the transformation function `f` panics, the calling code will panic and the data item
     /// will be lost. Ensure your transformation function is panic-free, or catch panics at a
     /// higher level if transformations may fail.
-    fn handle_incoming(&mut self, data: T) {
+    fn handle_incoming(&mut self, data: T) -> Result<(), crate::Backpressure> {
         self.queue.push_back((self.f)(data));
         if let Some(w) = self.waker.take() {
             w.wake();
         }
+        Ok(())
     }
 
     fn poll_action(
@@ -94,6 +95,10 @@ impl<T: TransportItemRequirements, F: Fn(T) -> T + Send + 'static> Transport<T> 
             self.waker = Some(cx.waker().clone());
             std::task::Poll::Pending
         }
+    }
+
+    fn has_space(&self) -> crate::Vacancy {
+        crate::Vacancy::Unbounded
     }
 
     fn status(&self) -> String {
@@ -110,9 +115,9 @@ mod tests {
     fn map_transforms_data() {
         let mut map = Map::new(|x: i32| x * 2);
 
-        map.handle_incoming(5);
-        map.handle_incoming(10);
-        map.handle_incoming(15);
+        map.handle_incoming(5).unwrap();
+        map.handle_incoming(10).unwrap();
+        map.handle_incoming(15).unwrap();
 
         let waker = noop_waker().clone();
         let mut cx = std::task::Context::from_waker(&waker);
@@ -140,8 +145,8 @@ mod tests {
     fn map_with_string_transformation() {
         let mut map = Map::new(|s: String| s.to_uppercase());
 
-        map.handle_incoming("hello".to_string());
-        map.handle_incoming("world".to_string());
+        map.handle_incoming("hello".to_string()).unwrap();
+        map.handle_incoming("world".to_string()).unwrap();
 
         let waker = noop_waker().clone();
         let mut cx = std::task::Context::from_waker(&waker);
@@ -164,7 +169,7 @@ mod tests {
         let mut map = Map::new(|x: i32| x + 1);
 
         for i in 1..=5 {
-            map.handle_incoming(i);
+            map.handle_incoming(i).unwrap();
         }
 
         let waker = noop_waker().clone();
@@ -200,9 +205,9 @@ mod tests {
 
         assert_eq!(map.status(), "Map Buffer Length: 0");
 
-        map.handle_incoming(1);
-        map.handle_incoming(2);
-        map.handle_incoming(3);
+        map.handle_incoming(1).unwrap();
+        map.handle_incoming(2).unwrap();
+        map.handle_incoming(3).unwrap();
 
         assert_eq!(map.status(), "Map Buffer Length: 3");
 
@@ -220,8 +225,8 @@ mod tests {
 
         let mut map = Map::new(|p: Point| Point(p.0 * 2, p.1 * 2));
 
-        map.handle_incoming(Point(1, 2));
-        map.handle_incoming(Point(3, 4));
+        map.handle_incoming(Point(1, 2)).unwrap();
+        map.handle_incoming(Point(3, 4)).unwrap();
 
         let waker = noop_waker().clone();
         let mut cx = std::task::Context::from_waker(&waker);
