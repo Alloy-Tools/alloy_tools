@@ -130,6 +130,20 @@ where
     }
 }
 
+#[macro_export]
+macro_rules! register_format {
+    ($format_registry:expr, $format:expr) => {{
+        $format_registry.register($format)
+    }};
+}
+
+#[macro_export]
+macro_rules! register_format_with {
+    ($format_registry:expr, $format:expr, $name:expr) => {{
+        $format_registry.register_named($name, $format)
+    }};
+}
+
 // ----- Format Registry -----
 // Allows 256 possible formats to be loaded at once for one byte.
 pub type FormatId = u8;

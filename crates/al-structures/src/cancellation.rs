@@ -425,7 +425,7 @@ mod tests {
         let waiter = token.cancelled_blocking(notifier);
         drop(waiter);
 
-        // Even if canceled, the dropped waiter's notifier should not be called
+        // Even if cancelled, the dropped waiter's notifier should not be called
         token.cancel();
         assert!(!called.load(Ordering::SeqCst));
     }

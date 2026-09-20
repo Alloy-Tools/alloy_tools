@@ -1,40 +1,114 @@
-use al_core::{Transport, TransportItemRequirements};
+use crate::tcp::{TcpError, TcpSocket};
 use al_crypto::NonceTrait;
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::{
-        tcp::{OwnedReadHalf, OwnedWriteHalf},
-        TcpListener, TcpStream, ToSocketAddrs,
-    },
-    sync::{Mutex, RwLock},
-    time::timeout as tokio_timeout,
+use al_events::DynMessage;
+use al_secure::noise::{
+    cipher_state::CipherState,
+    handshake_pattern::HandshakePattern,
+    handshake_state::{HandshakeResult, HandshakeState},
+    KeyPair, Noise, PublicKey, HASHLEN, MAX_MSG_BYTE_LEN,
 };
+use al_structures::{cancellation::CancellationToken, serde_utils::serde_registries::FormatId};
+use al_transport::{
+    transports::BoundaryQueue, Action, Backpressure, Transport, TransportError, Vacancy,
+};
+use std::{sync::Arc, task::Poll};
+use tokio::task::JoinSet;
 use zeroize::Zeroize;
 
-use crate::{
-    CipherState, HandshakePattern, HandshakeResult, HandshakeState, KeyPair, Noise, PublicKey,
-    TcpError, HASHLEN, MAX_MSG_BYTE_LEN,
-};
-use std::{sync::Arc, time::Duration};
+pub async fn run_server_with_shutdown<N: NonceTrait, F: Fn(Tcp<N>)>(
+    listener: tokio::net::TcpListener,
+    pattern: HandshakePattern,
+    prologue: Vec<u8>,
+    local_static: Option<KeyPair>,
+    remote_static: Option<PublicKey>,
+    token: CancellationToken,
+    on_connection: F,
+) -> std::io::Result<()> {
+    let mut tasks = JoinSet::<()>::new();
+
+    loop {
+        tokio::select! {
+            biased;
+            _ = token.cancelled() => break,
+            accept = listener.accept() => {
+                let (stream, _peer) = match accept {
+                    Ok(x) => x,
+                    Err(e) => {
+                        eprintln!("Tcp server: Accept error: {e}");
+                        continue;
+                    }
+                };
+                let (tcp, socket) = match Tcp::<N>::new_responder(
+                    pattern.clone(),
+                    prologue.clone(),
+                    local_static.clone(),
+                    remote_static.clone()
+                ) {
+                    Ok(x) => x,
+                    Err(e) => {
+                        eprintln!("Tcp server: Noise error: {e}");
+                        continue;
+                    }
+                };
+                on_connection(tcp);
+
+                let conn_token = token.clone();
+                tasks.spawn(async move {
+                    let _ = socket.run_with_cancel(stream, conn_token).await;
+                });
+            }
+        }
+    }
+
+    // Attempt to join gracefully
+    if tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while tasks.join_next().await.is_some() {}
+    })
+    .await
+    .is_err()
+    {
+        tasks.shutdown().await;
+    }
+    Ok(())
+}
+
+const MESSAGE_CAPACITY: usize = 1024;
 
 pub struct Tcp<N: NonceTrait> {
-    reader: Arc<Mutex<OwnedReadHalf>>,
-    writer: Arc<Mutex<OwnedWriteHalf>>,
-    buffer: Mutex<Box<[u8; MAX_MSG_BYTE_LEN]>>,
+    // Noise state
     noise: HandshakeState<N>,
     split: Option<(
-        Arc<RwLock<CipherState<N>>>, // Initiator sends with first
-        Arc<RwLock<CipherState<N>>>, // Responder sends with second
+        CipherState<N>, // Initiator sends with first
+        CipherState<N>, // Responder sends with second
         [u8; HASHLEN],
     )>,
-    timeout: Option<Duration>,
+    handshake_waiting_read: bool,
+    handshake_payload: Option<Vec<u8>>,
+
+    //REVIEW: Use two buffers? the current is renamed `box_buffer`
+    // and a smaller stack buffer (eg [u8; 1024]) could be used when possible?
+    buffer: Box<[u8; MAX_MSG_BYTE_LEN]>,
+
+    // Data recieved from the transport before handshake is complete
+    pre_buffer: std::collections::VecDeque<Vec<u8>>,
+    // Data recieved from the wire.
+    ready: std::collections::VecDeque<Vec<u8>>,
+
+    // Ciphertext to be written to the socket
+    to_wire: Arc<BoundaryQueue<Vec<u8>>>,
+    // Ciphertext read from the socket
+    from_wire: Arc<BoundaryQueue<Vec<u8>>>,
+
+    // from_wire framing state
+    pending_len: Option<u16>,
+    pending_bytes: std::collections::VecDeque<u8>,
+
+    error: Option<TcpError>,
 }
 
 impl<N: NonceTrait> std::fmt::Debug for Tcp<N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Tcp")
-            .field("stream", &"Arc<Mutex<TcpStream>>")
-            .field("buffer", &self.buffer)
             .field("noise", &self.noise)
             .field(
                 "split",
@@ -49,13 +123,73 @@ impl<N: NonceTrait> std::fmt::Debug for Tcp<N> {
                     "None".to_string()
                 },
             )
-            .field("timeout", &self.timeout)
+            .field("buffer", &self.buffer.len())
+            .field("pending_len", &self.pending_len)
+            .field("pending_bytes", &self.pending_bytes)
+            .field("pre-buffer", &self.pre_buffer.len())
+            .field("ready", &self.ready.len())
+            //REVIEW: include the len of the two boundary queues?
+            .field("error", &self.error)
             .finish()
     }
 }
 
 impl<N: NonceTrait> Tcp<N> {
-    pub async fn connect<A: ToSocketAddrs>(
+    // Client
+    pub fn new_initiator(
+        pattern: HandshakePattern,
+        prologue: Vec<u8>,
+        local_static: Option<KeyPair>,
+        remote_static: Option<PublicKey>,
+    ) -> Result<(Self, TcpSocket), TcpError> {
+        let noise = Noise::new(pattern)
+            .local_static(local_static)
+            .remote_static(remote_static)
+            .with_prologue(prologue)
+            .initiate()?;
+        let (mut tcp, socket) = Self::new(noise);
+        tcp.maybe_produce_handshake()?;
+        Ok((tcp, socket))
+    }
+
+    // Server
+    pub fn new_responder(
+        pattern: HandshakePattern,
+        prologue: Vec<u8>,
+        local_static: Option<KeyPair>,
+        remote_static: Option<PublicKey>,
+    ) -> Result<(Self, TcpSocket), TcpError> {
+        let noise = Noise::new(pattern)
+            .local_static(local_static)
+            .remote_static(remote_static)
+            .with_prologue(prologue)
+            .respond()?;
+        let (mut tcp, socket) = Self::new(noise);
+        tcp.handshake_waiting_read = true;
+        Ok((tcp, socket))
+    }
+
+    fn new(noise: HandshakeState<N>) -> (Self, TcpSocket) {
+        let to_wire = BoundaryQueue::<Vec<u8>>::new();
+        let from_wire = BoundaryQueue::<Vec<u8>>::new();
+        let tcp = Self {
+            noise,
+            split: None,
+            handshake_waiting_read: false,
+            handshake_payload: None,
+            to_wire: to_wire.clone(),
+            from_wire: from_wire.clone(),
+            pending_bytes: std::collections::VecDeque::new(),
+            pending_len: None,
+            buffer: Box::new([0u8; MAX_MSG_BYTE_LEN]),
+            pre_buffer: std::collections::VecDeque::new(),
+            ready: std::collections::VecDeque::new(),
+            error: None,
+        };
+        (tcp, TcpSocket::new(to_wire, from_wire))
+    }
+
+    /*pub async fn connect<A: ToSocketAddrs>(
         addr: A,
         timeout: Option<Duration>,
         pattern: HandshakePattern,
@@ -151,6 +285,7 @@ impl<N: NonceTrait> Tcp<N> {
                 // Call passed closure
                 Ok(conn) => f(conn),
                 // Sleep on timeout to avoid a tight loop
+                //REVIEW: Could I use `tokio::task::yield_now().await` instead?
                 Err(TcpError::Timeout(_)) => tokio::time::sleep(Duration::from_millis(10)).await,
                 Err(e) => eprintln!("Failed to accept connection: {:?}", e),
             }
@@ -190,6 +325,7 @@ impl<N: NonceTrait> Tcp<N> {
                 // Call passed closure
                 Ok(conn) => f(conn),
                 // Sleep on timeout to avoid a tight loop
+                //REVIEW: Could I use `tokio::task::yield_now().await` instead?
                 Err(TcpError::Timeout(_)) => tokio::time::sleep(Duration::from_millis(10)).await,
                 Err(e) => eprintln!("Failed to accept connection: {:?}", e),
             }
@@ -223,91 +359,10 @@ impl<N: NonceTrait> Tcp<N> {
             remote_static.clone(),
         )
         .await
-    }
+    }*/
 
-    /// Handles writing the current Noise step and payload to buffer, then sending the buffer
-    async fn write_message(&mut self, payload: &mut [u8]) -> Result<(), TcpError> {
-        let mut buffer = self.buffer.lock().await;
-        // Write noise message to buffer
-        let len = match self.noise.write_message(payload, &mut **buffer) {
-            Ok(HandshakeResult::InProgress(len)) => len,
-            Ok(HandshakeResult::Complete {
-                init,
-                resp,
-                handshake_hash,
-                len,
-            }) => {
-                self.split = Some((
-                    Arc::new(RwLock::new(init)),
-                    Arc::new(RwLock::new(resp)),
-                    handshake_hash,
-                ));
-                len
-            }
-            Err(e) => Err(e)?,
-        };
-
-        // Closure to send length prefixed message
-        let mut future = async || -> Result<(), TcpError> {
-            let mut stream = self.writer.lock().await;
-            stream.write(&len.to_be_bytes()).await?;
-            let msg = &mut buffer[..len as usize];
-            stream.write_all(msg).await?;
-            msg.zeroize();
-            Ok(())
-        };
-
-        // Possibly stop closure after timeout
-        if let Some(timeout) = self.timeout {
-            tokio_timeout(timeout, future()).await?
-        } else {
-            future().await
-        }
-    }
-
-    /// Handles reading the current noise step and payload to buffer. Returns the length of the payload in the buffer
-    async fn read_message(&mut self, payload_buffer: &mut [u8]) -> Result<u16, TcpError> {
-        let mut buffer = self.buffer.lock().await;
-        let mut recv_len = [0u8; 2];
-
-        // Closure to recv message into buffer, reading length first
-        let mut future = async || -> Result<usize, TcpError> {
-            let mut stream = self.reader.lock().await;
-            stream.read_exact(&mut recv_len).await?;
-            let len = u16::from_be_bytes(recv_len) as usize;
-            stream.read_exact(&mut buffer[..len]).await?;
-            Ok(len)
-        };
-
-        // Possibly stop closure after timeout
-        let len = if let Some(timeout) = self.timeout {
-            tokio_timeout(timeout, future()).await??
-        } else {
-            future().await?
-        };
-
-        // Read noise message from buffer
-        let payload_len = match self.noise.read_message(&mut buffer[..len], payload_buffer) {
-            Ok(HandshakeResult::InProgress(len)) => len,
-            Ok(HandshakeResult::Complete {
-                init,
-                resp,
-                handshake_hash,
-                len,
-            }) => {
-                self.split = Some((
-                    Arc::new(RwLock::new(init)),
-                    Arc::new(RwLock::new(resp)),
-                    handshake_hash,
-                ));
-                len
-            }
-            Err(e) => Err(e)?,
-        };
-        Ok(payload_len)
-    }
-
-    //TODO: handle payload better, currently limitied to 1024 bytes (1 kb)
+    /*//REVIEW: Could I pre-handle handshake?
+    //REVIEW: handle payload better, currently limitied to 1024 bytes (1 kb)
     async fn handle_handshake(&mut self) -> Result<(), TcpError> {
         let mut payload_buffer = [0u8; 1024];
         // Start with a read first if not initiator
@@ -327,280 +382,243 @@ impl<N: NonceTrait> Tcp<N> {
             }
         }
         Ok(())
-    }
+    }*/
 
-    pub async fn send_event<F: al_core::SerdeFormat, E: al_core::Event>(
-        &self,
-        event: E,
-    ) -> Result<(), TcpError> {
-        let format = F::default();
-        let event: Box<dyn al_core::Event> = Box::new(event);
-
-        // Serialize event to bytes
-        let bytes = format
-            .serialize_event(event.as_ref())
-            .map_err(|e| TcpError::SerdeError(format.error_to_string(e)))?;
-
-        // Send message
-        Ok(self.send(bytes).await?)
-    }
-
-    pub async fn recv_event<F: al_core::SerdeFormat>(
-        &self,
-    ) -> Result<Box<dyn al_core::Event>, TcpError> {
-        let format = F::default();
-        let vec: Vec<u8> = self.recv().await?;
-        format
-            .deserialize_event_dyn(&vec)
-            .map_err(|e| TcpError::SerdeError(format.error_to_string(e)))
-    }
-
-    async fn encrypt_bytes(
-        &self,
-        mut plaintext: Vec<u8>,
-    ) -> Result<Vec<u8>, al_core::TransportError> {
-        if let Some(split) = &self.split {
-            let cipher = if self.noise.is_initiator() {
-                &split.0
-            } else {
-                &split.1
-            };
-
-            let cipher = cipher.read().await;
-            Ok(cipher
-                .encrypt_with_ad(&[], plaintext.as_mut_slice())
-                .map_err(|e| al_core::TransportError::Transport(format!("{:?}", e)))?)
+    fn encrypt_and_send(&mut self, mut data: Vec<u8>) -> Result<(), TcpError> {
+        let split = self.split.as_ref().ok_or(TcpError::HandshakeIncomplete)?;
+        let cipher = if self.noise.is_initiator() {
+            &split.0
         } else {
-            Err(al_core::TransportError::Transport(
-                TcpError::HandshakeIncomplete.to_string(),
-            ))?
+            &split.1
+        };
+        let ciphertext = cipher.encrypt_with_ad(&[], data.as_mut_slice())?;
+
+        let mut packet = Vec::with_capacity(2 + ciphertext.len());
+        packet.extend_from_slice(&(ciphertext.len() as u16).to_be_bytes());
+        packet.extend_from_slice(&ciphertext);
+
+        self.to_wire
+            .send(packet)
+            .map_err(|_| TcpError::WireQueueClosed)?;
+        Ok(())
+    }
+
+    fn process_wire_bytes(&mut self, bytes: &[u8]) -> Result<(), TcpError> {
+        self.pending_bytes.extend(bytes);
+        loop {
+            if self.pending_len.is_none() {
+                if self.pending_bytes.len() < 2 {
+                    return Ok(());
+                }
+                let hi = self.pending_bytes.pop_front().unwrap();
+                let lo = self.pending_bytes.pop_front().unwrap();
+                let len = u16::from_be_bytes([hi, lo]) as usize;
+                if len > MAX_MSG_BYTE_LEN {
+                    return Err(TcpError::MessageTooLarge(len, MAX_MSG_BYTE_LEN));
+                }
+                self.pending_len = Some(len as u16);
+            }
+
+            let len = self.pending_len.unwrap() as usize;
+            if self.pending_bytes.len() < len {
+                return Ok(());
+            }
+            let mut frame: Vec<u8> = self.pending_bytes.drain(..len).collect();
+            self.pending_len = None;
+
+            if self.noise.is_complete() {
+                let split = self.split.as_ref().ok_or(TcpError::HandshakeIncomplete)?;
+                let cipher = if self.noise.is_initiator() {
+                    &split.1
+                } else {
+                    &split.0
+                };
+                let plaintext = cipher.decrypt_with_ad(&[], frame.as_mut_slice())?;
+                self.ready.push_back(plaintext);
+            } else {
+                let mut payload = self.handshake_payload.take().unwrap_or_default();
+                let result = self.noise.read_message(&mut frame, &mut payload)?;
+                match result {
+                    HandshakeResult::InProgress(_) => {}
+                    HandshakeResult::Complete {
+                        init,
+                        resp,
+                        handshake_hash,
+                        ..
+                    } => {
+                        self.split = Some((init, resp, handshake_hash));
+                    }
+                }
+                self.handshake_waiting_read = false;
+                self.maybe_produce_handshake()?;
+                self.flush_pending_app_data()?;
+            }
         }
     }
 
-    async fn decrypt_bytes(
-        &self,
-        ciphertext_packet: &mut [u8],
-    ) -> Result<Vec<u8>, al_core::TransportError> {
-        if let Some(split) = &self.split {
-            let cipher = if !self.noise.is_initiator() {
-                &split.0
-            } else {
-                &split.1
-            };
+    fn maybe_produce_handshake(&mut self) -> Result<(), TcpError> {
+        if self.noise.is_complete() || self.handshake_waiting_read {
+            return Ok(());
+        }
+        let result = self
+            .noise
+            .write_message(&mut [], self.buffer.as_mut_slice())?;
+        let len = match result {
+            HandshakeResult::InProgress(len) => len,
+            HandshakeResult::Complete {
+                init,
+                resp,
+                handshake_hash,
+                len,
+            } => {
+                self.split = Some((init, resp, handshake_hash));
+                len
+            }
+        };
+        let mut packet = Vec::with_capacity(2 + len as usize);
+        packet.extend_from_slice(&len.to_be_bytes());
+        packet.extend_from_slice(&self.buffer[..len as usize]);
+        self.to_wire
+            .send(packet)
+            .map_err(|_| TcpError::WireQueueClosed)?;
+        self.buffer.zeroize();
+        self.handshake_waiting_read = true;
+        Ok(())
+    }
 
-            let cipher = cipher.read().await;
-            Ok(cipher
-                .decrypt_with_ad(&[], ciphertext_packet)
-                .map_err(|e| al_core::TransportError::Transport(format!("{:?}", e)))?)
+    fn flush_pending_app_data(&mut self) -> Result<(), TcpError> {
+        if !self.noise.is_complete() {
+            return Ok(());
+        }
+        while let Some(data) = self.pre_buffer.pop_front() {
+            self.encrypt_and_send(data)?;
+        }
+        Ok(())
+    }
+
+    pub fn send_message(
+        &mut self,
+        format_id: FormatId,
+        message: &DynMessage,
+    ) -> Result<(), TcpError> {
+        let mut bytes = Vec::new();
+        message.to_format(format_id, &mut bytes)?;
+        self.handle_incoming(bytes).map_err(TcpError::Backpressure)
+    }
+
+    pub fn recv_message(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Action<DynMessage>> {
+        self.poll_action(cx).map(|action| match action {
+            Action::Data(data) => match DynMessage::from_format_slice(&data) {
+                Ok(msg) => Action::Data(msg),
+                Err(e) => Action::Error(TcpError::MessageError(e).into()),
+            },
+            Action::Pending => Action::Pending,
+            Action::Error(e) => Action::Error(e),
+        })
+    }
+}
+
+impl From<TcpError> for TransportError {
+    fn from(value: TcpError) -> Self {
+        if let TcpError::DriverError(al_transport::DriverError::Transport(err)) = value {
+            err
         } else {
-            Err(al_core::TransportError::Transport(
-                TcpError::HandshakeIncomplete.to_string(),
-            ))?
+            TransportError::Custom(Box::new(value))
         }
     }
 }
 
-//TODO: maybe use `AsyncRuntime::spawn_blocking` instead of not supporting blocking?
-/// Blocking operations are unsupported
-impl<T: TransportItemRequirements, N: NonceTrait> Transport<T> for Tcp<N> {
-    fn send_blocking(&self, _data: T) -> Result<(), al_core::TransportError> {
-        Err(al_core::TransportError::UnSupported(
-            "Tcp does not support blocking operations".to_string(),
-        ))
-    }
-
-    fn send_batch_blocking(&self, _data: Vec<T>) -> Result<(), al_core::TransportError> {
-        Err(al_core::TransportError::UnSupported(
-            "Tcp does not support blocking operations".to_string(),
-        ))
-    }
-
-    fn recv_blocking(&self) -> Result<T, al_core::TransportError> {
-        Err(al_core::TransportError::UnSupported(
-            "Tcp does not support blocking operations".to_string(),
-        ))
-    }
-
-    fn recv_avaliable_blocking(&self) -> Result<Vec<T>, al_core::TransportError> {
-        Err(al_core::TransportError::UnSupported(
-            "Tcp does not support blocking operations".to_string(),
-        ))
-    }
-
-    fn try_recv_blocking(&self) -> Result<Option<T>, al_core::TransportError> {
-        Err(al_core::TransportError::UnSupported(
-            "Tcp does not support blocking operations".to_string(),
-        ))
-    }
-
-    fn send(
-        &self,
-        data: T,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::prelude::rust_2024::Future<Output = Result<(), al_core::TransportError>>
-                + Send
-                + Sync
-                + '_,
-        >,
-    > {
-        Box::pin(async move {
-            // Serialize T
-            let bytes = bitcode::serialize(&data)
-                .map_err(|e| al_core::TransportError::SerdeError(e.to_string()))?;
-
-            // Encrypt using cipher
-            let encrypted = self.encrypt_bytes(bytes).await?;
-
-            // Send length prefixed encrypted message
-            let mut stream = self.writer.lock().await;
-
-            stream
-                .write_all(&(encrypted.len() as u16).to_be_bytes())
-                .await
-                .map_err(|e| al_core::TransportError::Transport(e.to_string()))?;
-
-            stream
-                .write_all(&encrypted)
-                .await
-                .map_err(|e| al_core::TransportError::Transport(e.to_string()))?;
-
-            Ok(())
-        })
-    }
-
-    fn send_batch(
-        &self,
-        data: Vec<T>,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::prelude::rust_2024::Future<Output = Result<(), al_core::TransportError>>
-                + Send
-                + Sync
-                + '_,
-        >,
-    > {
-        Box::pin(async move {
-            for item in data {
-                self.send(item).await?;
+impl<N: NonceTrait> Transport<Vec<u8>> for Tcp<N> {
+    fn handle_incoming(&mut self, data: Vec<u8>) -> Result<(), Backpressure> {
+        if self.error.is_some() {
+            return Err(Backpressure::Closed);
+        }
+        if !self.noise.is_complete() {
+            if self.pre_buffer.len() >= MESSAGE_CAPACITY {
+                return Err(Backpressure::BufferFull);
             }
-            Ok(())
+            self.pre_buffer.push_back(data);
+            return Ok(());
+        }
+        self.encrypt_and_send(data).map_err(|e| {
+            self.error = Some(e);
+            Backpressure::Closed
         })
     }
 
-    fn recv(
-        &self,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::prelude::rust_2024::Future<Output = Result<T, al_core::TransportError>>
-                + Send
-                + Sync
-                + '_,
-        >,
-    > {
-        Box::pin(async {
-            // Read length prefix
-            let mut len_bytes = [0u8; 2];
-            let mut stream = self.reader.lock().await;
+    fn poll_action(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Action<Vec<u8>>> {
+        if let Some(e) = self.error.take() {
+            return Poll::Ready(Action::Error(e.into()));
+        }
 
-            stream
-                .read_exact(&mut len_bytes)
-                .await
-                .map_err(|e| al_core::TransportError::Transport(e.to_string()))?;
-
-            let len = u16::from_be_bytes(len_bytes) as usize;
-
-            if len > MAX_MSG_BYTE_LEN {
-                return Err(al_core::TransportError::Transport(format!(
-                    "Message size {} exceeds the max {}",
-                    len, MAX_MSG_BYTE_LEN
-                )));
-            }
-
-            let mut buffer = self.buffer.lock().await;
-            // Read encrypted message
-            stream
-                .read_exact(&mut buffer[..len])
-                .await
-                .map_err(|e| al_core::TransportError::Transport(e.to_string()))?;
-
-            // Release stream after data is copied to buffer
-            drop(stream);
-
-            // Decrypt bytes
-            let mut decrypted = self.decrypt_bytes(&mut buffer[..len]).await?;
-
-            // Release buffer after data is used
-            drop(buffer);
-
-            // Deserialize to T
-            let t = bitcode::deserialize::<T>(&decrypted)
-                .map_err(|e| al_core::TransportError::SerdeError(e.to_string()));
-
-            // zeroize the decrypted bytes
-            decrypted.zeroize();
-
-            // Return the owned T
-            Ok(t?)
-        })
-    }
-
-    fn recv_avaliable(
-        &self,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::prelude::rust_2024::Future<Output = Result<Vec<T>, al_core::TransportError>>
-                + Send
-                + Sync
-                + '_,
-        >,
-    > {
-        Box::pin(async {
-            let mut result = Vec::new();
-            loop {
-                match tokio_timeout(std::time::Duration::from_millis(1), self.recv()).await {
-                    Ok(Ok(item)) => result.push(item),
-                    Ok(Err(e)) => Err(e)?,
-                    Err(_) => break,
+        // Drain wire bytes until the queue is empty, then register the waker
+        loop {
+            match self.from_wire.poll_recv(cx) {
+                Poll::Ready(Some(bytes)) => {
+                    if let Err(e) = self.process_wire_bytes(&bytes) {
+                        return Poll::Ready(Action::Error(e.into()));
+                    }
                 }
+                Poll::Ready(None) => {
+                    return Poll::Ready(Action::Error(TransportError::Backpressure(
+                        Backpressure::Closed,
+                    )))
+                }
+                Poll::Pending => break,
             }
-            Ok(result)
-        })
+        }
+
+        if let Some(data) = self.ready.pop_front() {
+            if !self.ready.is_empty() {
+                cx.waker().wake_by_ref();
+            }
+            return Poll::Ready(Action::Data(data));
+        }
+        Poll::Pending
     }
 
-    fn try_recv(
-        &self,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::prelude::rust_2024::Future<Output = Result<Option<T>, al_core::TransportError>>
-                + Send
-                + Sync
-                + '_,
-        >,
-    > {
-        Box::pin(async {
-            Ok(
-                match tokio_timeout(std::time::Duration::from_millis(1), self.recv()).await {
-                    Ok(Ok(item)) => Some(item),
-                    Ok(Err(e)) => Err(e)?,
-                    Err(_) => None,
-                },
-            )
-        })
+    fn has_space(&self) -> al_transport::Vacancy {
+        if self.error.is_some() {
+            Vacancy::Backpressure(Backpressure::Closed)
+        } else {
+            let vacancy = MESSAGE_CAPACITY.saturating_sub(self.pre_buffer.len());
+            if vacancy > 0 {
+                Vacancy::Vacancy(vacancy)
+            } else {
+                Vacancy::Backpressure(Backpressure::BufferFull)
+            }
+        }
+    }
+
+    fn status(&self) -> String {
+        format!(
+            "Tcp {{ handshake complete: {}, initiator: {}, pending_bytes: {}, buffer: {}, ready: {}, error: {:?} }}",
+            self.noise.is_complete(),
+            self.noise.is_initiator(),
+            self.pending_bytes.len(),
+            self.pre_buffer.len(),
+            self.ready.len(),
+            self.error
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{CommandDispatcher, ConnectionManager, Tcp};
-    use al_core::{Event, Transport};
-    use al_crypto::Monotonic;
-    use std::{sync::Arc, time::Duration};
-    use tokio::sync::RwLock;
+    use crate::tcp::{run_server_with_shutdown, Tcp};
+    use al_crypto::{Monotonic, NonceTrait};
+    use al_events::{
+        command, event, register_command, register_event, register_format, CommandHelpers,
+        EventHelpers,
+    };
+    use al_secure::noise::handshake_pattern::HandshakePattern;
+    use al_structures::cancellation::CancellationToken;
+    use al_transport::{Action, Transport};
+    use std::time::Duration;
 
     const _TEST_MSG: &str = "secret message";
     const LOCAL_ADDR: &str = "127.0.0.1:7878";
-    const TEST_PATTERN: crate::HandshakePattern = crate::HandshakePattern::NN;
+    const TEST_PATTERN: HandshakePattern = HandshakePattern::NN;
     const TEST_PROLOGUE: &str = "";
     const _TEST_STATIC_I: [u8; 32] = [
         54, 204, 226, 149, 59, 170, 202, 179, 39, 51, 78, 144, 190, 98, 38, 222, 177, 244, 71, 48,
@@ -619,174 +637,130 @@ mod tests {
         235, 104, 35, 131, 93, 247, 14, 98, 74, 152, 206, 183, 1,
     ];
 
-    #[al_core::old_event]
+    #[event]
     struct TestEventA(u8);
 
-    #[al_core::old_event]
+    #[event]
     struct TestEventB(u8);
+
+    #[command]
+    struct Pulse;
+
+    async fn echo_driver<N: NonceTrait>(mut tcp: Tcp<N>, token: CancellationToken) {
+        loop {
+            if !tcp.has_space().is_available() {
+                continue;
+            }
+            let action = tokio::select! {
+                biased;
+                _ = token.cancelled() => break,
+                action = std::future::poll_fn(|cx| tcp.poll_action(cx)) => action,
+            };
+
+            match action {
+                Action::Data(data) => {
+                    if tcp.handle_incoming(data).is_err() {
+                        break;
+                    }
+                }
+                Action::Error(e) => {
+                    eprintln!("echo driver error: {e}");
+                    break;
+                }
+                Action::Pending => {}
+            }
+        }
+    }
 
     #[tokio::test]
     async fn nn_client_server_echo() {
+        let format_id = register_format!(al_structures::serde_utils::formats::JsonFormat).unwrap();
+        //TODO: get ids from register macros like format
         // Register event types
-        al_core::register_event!(TestEventA);
-        al_core::register_event!(TestEventB);
+        register_event!(TestEventA);
+        register_event!(TestEventB);
+        register_command!(Pulse);
 
-        // Create dispatcher
-        let mut dispatcher =
-            CommandDispatcher::<(u64, Arc<ConnectionManager<Monotonic>>), _>::new(());
+        let server_token = CancellationToken::new();
+        let client_token = CancellationToken::new();
 
-        // Register two event handlers for `TestEventA`
-        dispatcher
-            .register_event::<TestEventA, _>(|_, _, _| async { println!("Received TestEventA") })
-            .await;
-        dispatcher
-            .register_event::<TestEventA, _>(|(conn_id, connections), _, event| async move {
-                let _x = connections.get(0).await;
-                println!("Received TestEventA from conn {}: {:?}", conn_id, event)
+        // ----- Server -----
+        let server_handle = {
+            let accept_token = server_token.clone();
+            let conn_token = server_token.clone();
+            tokio::spawn(async move {
+                let listener = tokio::net::TcpListener::bind(LOCAL_ADDR).await.unwrap();
+                run_server_with_shutdown::<Monotonic, _>(
+                    listener,
+                    TEST_PATTERN,
+                    TEST_PROLOGUE.as_bytes().to_vec(),
+                    None,
+                    None,
+                    accept_token,
+                    move |tcp| {
+                        let token = conn_token.clone();
+                        tokio::spawn(async move {
+                            echo_driver(tcp, token).await;
+                        });
+                    },
+                )
+                .await
+                .unwrap();
             })
-            .await;
-
-        // Register two event handlers for `TestEventB`
-        dispatcher
-            .register_event(|_, _, _: TestEventB| async { println!("Received TestEventB") })
-            .await;
-        dispatcher
-            .register_event(|(conn_id, connections), _, event: TestEventB| async move {
-                connections.get(conn_id).await;
-                println!("Received TestEventB: {:?}", event)
-            })
-            .await;
-
-        // Register catch-all command handler
-        dispatcher
-            .register_command(|(conn_id, _), _, cmd| async move {
-                match cmd.event_type_name() {
-                    Some(type_name) => println!(
-                        "\nCommand from conn {} is event type {}: {:?}",
-                        conn_id, type_name, cmd
-                    ),
-                    None => println!("Command from conn {} is command: {:?}", conn_id, cmd),
-                }
-            })
-            .await;
-
-        // Start a server on another thread
-        let token = Arc::new(RwLock::new(false));
-        let token_clone = token.clone();
-        let mut dispatcher_clone = dispatcher.deep_clone().await;
-
-        let server_handle = tokio::spawn(async move {
-            // Echo commands back to sender
-            dispatcher_clone
-                .register_command(|(id, connections), _, cmd| async move {
-                    if let Some(conn) = connections.get(id).await {
-                        let _ = conn.send(cmd).await;
-                    }
-                })
-                .await;
-            let connection_manager = Arc::new(ConnectionManager::new());
-            Tcp::<Monotonic>::run_server_with_shutdown(
-                LOCAL_ADDR,
-                Some(Duration::from_millis(10)),
-                TEST_PATTERN,
-                TEST_PROLOGUE.as_bytes().to_vec(),
-                None,
-                None,
-                token_clone,
-                |tcp| {
-                    let dispatcher = dispatcher_clone.clone();
-                    let connection_manager_clone = connection_manager.clone();
-                    tokio::spawn(async move {
-                        let tcp = Arc::new(tcp);
-                        let conn_id = connection_manager_clone.insert(tcp.clone()).await;
-
-                        loop {
-                            match tcp.recv().await {
-                                Ok(cmd) => {
-                                    dispatcher
-                                        .dispatch((conn_id, connection_manager_clone.clone()), cmd)
-                                        .await
-                                }
-                                Err(e) => eprintln!("Error: {:?}", e),
-                            }
-                        }
-                    });
-                },
-            )
-            .await
-        });
+        };
 
         // Wait for server to start
         tokio::time::sleep(Duration::from_millis(100)).await;
 
-        // Connect to the server
-        let connection_manager = Arc::new(ConnectionManager::new());
-        let tcp = Arc::new(
-            Tcp::<Monotonic>::connect(
-                LOCAL_ADDR,
-                None,
-                TEST_PATTERN,
-                TEST_PROLOGUE.as_bytes().to_vec(),
-                None,
-                None,
+        // ----- Client -----
+        let (mut tcp, socket) = Tcp::<Monotonic>::new_initiator(
+            TEST_PATTERN,
+            TEST_PROLOGUE.as_bytes().to_vec(),
+            None,
+            None,
+        )
+        .unwrap();
+
+        let socket_handle = {
+            let token = client_token.clone();
+            tokio::spawn(
+                async move { socket.connect_with_cancel(LOCAL_ADDR, token).await.unwrap() },
             )
-            .await
-            .unwrap(),
-        );
-        let conn_id = connection_manager.insert(tcp.clone()).await;
+        };
 
-        // Send command to server
-        tcp.send(al_core::Command::Pulse).await.unwrap();
+        // ----- Msg Queue -----
+        let msgs = [
+            Pulse.to_msg(),
+            TestEventA(1).to_msg(),
+            TestEventB(42).to_msg(),
+        ];
+        tcp.handle_incoming(b"hello world".to_vec()).unwrap();
+        for msg in &msgs {
+            tcp.send_message(format_id, msg).unwrap();
+        }
 
-        // Recv echo back from server
-        let cmd: al_core::Command = tcp.recv().await.unwrap();
-        assert_eq!(al_core::Command::Pulse, cmd);
-        dispatcher
-            .dispatch((conn_id, connection_manager.clone()), cmd)
-            .await;
+        // Wait for echo
+        let echoed = std::future::poll_fn(|cx| tcp.poll_action(cx)).await;
+        match echoed {
+            Action::Data(data) => assert_eq!(data, b"hello world"),
+            Action::Error(e) => panic!("transport error: {e}"),
+            Action::Pending => panic!("poll_action returned `Pending` without a matching wake"),
+        }
+        for msg in msgs {
+            let echoed = std::future::poll_fn(|cx| tcp.recv_message(cx)).await;
+            match echoed {
+                Action::Data(data) => {
+                    assert_eq!(data, msg)
+                }
+                Action::Error(e) => panic!("transport error: {e}"),
+                Action::Pending => panic!("poll_action returned `Pending` without a matching wake"),
+            }
+        }
 
-        // Send event as command to server
-        tcp.send(TestEventA(0).to_cmd()).await.unwrap();
-
-        // Recv echo back from server
-        let cmd: al_core::Command = tcp.recv().await.unwrap();
-        assert_eq!(TestEventA(0), cmd.downcast_event().unwrap());
-        dispatcher
-            .dispatch((conn_id, connection_manager.clone()), cmd)
-            .await;
-
-        // Send event as command to server
-        tcp.send(TestEventA(5).to_cmd()).await.unwrap();
-
-        // Recv echo back from server
-        let cmd: al_core::Command = tcp.recv().await.unwrap();
-        assert_eq!(TestEventA(5), cmd.downcast_event().unwrap());
-        dispatcher
-            .dispatch((conn_id, connection_manager.clone()), cmd)
-            .await;
-
-        // Send event as command to server
-        tcp.send(TestEventB(10).to_cmd()).await.unwrap();
-
-        // Recv echo back from server
-        let cmd: al_core::Command = tcp.recv().await.unwrap();
-        assert_eq!(TestEventB(10), cmd.downcast_event().unwrap());
-        dispatcher
-            .dispatch((conn_id, connection_manager.clone()), cmd)
-            .await;
-
-        // Send event as command to server
-        tcp.send(TestEventB(15).to_cmd()).await.unwrap();
-
-        // Recv echo back from server
-        let cmd: al_core::Command = tcp.recv().await.unwrap();
-        assert_eq!(TestEventB(15), cmd.downcast_event().unwrap());
-        dispatcher
-            .dispatch((conn_id, connection_manager.clone()), cmd)
-            .await;
-
-        // Stop server and await handle
-        *token.write().await = true;
-        server_handle.await.unwrap().unwrap();
+        // ----- Cleanup -----
+        server_token.cancel();
+        client_token.cancel();
+        server_handle.await.unwrap();
+        socket_handle.await.unwrap();
     }
 }

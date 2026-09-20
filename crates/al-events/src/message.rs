@@ -533,6 +533,22 @@ mod borrow {
 
 #[cfg(feature = "serde")]
 #[macro_export]
+macro_rules! register_format {
+    ($format:expr) => {{
+        al_events::MESSAGE_FORMATS().register($format)
+    }};
+}
+
+#[cfg(feature = "serde")]
+#[macro_export]
+macro_rules! register_format_with {
+    ($format:expr, $name:expr) => {{
+        al_events::MESSAGE_FORMATS().register_named($name, $format)
+    }};
+}
+
+#[cfg(feature = "serde")]
+#[macro_export]
 macro_rules! erase_message_factory {
     ($type:ty, $variant:ident, $format_type:ty, $error_msg:expr) => {{
         ::paste::paste! {
@@ -768,13 +784,14 @@ macro_rules! define_message_kind {
                     #[macro_export]
                     macro_rules! [<register_ $kind:snake>] {
                         ($msg:ty) => {{
-                            if let Err(e) = $crate::[<try_register_ $kind:snake>]::<$msg>() {
-                                ::std::panic!(
+                            match $crate::[<try_register_ $kind:snake>]::<$msg>() {
+                                Ok(id) => id,
+                                Err(e) => ::std::panic!(
                                     "Failed to register {} type {}: {}",
                                     stringify!($kind),
                                     stringify!($msg),
                                     e
-                                );
+                                ),
                             }
                         }};
                     }
@@ -782,14 +799,15 @@ macro_rules! define_message_kind {
                     #[macro_export]
                     macro_rules! [<register_ $kind:snake _with>] {
                         ($registry:expr, $msg:ty) => {{
-                            if let Err(e) = $crate::[<try_register_ $kind:snake _with>]::<$msg>($registry) {
-                                ::std::panic!(
+                            match $crate::[<try_register_ $kind:snake _with>]::<$msg>($registry) {
+                                Ok(id) => id,
+                                Err(e) => ::std::panic!(
                                     "Failed to register {} type {} in registry {}: {}",
                                     stringify!($kind),
                                     stringify!($msg),
                                     stringify!($registry),
                                     e
-                                );
+                                ),
                             }
                         }};
                     }

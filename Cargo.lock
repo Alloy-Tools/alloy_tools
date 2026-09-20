@@ -81,13 +81,16 @@ dependencies = [
 name = "al-net"
 version = "0.1.0"
 dependencies = [
+ "al-crypto",
  "al-events",
  "al-secure",
  "al-structures",
+ "al-transport",
  "crossterm",
  "serde",
  "tokio",
  "toml",
+ "zeroize",
 ]
 
 [[package]]

@@ -12,10 +12,14 @@ doctest = false
 al-secure = { path = "../al-secure", features = ["noise"] }
 al-structures = { path = "../al-structures", features = ["traits", "binary"] }
 al-events = { path = "../al-events", features = ["binary"] }
+al-transport = { path = "../al-transport" }
+al-crypto = { path = "../al-crypto", optional = true }
+zeroize = { version = "1.8.2", features = ["alloc"], optional = true }
 serde = { version = "1.0.228", features = ["derive"] }
 tokio = { version = "1", features = ["sync", "net", "time", "io-util"] }
 
 [dev-dependencies]
+al-structures = { path = "../al-structures", features = ["traits", "json"] }
 tokio = { version = "1", features = [
     "rt-multi-thread",
     "macros",
@@ -26,3 +30,7 @@ tokio = { version = "1", features = [
 ] }
 toml = "0.9.8"
 crossterm = "0.29.0"
+
+[features]
+default = ["tcp"]
+tcp = ["dep:al-crypto", "dep:zeroize"]
