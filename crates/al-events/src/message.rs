@@ -669,6 +669,10 @@ macro_rules! define_message_kind {
 
             impl dyn $kind {
                 //TODO: Remove these and add the `Downcast` trait
+                pub fn downcast<T: $kind>(self: Box<Self>) -> Result<T, Box<dyn $kind>> {
+                    self.downcast_box::<T>().map(|boxed| *boxed)
+                }
+
                 #[doc = concat!("Downcast `&dyn ", stringify!($kind), "` to a concrete `&T`.")]
                 pub fn downcast_ref<T: $kind>(&self) -> Option<&T> {
                     self.as_any().downcast_ref::<T>()

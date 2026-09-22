@@ -109,6 +109,7 @@ pub struct Tcp<N: NonceTrait> {
     pending_len: Option<u16>,
     pending_bytes: std::collections::VecDeque<u8>,
 
+    saw_eof: bool,
     error: Option<TcpError>,
 }
 
@@ -190,6 +191,7 @@ impl<N: NonceTrait> Tcp<N> {
             buffer: Box::new([0u8; MAX_MSG_BYTE_LEN]),
             pre_buffer: std::collections::VecDeque::new(),
             ready: std::collections::VecDeque::new(),
+            saw_eof: false,
             error: None,
         };
         (tcp, TcpSocket::new(to_wire, from_wire))
@@ -561,19 +563,25 @@ impl<N: NonceTrait> Transport<Vec<u8>> for Tcp<N> {
         }
 
         // Drain wire bytes until the queue is empty, then register the waker
-        loop {
-            match self.from_wire.poll_recv(cx) {
-                Poll::Ready(Some(bytes)) => {
-                    if let Err(e) = self.process_wire_bytes(&bytes) {
-                        return Poll::Ready(Action::Error(e.into()));
+        if !self.saw_eof {
+            loop {
+                match self.from_wire.poll_recv(cx) {
+                    Poll::Ready(Some(bytes)) => {
+                        if bytes.is_empty() {
+                            self.saw_eof = true;
+                            break;
+                        }
+                        if let Err(e) = self.process_wire_bytes(&bytes) {
+                            return Poll::Ready(Action::Error(e.into()));
+                        }
                     }
+                    Poll::Ready(None) => {
+                        return Poll::Ready(Action::Error(TransportError::Backpressure(
+                            Backpressure::Closed,
+                        )))
+                    }
+                    Poll::Pending => break,
                 }
-                Poll::Ready(None) => {
-                    return Poll::Ready(Action::Error(TransportError::Backpressure(
-                        Backpressure::Closed,
-                    )))
-                }
-                Poll::Pending => break,
             }
         }
 
@@ -582,6 +590,10 @@ impl<N: NonceTrait> Transport<Vec<u8>> for Tcp<N> {
                 cx.waker().wake_by_ref();
             }
             return Poll::Ready(Action::Data(data));
+        }
+
+        if self.saw_eof {
+            return Poll::Ready(Action::Error(TransportError::Backpressure(Backpressure::Closed)));
         }
         Poll::Pending
     }

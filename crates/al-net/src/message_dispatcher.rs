@@ -1,13 +1,10 @@
 use std::sync::Arc;
 
 use al_events::{Command, DynIdCache, DynMessage, Event, Query, TypeId};
-use al_structures::{
-    collections::storage::utils::{
-        indexed::{IndexedHandle, IndexedStorage},
-        keyed::{KeyedHandle, KeyedStorage},
-        HandleBulkRead,
-    },
-    traits::Downcast,
+use al_structures::collections::storage::utils::{
+    indexed::{IndexedHandle, IndexedStorage},
+    keyed::{KeyedHandle, KeyedStorage},
+    HandleBulkRead,
 };
 use al_transport::dispatcher::{BoxFut, Dispatcher, DispatcherError, Handler, KeyedHandlerKey};
 

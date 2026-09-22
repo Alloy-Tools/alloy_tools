@@ -50,7 +50,8 @@ pub type AppDispatcher =
 pub type TransportIdStorage = HashMap<ConnId, TransportId>;
 pub type ConnIdStorage = HashMap<TransportId, ConnId>;
 pub type LiveStorage = Vec<ConnId>;
-pub type NetTask = NetworkTask<al_crypto::Monotonic, TransportIdStorage, ConnIdStorage, LiveStorage>;
+pub type NetTask =
+    NetworkTask<al_crypto::Monotonic, TransportIdStorage, ConnIdStorage, LiveStorage>;
 
 #[tokio::main]
 async fn main() {
@@ -225,6 +226,16 @@ impl App {
                         NetEvent::NoOp => {}
                         NetEvent::Connected(conn_id) => {
                             if ctx.net.is_server() {
+                                {
+                                    let mut s = state.write().await;
+                                    s.history.push_back(Msg::new(
+                                        "Server",
+                                        format!("Client {conn_id} connected"),
+                                    ));
+                                    if s.history.len() > s.max_history_len {
+                                        s.history.pop_front();
+                                    }
+                                }
                                 let history: Vec<Msg> =
                                     { state.read().await.history.iter().cloned().collect() };
                                 for msg in history {
@@ -232,16 +243,30 @@ impl App {
                                         eprintln!("Server failed to send history message: {e}")
                                     }
                                 }
+                                if let Err(e) = ctx.net.broadcast(
+                                    Some(vec![conn_id]),
+                                    Msg::new("Server", format!("Client {conn_id} connected"))
+                                        .to_msg(),
+                                ) {
+                                    eprintln!(
+                                        "Server failed to send `new connection` broadcast: {e}"
+                                    );
+                                }
                             } else {
                                 state.write().await.local_conn = Some(conn_id);
                             }
                         }
                         NetEvent::Disconnected(conn_id) => {
                             let mut s = state.write().await;
-                            s.history.push_back(Msg::new(
-                                "Server",
-                                format!("Client {conn_id} disconnected"),
-                            ));
+                            if !ctx.net.is_server() {
+                                s.history.clear();
+                            }
+                            let msg = if ctx.net.is_server() {
+                                Msg::new("Server", format!("Client {conn_id} disconnected."))
+                            } else {
+                                Msg::new("Client", "Disconnected from server".to_string())
+                            };
+                            s.history.push_back(msg);
                             if s.history.len() > s.max_history_len {
                                 s.history.pop_front();
                             }
@@ -711,6 +736,11 @@ impl<
                 eprintln!("Chat driver socket from `add_tcp` failed: {e}")
             }
         });
+
+        // Emit the connection
+        if let Err(e) = self.events.send(NetEvent::Connected(conn_id)) {
+            eprintln!("Chat `add_tcp` events `send` error: {e}");
+        }
         Ok(conn_id)
     }
 
@@ -776,17 +806,13 @@ impl<
                         Ok(x) => x,
                         Err(e) => { eprintln!("Chat server `noise` error: {e}"); continue; }
                     };
-                    match self.add_tcp(tcp, socket, stream).await {
-                        Ok(conn_id) => if let Err(e) = self.events.send(NetEvent::Connected(conn_id)) {
-                            eprintln!("Chat server events `send` error: {e}");
-                            continue;
-                        }
-                        Err(e) => { eprintln!("Chat server `add_tcp` failed: {e}"); continue; }
+                    if let Err(e) = self.add_tcp(tcp, socket, stream).await {
+                        eprintln!("Chat server `add_tcp` failed: {e}");
+                        continue;
                     }
                 }
 
                 item = self.net_in.recv() => {
-                    use al_structures::traits::Downcast;
                     let mut driver = self.driver.lock().await;
 
                     let mut batch = Vec::new();
@@ -802,14 +828,14 @@ impl<
                                     continue;
                                 }
                             };
-                            let broadcast = match msg.downcast::<Broadcast>() {
-                                Ok(bcst) => bcst,
-                                Err(_) => {
+                            let mut broadcast = match msg.into_event().map(|(e, _)| e.downcast::<Broadcast>()) {
+                                Some(Ok(bcst)) => bcst,
+                                _ => {
                                     eprintln!("Chat server `broadcast downcast` failed.");
                                     continue;
                                 }
                             };
-                            let except = broadcast.except.unwrap_or_default();
+                            let except = broadcast.except.take().unwrap_or_default();
                             let payload = broadcast.msg;
 
                             match self.live.read().await.values() {

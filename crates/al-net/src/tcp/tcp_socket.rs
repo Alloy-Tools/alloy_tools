@@ -63,7 +63,7 @@ impl TcpSocket {
         let from_wire = self.from_wire.clone();
 
         let read_token = token.clone();
-        let read_task = tokio::spawn(async move {
+        let mut read_task = tokio::spawn(async move {
             let mut buf = Box::new([0u8; MAX_MSG_BYTE_LEN]);
             loop {
                 let n = tokio::select! {
@@ -81,20 +81,25 @@ impl TcpSocket {
         });
 
         loop {
-            let data = tokio::select! {
+            tokio::select! {
                 biased;
                 _ = token.cancelled() => break,
+                // Peer closed or read error
+                _ = &mut read_task => break,
                 data = to_wire.recv() => match data {
-                    Ok(d) => d,
+                    Ok(d) => {
+                        if writer.write_all(&d).await.is_err() {
+                            break;
+                        }
+                    }
                     Err(_) => break,
                 }
-            };
-            if writer.write_all(&data).await.is_err() {
-                break;
             }
         }
 
         read_task.abort();
+        // Signal EOF
+        let _ = self.from_wire.send(Vec::new());
         Ok(())
     }
 
