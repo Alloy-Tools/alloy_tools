@@ -95,6 +95,8 @@
 //      I need to estimate the benefit of not actually moving/cloning the data vs the cost of Rc and getting mut.
 //      Copies might be treated differently so I might need a CoW instead of Rc.
 
+pub mod arc_utils;
+pub mod dispatcher;
 mod driver;
 mod marker;
 pub mod splice;
@@ -106,7 +108,7 @@ pub use marker::TransportItemRequirements;
 #[cfg(test)]
 pub use test_counting::{CountingConsumer, CountingProducer};
 pub use transport::{
-    Action, Backpressure, Transport, TransportError, TransportID, TransportIDError, Vacancy,
+    Action, Backpressure, Transport, TransportError, TransportId, TransportIdError, Vacancy,
 };
 
 #[cfg(test)]

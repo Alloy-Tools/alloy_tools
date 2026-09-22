@@ -74,6 +74,12 @@ pub async fn run_server_with_shutdown<N: NonceTrait, F: Fn(Tcp<N>)>(
 
 const MESSAGE_CAPACITY: usize = 1024;
 
+impl<N: NonceTrait> Into<Box<dyn Transport<Vec<u8>>>> for Tcp<N> {
+    fn into(self) -> Box<dyn Transport<Vec<u8>>> {
+        Box::new(self)
+    }
+}
+
 pub struct Tcp<N: NonceTrait> {
     // Noise state
     noise: HandshakeState<N>,
@@ -392,7 +398,10 @@ impl<N: NonceTrait> Tcp<N> {
             &split.1
         };
         let ciphertext = cipher.encrypt_with_ad(&[], data.as_mut_slice())?;
-
+        /*REVIEW: to handle arcs, just change to:
+        let mut buf = al_transport::consume_or_clone(data);
+        let ciphertext = cipher.encrypt_with_ad(&[], buf.as_mut_slice())?;*/
+        
         let mut packet = Vec::with_capacity(2 + ciphertext.len());
         packet.extend_from_slice(&(ciphertext.len() as u16).to_be_bytes());
         packet.extend_from_slice(&ciphertext);
@@ -675,7 +684,6 @@ mod tests {
     #[tokio::test]
     async fn nn_client_server_echo() {
         let format_id = register_format!(al_structures::serde_utils::formats::JsonFormat).unwrap();
-        //TODO: get ids from register macros like format
         // Register event types
         register_event!(TestEventA);
         register_event!(TestEventB);

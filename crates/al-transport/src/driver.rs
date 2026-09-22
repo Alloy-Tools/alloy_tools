@@ -1,13 +1,13 @@
 use crate::{
-    Action, Backpressure, Transport, TransportError, TransportID, TransportIDError,
+    Action, Backpressure, Transport, TransportError, TransportId, TransportIdError,
     TransportItemRequirements,
 };
 use al_structures::noop_waker::noop_waker;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DriverError {
-    InvalidSender(TransportIDError),
-    InvalidReceiver(TransportIDError),
+    InvalidSender(TransportIdError),
+    InvalidReceiver(TransportIdError),
     Transport(TransportError),
     SelfConnection,
 }
@@ -103,16 +103,16 @@ impl<T: TransportItemRequirements> Driver<T> {
     }
 
     /// Validates the TransportID and returns `Some(transports_index)` for valid IDs
-    fn resolve(&self, id: TransportID) -> Result<usize, TransportIDError> {
+    fn resolve(&self, id: TransportId) -> Result<usize, TransportIdError> {
         //TODO: validate ID with StableVec
         if id.index < self.transports.len() {
             Ok(id.index)
         } else {
-            Err(TransportIDError::InvalidIndex)
+            Err(TransportIdError::InvalidIndex)
         }
     }
 
-    pub fn add_transport(&mut self, transport: impl Into<Box<dyn Transport<T>>>) -> TransportID {
+    pub fn add_transport(&mut self, transport: impl Into<Box<dyn Transport<T>>>) -> TransportId {
         //TODO: get all from StableVec once implemented with generations
         let index = self.transports.len();
 
@@ -121,13 +121,13 @@ impl<T: TransportItemRequirements> Driver<T> {
         self.fan_outs.push(None);
         self.dead.push(false);
 
-        TransportID {
+        TransportId {
             index,
             generation: 0,
         }
     }
 
-    pub fn connect(&mut self, from: TransportID, to: TransportID) -> Result<(), DriverError> {
+    pub fn connect(&mut self, from: TransportId, to: TransportId) -> Result<(), DriverError> {
         let fi = self.resolve(from).map_err(DriverError::InvalidSender)?;
         let ti = self.resolve(to).map_err(DriverError::InvalidReceiver)?;
 
@@ -155,7 +155,7 @@ impl<T: TransportItemRequirements> Driver<T> {
         Ok(())
     }
 
-    pub fn disconnect(&mut self, from: TransportID, to: TransportID) -> Result<(), DriverError> {
+    pub fn disconnect(&mut self, from: TransportId, to: TransportId) -> Result<(), DriverError> {
         let fi = self.resolve(from).map_err(DriverError::InvalidSender)?;
         let ti = self.resolve(to).map_err(DriverError::InvalidReceiver)?;
 
@@ -254,14 +254,14 @@ impl<T: TransportItemRequirements> Driver<T> {
         }
     }
 
-    pub fn deliver_to(&mut self, to: TransportID, data: T) -> Result<(), DriverError> {
+    pub fn deliver_to(&mut self, to: TransportId, data: T) -> Result<(), DriverError> {
         let ti = self.resolve(to).map_err(DriverError::InvalidReceiver)?;
         self.transports[ti]
             .handle_incoming(data)
             .map_err(|e| DriverError::Transport(TransportError::Backpressure(e)))
     }
 
-    pub fn poll(&mut self, cx: &mut std::task::Context<'_>) {
+    pub fn poll(&mut self, cx: &mut std::task::Context<'_>) -> Vec<TransportId> {
         let mut work = std::collections::VecDeque::new();
         let mut to_kill = Vec::<usize>::new();
 
@@ -293,9 +293,15 @@ impl<T: TransportItemRequirements> Driver<T> {
             }
         }
 
+        let mut killed = Vec::new();
         for idx in to_kill {
+            killed.push(TransportId {
+                index: idx,
+                generation: 0,
+            });
             self.kill_transport(idx);
         }
+        killed
     }
 }
 
@@ -319,14 +325,14 @@ mod tests {
     fn invalid_sender() {
         let mut driver = Driver::new();
         let valid_id = driver.add_transport(CountingProducer::new());
-        let invalid_id = TransportID {
+        let invalid_id = TransportId {
             index: 1,
             generation: 0,
         };
 
         assert!(matches!(
             driver.connect(invalid_id, valid_id),
-            Err(DriverError::InvalidSender(TransportIDError::InvalidIndex))
+            Err(DriverError::InvalidSender(TransportIdError::InvalidIndex))
         ));
     }
 
@@ -334,28 +340,28 @@ mod tests {
     fn invalid_receiver() {
         let mut driver = Driver::new();
         let valid_id = driver.add_transport(CountingProducer::new());
-        let invalid_id = TransportID {
+        let invalid_id = TransportId {
             index: 1,
             generation: 0,
         };
 
         assert!(matches!(
             driver.connect(valid_id, invalid_id),
-            Err(DriverError::InvalidReceiver(TransportIDError::InvalidIndex))
+            Err(DriverError::InvalidReceiver(TransportIdError::InvalidIndex))
         ));
     }
 
     #[test]
     fn deliver_to_invalid_id() {
         let mut driver = Driver::new();
-        let invalid_id = TransportID {
+        let invalid_id = TransportId {
             index: 1,
             generation: 0,
         };
 
         assert!(matches!(
             driver.deliver_to(invalid_id, 10),
-            Err(DriverError::InvalidReceiver(TransportIDError::InvalidIndex))
+            Err(DriverError::InvalidReceiver(TransportIdError::InvalidIndex))
         ));
     }
 
@@ -390,14 +396,14 @@ mod tests {
     fn disconnect_invalid_sender() {
         let mut driver = Driver::new();
         let valid_id = driver.add_transport(CountingConsumer::new());
-        let invalid_id = TransportID {
+        let invalid_id = TransportId {
             index: 1,
             generation: 0,
         };
 
         assert!(matches!(
             driver.disconnect(invalid_id, valid_id),
-            Err(DriverError::InvalidSender(TransportIDError::InvalidIndex))
+            Err(DriverError::InvalidSender(TransportIdError::InvalidIndex))
         ));
     }
 

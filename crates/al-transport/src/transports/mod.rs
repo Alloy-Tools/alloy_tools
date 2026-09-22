@@ -54,8 +54,10 @@ mod boundary_queue;
 mod filter;
 mod map;
 mod queue;
+mod sink;
 
 pub use boundary_queue::{BoundaryQueue, BoundaryQueueError, BoundaryQueueTransport};
 pub use filter::Filter;
 pub use map::Map;
 pub use queue::Queue;
+pub use sink::{FallibleSink, FallibleStatefulSink, Sink, StatefulSink};

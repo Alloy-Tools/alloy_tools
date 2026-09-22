@@ -1,27 +1,27 @@
-use al_structures::traits::CloneEqError;
 use crate::TransportItemRequirements;
+use al_structures::traits::CloneEqError;
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
-pub struct TransportID {
+pub struct TransportId {
     pub(crate) index: usize,
     pub(crate) generation: usize,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub enum TransportIDError {
+pub enum TransportIdError {
     InvalidIndex,
     InvalidGeneration,
 }
 
-impl std::fmt::Display for TransportIDError {
+impl std::fmt::Display for TransportIdError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            &TransportIDError::InvalidIndex => write!(f, "Invalid index for TransportID"),
-            TransportIDError::InvalidGeneration => write!(f, "Invalid generation for TransportID"),
+            &TransportIdError::InvalidIndex => write!(f, "Invalid index for TransportID"),
+            TransportIdError::InvalidGeneration => write!(f, "Invalid generation for TransportID"),
         }
     }
 }
-impl std::error::Error for TransportIDError {}
+impl std::error::Error for TransportIdError {}
 
 pub enum Action<T: TransportItemRequirements> {
     /// Transport has data to push downstream.
