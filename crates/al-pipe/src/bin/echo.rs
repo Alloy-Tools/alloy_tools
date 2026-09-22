@@ -1,9 +1,9 @@
-use al_core::Transport;
+/*use al_core::Transport;
 use al_pipe::{DuplexPipe, DuplexPipeError};
-use std::time::Duration;
+use std::time::Duration;*/
 
-#[tokio::main(flavor = "multi_thread")]
-async fn main() -> Result<(), DuplexPipeError> {
+//#[tokio::main(flavor = "multi_thread")]
+fn main() {/* -> Result<(), DuplexPipeError> {
     let pipe = DuplexPipe::connect_as_child_with_timeout(Some(Duration::from_secs(5)))?;
 
     eprintln!("Spawned pipes");
@@ -32,5 +32,5 @@ async fn main() -> Result<(), DuplexPipeError> {
 
     pipe.close();
 
-    Ok(())
+    Ok(())*/
 }

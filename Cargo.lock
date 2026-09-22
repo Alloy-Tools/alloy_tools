@@ -17,20 +17,6 @@ name = "al-cereal"
 version = "0.1.0"
 
 [[package]]
-name = "al-core"
-version = "0.1.0"
-dependencies = [
- "al-derive",
- "bitcode",
- "erased-serde",
- "once_cell",
- "serde",
- "serde_json",
- "tokio",
- "tynm",
-]
-
-[[package]]
 name = "al-crypto"
 version = "0.1.0"
 dependencies = [
@@ -52,15 +38,6 @@ version = "0.1.0"
 dependencies = [
  "quote",
  "syn",
-]
-
-[[package]]
-name = "al-derive-test"
-version = "0.1.0"
-dependencies = [
- "al-core",
- "al-derive",
- "serde",
 ]
 
 [[package]]
@@ -97,7 +74,6 @@ dependencies = [
 name = "al-pipe"
 version = "0.1.0"
 dependencies = [
- "al-core",
  "tokio",
 ]
 
@@ -131,29 +107,6 @@ version = "0.1.0"
 dependencies = [
  "al-structures",
  "tokio",
-]
-
-[[package]]
-name = "al-tui"
-version = "0.1.0"
-dependencies = [
- "al-core",
- "al-ui",
- "bitcode",
- "crossterm",
- "serde",
- "tokio",
-]
-
-[[package]]
-name = "al-ui"
-version = "0.1.0"
-dependencies = [
- "al-core",
- "erased-serde",
- "num-traits",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -248,9 +201,6 @@ name = "bitflags"
 version = "2.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4512299f36f043ab09a583e57bceb5a5aab7a73db1805848e8fef3c9e8c78b3"
-dependencies = [
- "serde_core",
-]
 
 [[package]]
 name = "blake2"
@@ -413,7 +363,6 @@ dependencies = [
  "mio",
  "parking_lot",
  "rustix",
- "serde",
  "signal-hook",
  "signal-hook-mio",
  "winapi",
@@ -1153,9 +1102,7 @@ dependencies = [
  "bytes",
  "libc",
  "mio",
- "parking_lot",
  "pin-project-lite",
- "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys",

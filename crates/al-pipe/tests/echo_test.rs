@@ -1,4 +1,4 @@
-use al_core::Transport;
+/*use al_core::Transport;
 use al_pipe::DuplexPipe;
 use std::process::Command;
 use std::time::Duration;
@@ -29,4 +29,4 @@ async fn echo() {
     assert_ne!(cmd, al_core::Command::Pulse);
 
     pipe.close();
-}
+}*/
