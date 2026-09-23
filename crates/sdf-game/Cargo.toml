@@ -1,0 +1,13 @@
+[package]
+name = "sdf-game"
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+edition.workspace = true
+
+[dependencies]
+al-math = { path = "../al-math", features = ["sdf"] }
+winit = "0.30.5"
+wgpu = "30.0.1"
+pollster = "1.0.1"
+bytemuck = "1.25.2"
