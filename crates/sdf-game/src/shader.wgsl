@@ -1,6 +1,11 @@
 struct Globals {
     resolution: vec2<f32>,
-    _pad: vec2<f32>,
+    camera_pos: vec2<f32>,
+    view_size: f32,
+    // Pad to 32 bytes
+    _pad0: f32,
+    _pad1: f32,
+    _pad2: f32,
 };
 
 struct PlayerData {
@@ -21,8 +26,6 @@ const WORLD_MIN: f32 = -1.0;
 const WORLD_MAX: f32 = 1.0;
 const WORLD_SIZE: f32 = WORLD_MAX - WORLD_MIN;
 
-const WORLD_VIEW_SIZE: f32 = 2.4;
-
 @vertex
 fn vs_main(@builtin(vertex_index) idx: u32) -> @builtin(position) vec4<f32> {
     var positions = array<vec2<f32>, 6>(
@@ -42,7 +45,7 @@ fn fs_main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     let centered = frag_coord.xy - 0.5 * globals.resolution;
     let ndc = vec2<f32>(centered.x, -centered.y) / globals.resolution.y;
 
-    let world_p = ndc * WORLD_VIEW_SIZE;
+    let world_p = globals.camera_pos + ndc * globals.view_size;
 
     // ----- Map Dist -----
     let map_uv = vec2<f32>(
@@ -78,7 +81,7 @@ fn fs_main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     let remote_color = vec3<f32>(0.95, 0.55, 0.20);
     let local_color = vec3<f32>(0.30, 0.80, 0.50);
     let player_color = mix(remote_color, local_color, is_local);
-    
+
     let player_t = smoothstep(-0.003, 0.003, min_player_dist);
     let color = mix(player_color, bg, player_t);
 

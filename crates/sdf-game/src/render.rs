@@ -7,7 +7,9 @@ use crate::map::MAP_RES;
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Globals {
     pub resolution: [f32; 2],
-    pub _pad: [f32; 2],
+    pub camera_pos: [f32; 2],
+    pub view_size: f32,
+    pub _pad: [f32; 3],
 }
 
 pub struct RenderState {
@@ -276,7 +278,9 @@ impl RenderState {
         // Update globals for this frame
         let globals = Globals {
             resolution: [self.config.width as f32, self.config.height as f32],
-            _pad: [0.0; 2],
+            camera_pos: game.camera.pos,
+            view_size: game.camera.view_size,
+            _pad: [0.; 3],
         };
         self.queue
             .write_buffer(&self.globals_buffer, 0, bytemuck::bytes_of(&globals));
