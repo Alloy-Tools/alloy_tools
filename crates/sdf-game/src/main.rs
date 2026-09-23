@@ -1,6 +1,7 @@
 mod app;
 mod render;
 mod game;
+mod map;
 
 fn main() {
     app::App::new().run().unwrap()

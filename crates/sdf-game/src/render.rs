@@ -1,6 +1,8 @@
 use wgpu::{Surface, SurfaceConfiguration};
 use winit::window::Window;
 
+use crate::map::MAP_RES;
+
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Globals {
@@ -16,6 +18,9 @@ pub struct RenderState {
     pub pipeline: wgpu::RenderPipeline,
     pub globals_buffer: wgpu::Buffer,
     pub player_buffer: wgpu::Buffer,
+    // Kept alive so the bind group's texture resource isn't dropped.
+    #[allow(dead_code)]
+    map_view: wgpu::TextureView,
     pub bind_group: wgpu::BindGroup,
 }
 
@@ -73,6 +78,55 @@ impl RenderState {
             source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
         });
 
+        // ----- Map Texture -----
+        let map_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Map SDF Texture"),
+            size: wgpu::Extent3d {
+                width: MAP_RES,
+                height: MAP_RES,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R16Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        let map_data = crate::map::MapData::new(crate::map::map_sdf);
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &map_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            bytemuck::cast_slice(map_data.sdf_map()),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(MAP_RES * 2),
+                rows_per_image: Some(MAP_RES),
+            },
+            wgpu::Extent3d {
+                width: MAP_RES,
+                height: MAP_RES,
+                depth_or_array_layers: 1,
+            },
+        );
+        let map_view = map_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let map_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Map Sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            ..Default::default()
+        });
+
         // ----- Buffers -----
         let globals_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Globals Buffer"),
@@ -81,7 +135,7 @@ impl RenderState {
             mapped_at_creation: false,
         });
 
-        let player_buffer = device.create_buffer(&wgpu::wgt::BufferDescriptor {
+        let player_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Player Buffer"),
             size: std::mem::size_of::<crate::game::PlayerData>() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
@@ -112,6 +166,22 @@ impl RenderState {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
         });
 
@@ -126,6 +196,14 @@ impl RenderState {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: player_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&map_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Sampler(&map_sampler),
                 },
             ],
         });
@@ -179,6 +257,7 @@ impl RenderState {
             pipeline,
             globals_buffer,
             player_buffer,
+            map_view,
             bind_group,
         }
     }
@@ -202,6 +281,7 @@ impl RenderState {
         self.queue
             .write_buffer(&self.globals_buffer, 0, bytemuck::bytes_of(&globals));
 
+        // Update player buffer
         self.queue.write_buffer(
             &self.player_buffer,
             0,

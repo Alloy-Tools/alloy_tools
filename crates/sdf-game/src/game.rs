@@ -74,16 +74,16 @@ impl GameState {
         let mut dx = 0.0f32;
         let mut dy = 0.0f32;
         if self.keys.up {
-            dy += 0.1;
+            dy += 1.;
         }
         if self.keys.down {
-            dy -= 0.1;
+            dy -= 1.;
         }
         if self.keys.right {
-            dx += 0.1;
+            dx += 1.;
         }
         if self.keys.left {
-            dx -= 0.1;
+            dx -= 1.;
         }
 
         let len = (dx * dx + dy * dy).sqrt();
