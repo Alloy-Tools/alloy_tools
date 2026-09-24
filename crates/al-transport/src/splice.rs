@@ -65,7 +65,7 @@ impl SpliceHandle {
 /// // ... later ...
 /// handle.stop();
 /// ```
-pub async fn splice_async<
+pub fn splice_async<
     T: TransportItemRequirements,
     N: TransportItemRequirements,
     F: Fn(T) -> N + Send + 'static,
@@ -183,8 +183,7 @@ mod tests {
                 tokio::spawn(f);
             },
             panic_on_error,
-        )
-        .await;
+        );
 
         assert!(!handle.is_stopped());
         handle.stop();

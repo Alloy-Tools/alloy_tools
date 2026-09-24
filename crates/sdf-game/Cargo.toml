@@ -7,8 +7,19 @@ edition.workspace = true
 
 [dependencies]
 al-math = { path = "../al-math", features = ["sdf"] }
+al-events = { path = "../al-events", features = ["json"] }
+al-transport = { path = "../al-transport" }
+al-crypto = { path = "../al-crypto" }
+al-structures = { path = "../al-structures", features = [
+    "cancellation",
+    "json",
+] }
+al-net = { path = "../al-net", features = ["tcp"] }
+al-secure = { path = "../al-secure", features = ["noise"] }
 winit = "0.30.5"
 wgpu = "30.0.1"
 pollster = "1.0.1"
 bytemuck = "1.25.2"
 half = { version = "2.7.1", features = ["bytemuck"] }
+serde = { version = "1.0.229", features = ["derive"] }
+tokio = { version = "1", features = ["rt", "sync", "net", "time", "io-util"] }

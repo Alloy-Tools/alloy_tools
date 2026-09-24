@@ -32,5 +32,9 @@ toml = "0.9.8"
 crossterm = "0.29.0"
 
 [features]
-default = ["tcp"]
+default = []
 tcp = ["dep:al-crypto", "dep:zeroize"]
+
+[[example]]
+name = "simple_client_server"
+required-features = ["tcp"]

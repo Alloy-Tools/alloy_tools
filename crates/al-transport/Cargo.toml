@@ -12,6 +12,7 @@ al-structures = { path = "../al-structures", features = [
     "noop_waker",
     "enums",
     "traits",
+    "collections",
     "race",
     "cancellation",
 ] }

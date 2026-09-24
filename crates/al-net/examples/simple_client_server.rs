@@ -917,8 +917,7 @@ impl NetworkHandle {
                 tokio::spawn(f);
             },
             al_transport::splice::panic_on_error,
-        )
-        .await;
+        );
 
         let in_handle = splice_async(
             net_out.clone(),
@@ -933,8 +932,7 @@ impl NetworkHandle {
                 tokio::spawn(f);
             },
             al_transport::splice::panic_on_error,
-        )
-        .await;
+        );
 
         let task_events = events.clone();
         let task_token = token.clone();
