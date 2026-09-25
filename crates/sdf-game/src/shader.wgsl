@@ -1,11 +1,9 @@
 struct Globals {
     resolution: vec2<f32>,
     camera_pos: vec2<f32>,
+    cursor_world: vec2<f32>,
     view_size: f32,
-    // Pad to 32 bytes
     _pad0: f32,
-    _pad1: f32,
-    _pad2: f32,
 };
 
 struct PlayerData {
@@ -13,14 +11,23 @@ struct PlayerData {
     _pad0: u32,
     _pad1: u32,
     _pad2: u32,
-    // x,y = center in world space, z = radius, w = 1.0 if local, else 0.0
-    players: array<vec4<f32>, 64>,
+    // 64 players * 2 vec4s each
+    players: array<vec4<f32>, 128>,
+};
+
+struct ProjectileData {
+    count: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+    projectiles: array<vec4<f32>, 64>,
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
 @group(0) @binding(1) var<uniform> player_data: PlayerData;
 @group(0) @binding(2) var map_texture: texture_2d<f32>;
 @group(0) @binding(3) var map_sampler: sampler;
+@group(0) @binding(4) var<uniform> projectile_data: ProjectileData;
 
 const WORLD_MIN: f32 = -1.0;
 const WORLD_MAX: f32 = 1.0;
@@ -56,13 +63,21 @@ fn fs_main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
 
     // ----- Player Dist -----
     var min_player_dist: f32 = 1e10;
-    var is_local: f32 = 0.0;
+    var is_local: f32 = 0.;
+    var player_hp: f32 = 1.;
     for (var i: u32 = 0u; i < player_data.count; i = i + 1u) {
-        let pd = player_data.players[i];
-        let d = length(world_p - pd.xy) - pd.z;
+        let base = i * 2u;
+        let da = player_data.players[base];
+        let db = player_data.players[base + 1u];
+        // da = [x, y, radius, is_local]
+        // db = [hp_norm, alive, 0, 0]
+        if db.y <= 0.5 { continue; }
+
+        let d = length(world_p - da.xy) - da.z;
         if d < min_player_dist {
             min_player_dist = d;
-            is_local = pd.w;
+            is_local = da.w;
+            player_hp = db.x;
         }
     }
 
@@ -80,10 +95,38 @@ fn fs_main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     // ----- Player drawn on top -----
     let remote_color = vec3<f32>(0.95, 0.55, 0.20);
     let local_color = vec3<f32>(0.30, 0.80, 0.50);
-    let player_color = mix(remote_color, local_color, is_local);
+    let base_player_color = mix(remote_color, local_color, is_local);
+    let hurt_tint = vec3<f32>(0.9, 0.15, 0.15);
+    let player_color = mix(base_player_color, hurt_tint, (1. - player_hp) * 0.7);
 
     let player_t = smoothstep(-0.003, 0.003, min_player_dist);
-    let color = mix(player_color, bg, player_t);
+    let color_0 = mix(player_color, bg, player_t);
 
-    return vec4<f32>(color, 1.0);
+    // ----- Projectiles -----
+    var min_proj_dist: f32 = 1e10;
+    var proj_is_local: f32 = 0.;
+    for (var i: u32 = 0u; i < projectile_data.count; i = i + 1u) {
+        let pd = projectile_data.projectiles[i];
+        let d = length(world_p - pd.xy) - pd.z;
+        if d < min_proj_dist {
+            min_proj_dist = d;
+            proj_is_local = pd.w;
+        }
+    }
+    let proj_color = mix(
+        vec3<f32>(1., 0.85, 0.25),
+        vec3<f32>(1., 0.95, 0.55),
+        proj_is_local
+    );
+    let proj_t = smoothstep(-0.0015, 0.0015, min_proj_dist);
+    let color_1 = mix(proj_color, color_0, proj_t);
+
+    let cpos = world_p - globals.cursor_world;
+    let d_ring = abs(length(cpos) - 0.012) - 0.0018;
+    let d_dot = length(cpos) - 0.0025;
+    let d_cross = min(d_ring, d_dot);
+    let cross_alpha = 1. - smoothstep(-0.0008, 0.0008, d_cross);
+    let color_2 = mix(color_1, vec3<f32>(0.95, 0.95, 0.98), cross_alpha);
+
+    return vec4<f32>(color_2, 1.0);
 }

@@ -24,6 +24,11 @@ use tokio::{
     task::JoinSet,
 };
 
+use crate::game::{
+    ScoreEntry, Scoreboard, DAMAGE_PER_HIT, MAX_HP, PROJECTILE_LIFETIME, PROJECTILE_RADIUS,
+    PROJECTILE_SPEED,
+};
+
 pub type Payload = Vec<u8>;
 pub type TaggedBytes = (ConnId, Payload);
 pub type TaggedMsg = (ConnId, DynMessage);
@@ -48,6 +53,7 @@ pub enum NetEvent {
     NoOp,
     Connected(ConnId),
     Disconnected(ConnId),
+    Welcome(ConnId),
 }
 
 #[al_events::event]
@@ -79,19 +85,71 @@ impl RemotePlayer {
     }
 }
 
+pub struct ServerPlayer {
+    pub pos: [f32; 2],
+    pub radius: f32,
+    pub hp: f32,
+    pub respawn_at: Option<std::time::Instant>,
+    pub kills: u32,
+    pub deaths: u32,
+}
+
+pub struct ServerProjectile {
+    pub pos: [f32; 2],
+    pub vel: [f32; 2],
+    pub life: f32,
+    pub owner: ConnId,
+}
+
+pub struct Hit {
+    target: ConnId,
+    damage: f32,
+}
+impl Hit {
+    pub fn new(target: ConnId, damage: f32) -> Self {
+        Self { target, damage }
+    }
+    pub fn target(&self) -> ConnId {
+        self.target
+    }
+    pub fn damage(&self) -> f32 {
+        self.damage
+    }
+}
+
 pub type NetStateRef = Arc<RwLock<NetState>>;
 pub struct NetState {
     /// The single connection this app owns (client mode only).
     local_conn: Option<ConnId>,
+    /// Server assigned ConnId
+    server_id: Option<ConnId>,
     players: HashMap<ConnId, RemotePlayer>,
+    pending_projectiles: Vec<(ConnId, [f32; 2], [f32; 2])>,
+    pending_health: Vec<(ConnId, f32)>,
+    pending_scoreboard: Option<Scoreboard>,
+    server_players: HashMap<ConnId, ServerPlayer>,
+    server_projectiles: Vec<ServerProjectile>,
 }
 
 impl NetState {
     pub fn new() -> Self {
         Self {
             local_conn: None,
+            server_id: None,
             players: HashMap::new(),
+            pending_projectiles: Vec::new(),
+            pending_health: Vec::new(),
+            pending_scoreboard: None,
+            server_players: HashMap::new(),
+            server_projectiles: Vec::new(),
         }
+    }
+
+    pub fn server_id(&self) -> Option<ConnId> {
+        self.server_id
+    }
+    pub fn set_server_id(&mut self, id: Option<ConnId>) {
+        self.server_id = id
     }
 
     pub fn local_conn(&self) -> Option<ConnId> {
@@ -112,6 +170,144 @@ impl NetState {
 
     pub fn remove_player(&mut self, conn_id: ConnId) {
         self.players.remove(&conn_id);
+    }
+
+    pub fn queue_projectile(&mut self, owner: ConnId, pos: [f32; 2], dir: [f32; 2]) {
+        self.pending_projectiles.push((owner, pos, dir));
+    }
+
+    pub fn drain_projectiles(&mut self) -> Vec<(ConnId, [f32; 2], [f32; 2])> {
+        std::mem::take(&mut self.pending_projectiles)
+    }
+
+    pub fn queue_health(&mut self, conn_id: ConnId, hp: f32) {
+        self.pending_health.push((conn_id, hp));
+    }
+
+    pub fn drain_health(&mut self) -> Vec<(ConnId, f32)> {
+        std::mem::take(&mut self.pending_health)
+    }
+
+    pub fn set_scoreboard(&mut self, scoreboard: Scoreboard) {
+        self.pending_scoreboard = Some(scoreboard);
+    }
+
+    pub fn take_scoreboard(&mut self) -> Option<Scoreboard> {
+        self.pending_scoreboard.take()
+    }
+
+    pub fn server_player_mut(&mut self, id: ConnId) -> Option<&mut ServerPlayer> {
+        self.server_players.get_mut(&id)
+    }
+
+    pub fn update_server_player(&mut self, id: ConnId, pos: [f32; 2], radius: f32) {
+        if let Some(p) = self.server_players.get_mut(&id) {
+            p.pos = pos;
+            p.radius = radius;
+        }
+    }
+
+    pub fn ensure_server_player(&mut self, id: ConnId) -> &mut ServerPlayer {
+        self.server_players
+            .entry(id)
+            .or_insert_with(|| ServerPlayer {
+                pos: [0., 0.],
+                radius: 0.05,
+                hp: crate::game::MAX_HP,
+                respawn_at: None,
+                kills: 0,
+                deaths: 0,
+            })
+    }
+
+    pub fn remove_server_player(&mut self, id: ConnId) {
+        self.server_players.remove(&id);
+    }
+
+    pub fn server_scoreboard(&self) -> Scoreboard {
+        Scoreboard::new(
+            self.server_players
+                .iter()
+                .map(|(id, sp)| ScoreEntry {
+                    conn_id: *id,
+                    kills: sp.kills,
+                    deaths: sp.deaths,
+                })
+                .collect(),
+        )
+    }
+
+    pub fn tick_respawns(&mut self) -> Vec<ConnId> {
+        let now = std::time::Instant::now();
+        let mut ready = Vec::new();
+        for (id, sp) in self.server_players.iter_mut() {
+            if let Some(t) = sp.respawn_at {
+                if now >= t {
+                    sp.hp = MAX_HP;
+                    sp.respawn_at = None;
+                    ready.push(*id);
+                }
+            }
+        }
+        ready
+    }
+
+    pub fn queue_server_projectile(&mut self, owner: ConnId, pos: [f32; 2], dir: [f32; 2]) {
+        self.server_projectiles.push(ServerProjectile {
+            pos,
+            vel: [dir[0] * PROJECTILE_SPEED, dir[1] * PROJECTILE_SPEED],
+            life: PROJECTILE_LIFETIME,
+            owner,
+        });
+    }
+
+    pub fn tick_server_projectiles(&mut self, map: impl Fn(f32, f32) -> f32, dt: f32) -> Vec<Hit> {
+        let mut hits = Vec::new();
+        let mut alive = Vec::with_capacity(self.server_projectiles.len());
+
+        for mut proj in std::mem::take(&mut self.server_projectiles) {
+            proj.life -= dt;
+            if proj.life <= 0. {
+                continue;
+            }
+
+            let step_dist = (proj.vel[0] * proj.vel[0] + proj.vel[1] * proj.vel[1]).sqrt() * dt;
+            let steps = (step_dist / (PROJECTILE_RADIUS * 0.9)).ceil().max(1.) as u32;
+            let step_dt = dt / steps as f32;
+
+            let mut died = false;
+            'outer: for _ in 0..steps {
+                proj.pos[0] += proj.vel[0] * step_dt;
+                proj.pos[1] += proj.vel[1] * step_dt;
+
+                // Map hit
+                if map(proj.pos[0], proj.pos[1]) < PROJECTILE_RADIUS {
+                    died = true;
+                    break;
+                }
+
+                // Player hit
+                for (id, p) in self.server_players.iter() {
+                    if *id == proj.owner || p.hp <= 0. {
+                        continue;
+                    }
+
+                    let dx = proj.pos[0] - p.pos[0];
+                    let dy = proj.pos[1] - p.pos[1];
+                    let r = PROJECTILE_RADIUS + p.radius;
+                    if dx * dx + dy * dy < r * r {
+                        hits.push(Hit::new(*id, DAMAGE_PER_HIT));
+                        died = true;
+                        break 'outer;
+                    }
+                }
+            }
+            if !died {
+                alive.push(proj);
+            }
+        }
+        self.server_projectiles = alive;
+        hits
     }
 }
 
@@ -137,7 +333,7 @@ impl NetContext {
 
 pub struct NetworkState {
     handle: Arc<NetworkHandle>,
-    task: std::thread::JoinHandle<()>,
+    _task: std::thread::JoinHandle<()>,
     state: NetStateRef,
 }
 
@@ -173,7 +369,7 @@ impl NetworkState {
 
         Self {
             handle: Arc::new(handle),
-            task: net_task,
+            _task: net_task,
             state,
         }
     }
@@ -198,7 +394,7 @@ impl NetworkState {
 
         Self {
             handle,
-            task: net_task,
+            _task: net_task,
             state,
         }
     }
@@ -213,6 +409,10 @@ impl NetworkState {
 
     pub async fn local_conn_id(&self) -> Option<ConnId> {
         self.state.read().await.local_conn.clone()
+    }
+
+    pub async fn server_id(&self) -> Option<ConnId> {
+        self.state.read().await.server_id.clone()
     }
 
     pub async fn update(
@@ -240,7 +440,7 @@ pub struct NetworkHandle {
     app_out: Arc<BoundaryQueue<TaggedMsg>>,
     app_in: Arc<BoundaryQueue<TaggedMsg>>,
     _splices: Vec<al_transport::splice::SpliceHandle>,
-    token: CancellationToken,
+    _token: CancellationToken,
     mode: AtomicBool,
 }
 
@@ -292,7 +492,7 @@ impl NetworkHandle {
                 app_out,
                 app_in,
                 _splices: vec![out_handle, in_handle],
-                token,
+                _token: token,
                 mode: AtomicBool::new(false),
             },
             NetworkTask::new(net_in, net_out, task_events, task_token),

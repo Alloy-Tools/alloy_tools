@@ -1,6 +1,6 @@
 use crate::{
     block_on,
-    game::{GameState, PlayerUpdate},
+    game::{GameState, HealthUpdate, PlayerUpdate, ProjectileSpawn, Scoreboard},
     net::{Dispatcher, NetEvent, NetworkState},
     render::RenderState,
 };
@@ -45,6 +45,42 @@ impl App {
             .await
             .unwrap();
 
+        // Projectile Spawning
+        dispatcher
+            .register_event(|_, state, spawn: ProjectileSpawn| {
+                Box::pin(async move {
+                    state
+                        .write()
+                        .await
+                        .queue_projectile(spawn.owner(), spawn.pos(), spawn.dir());
+                })
+            })
+            .await
+            .unwrap();
+
+        // Health Updates
+        dispatcher
+            .register_event(|_, state, update: HealthUpdate| {
+                Box::pin(async move {
+                    state
+                        .write()
+                        .await
+                        .queue_health(update.conn_id(), update.hp());
+                })
+            })
+            .await
+            .unwrap();
+
+        // Scoreboard Updates
+        dispatcher
+            .register_event(|_, state, sb: Scoreboard| {
+                Box::pin(async move {
+                    state.write().await.set_scoreboard(sb);
+                })
+            })
+            .await
+            .unwrap();
+
         // Connection lifecycle
         dispatcher
             .register_event(|_, state, evt: NetEvent| {
@@ -52,13 +88,8 @@ impl App {
                     match evt {
                         NetEvent::NoOp => {}
                         NetEvent::Connected(id) => state.write().await.set_local_conn(Some(id)),
-                        NetEvent::Disconnected(id) => {
-                            let mut s = state.write().await;
-                            if s.local_conn() == Some(id) {
-                                s.set_local_conn(None);
-                            }
-                            s.remove_player(id);
-                        }
+                        NetEvent::Disconnected(id) => state.write().await.remove_player(id),
+                        NetEvent::Welcome(id) => state.write().await.set_server_id(Some(id)),
                     }
                 })
             })
@@ -116,27 +147,45 @@ impl ApplicationHandler for App {
             }
             WindowEvent::RedrawRequested => {
                 block_on(self.game.net_state.update(&self.dispatcher)).unwrap();
-                self.game.update();
+                self.game.update(crate::map::map_sdf);
                 self.game.maybe_broadcast_update();
                 if let Some(state) = &self.state {
-                    state.render(&self.game);
+                    state.render(&mut self.game);
+                }
+                if let Some(window) = &self.window {
+                    window.set_title(&format_scorboard(TITLE, &self.game));
                 }
             }
+
             WindowEvent::KeyboardInput { event, .. } => {
                 let pressed = event.state == winit::event::ElementState::Pressed;
+
+                if let winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Space) =
+                    event.physical_key
+                {
+                    self.game.keys.space = pressed;
+                }
+
                 if let winit::keyboard::Key::Character(s) = &event.logical_key {
-                    let s = s.as_str().to_lowercase();
-                    if s == "w" {
-                        self.game.keys.up = pressed;
-                    } else if s == "s" {
-                        self.game.keys.down = pressed;
-                    } else if s == "a" {
-                        self.game.keys.left = pressed;
-                    } else if s == "d" {
-                        self.game.keys.right = pressed;
+                    match s.to_lowercase().as_str() {
+                        "w" => self.game.keys.up = pressed,
+                        "s" => self.game.keys.down = pressed,
+                        "a" => self.game.keys.left = pressed,
+                        "d" => self.game.keys.right = pressed,
+                        _ => {}
                     }
                 }
             }
+
+            WindowEvent::CursorMoved { position, .. } => {
+                self.game.cursor_px = [position.x as f32, position.y as f32];
+            }
+            WindowEvent::Focused(focused) => {
+                if let Some(window) = &self.window {
+                    window.set_cursor_visible(!focused);
+                }
+            }
+
             _ => {}
         }
     }
@@ -146,4 +195,18 @@ impl ApplicationHandler for App {
             window.request_redraw();
         }
     }
+}
+
+fn format_scorboard(base: &str, game: &GameState) -> String {
+    if game.scoreboard.entries().is_empty() {
+        return base.to_string();
+    }
+    let mut parts = game
+        .scoreboard
+        .entries()
+        .iter()
+        .map(|e| format!("c{} {}/{}", e.conn_id, e.kills, e.deaths))
+        .collect::<Vec<_>>();
+    parts.sort();
+    format!("{} | {}", base, parts.join(" - "))
 }

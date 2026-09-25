@@ -8,8 +8,9 @@ use crate::map::MAP_RES;
 pub struct Globals {
     pub resolution: [f32; 2],
     pub camera_pos: [f32; 2],
+    pub cursor_world: [f32; 2],
     pub view_size: f32,
-    pub _pad: [f32; 3],
+    pub _pad: f32,
 }
 
 pub struct RenderState {
@@ -20,6 +21,7 @@ pub struct RenderState {
     pub pipeline: wgpu::RenderPipeline,
     pub globals_buffer: wgpu::Buffer,
     pub player_buffer: wgpu::Buffer,
+    pub projectile_buffer: wgpu::Buffer,
     // Kept alive so the bind group's texture resource isn't dropped.
     #[allow(dead_code)]
     map_view: wgpu::TextureView,
@@ -144,6 +146,13 @@ impl RenderState {
             mapped_at_creation: false,
         });
 
+        let projectile_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Projectile Buffer"),
+            size: std::mem::size_of::<crate::game::ProjectileData>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         // ----- Bind buffer group layout -----
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Main Bind Group Layout"),
@@ -184,6 +193,16 @@ impl RenderState {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -206,6 +225,10 @@ impl RenderState {
                 wgpu::BindGroupEntry {
                     binding: 3,
                     resource: wgpu::BindingResource::Sampler(&map_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: projectile_buffer.as_entire_binding(),
                 },
             ],
         });
@@ -259,12 +282,13 @@ impl RenderState {
             pipeline,
             globals_buffer,
             player_buffer,
+            projectile_buffer,
             map_view,
             bind_group,
         }
     }
 
-    pub fn render(&self, game: &crate::game::GameState) {
+    pub fn render(&self, game: &mut crate::game::GameState) {
         let surface_texture = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(tex)
             | wgpu::CurrentSurfaceTexture::Suboptimal(tex) => tex,
@@ -275,12 +299,16 @@ impl RenderState {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
+        let resolution = [self.config.width as f32, self.config.height as f32];
+        game.set_resolution(resolution);
+
         // Update globals for this frame
         let globals = Globals {
-            resolution: [self.config.width as f32, self.config.height as f32],
+            resolution,
             camera_pos: game.camera.pos,
+            cursor_world: game.cursor_world,
             view_size: game.camera.view_size,
-            _pad: [0.; 3],
+            _pad: 0.,
         };
         self.queue
             .write_buffer(&self.globals_buffer, 0, bytemuck::bytes_of(&globals));
@@ -290,6 +318,13 @@ impl RenderState {
             &self.player_buffer,
             0,
             bytemuck::bytes_of(&crate::game::PlayerData::new(game)),
+        );
+
+        // Update projectile buffer
+        self.queue.write_buffer(
+            &self.projectile_buffer,
+            0,
+            bytemuck::bytes_of(&crate::game::ProjectileData::new(game)),
         );
 
         let mut encoder = self
