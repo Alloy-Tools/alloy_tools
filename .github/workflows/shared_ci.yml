@@ -13,18 +13,18 @@ env:
 
 jobs:
   list-crates:
-  runs-on: ubuntu-latest
-  outputs:
-    crates: ${{ steps.list.outputs.crates }}
-  steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+    runs-on: ubuntu-latest
+    outputs:
+      crates: ${{ steps.list.outputs.crates }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: List crates
-      id: list
-      run: |
-        CRATES=$(cargo metadata --format-version 1 --no-deps | jq -c '[.packages[].name]')
-        echo "crates=$CRATES" >> "$GITHUB_OUTPUT"
+      - name: List crates
+        id: list
+        run: |
+          CRATES=$(cargo metadata --format-version 1 --no-deps | jq -c '[.packages[].name]')
+          echo "crates=$CRATES" >> "$GITHUB_OUTPUT"
   
   test-native:
     name: 'Native ${{ matrix.platform.os }} - ${{ matrix.crate }} - ${{ matrix.platform.target }}'
@@ -50,7 +50,7 @@ jobs:
     - name: Add target
       run: rustup target add ${{ matrix.platform.target }}
 
-    - name: Install cargp-hack
+    - name: Install cargo-hack
       uses: taiki-e/install-action@v2
       with:
         tool: cargo-hack
