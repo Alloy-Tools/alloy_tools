@@ -12,18 +12,33 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  list-crates:
+  runs-on: ubuntu-latest
+  outputs:
+    crates: ${{ steps.list.outputs.crates }}
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: List crates
+      id: list
+      run: |
+        CRATES=$(cargo metadata --format-version 1 --no-deps | jq -c '[.packages[].name]')
+        echo "crates=$CRATES" >> "$GITHUB_OUTPUT"
+  
   test-native:
-    name: 'Native ${{ matrix.platform.os }} Test - Target: ${{ matrix.platform.target }} - Features: ${{ matrix.features }}'
+    name: 'Native ${{ matrix.platform.os }} - ${{ matrix.crate }} - ${{ matrix.platform.target }}'
+    needs: list-crates
     continue-on-error: true
     runs-on: ${{ matrix.platform.os }}
     strategy:
+      fail-fast: false
       matrix:
         platform:
           - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
           - { os: windows-latest, target: x86_64-pc-windows-msvc }
           - { os: macos-latest, target: x86_64-apple-darwin }
-        features: &feature-matrix
-          [ "none", "base", "transport-base", "base, transport-base", "base, transport-base, serde", "base, transport-base, json", "base, transport-base, binary", "base, transport-base, json, binary", "base, transport-base, test-utils", "base, transport-base, test-tasks" ]
+        crate: ${{ fromJSON(needs.list-crates.outputs.crates) }}
 
     steps:
     - name: Checkout code
@@ -32,55 +47,16 @@ jobs:
     - name: Update rustup
       run: rustup update
       
-    - name: Update cargo
-      run: cargo update
-      
     - name: Add target
       run: rustup target add ${{ matrix.platform.target }}
 
+    - name: Install cargp-hack
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-hack
+
     - name: Cache files
       uses: Swatinem/rust-cache@v2
-      
-    - name: Build
-      run: cargo build --verbose
 
-    - name: Run tests
-      run: cargo test --features "${{ matrix.features }}" --no-default-features --target ${{ matrix.platform.target }}
-
-#  test-wasm:
-#    name: 'WASM ${{ matrix.os }} Test - Target: ${{ matrix.target }} - Features: ${{ matrix.features }}'
-#    continue-on-error: true
-#    runs-on: ${{ matrix.os }}
-#    strategy:
-#      matrix:
-#        os: [ ubuntu-latest ]
-#        target: [ wasm32-unknown-unknown ]
-#        browser: [--chrome, --firefox]
-#        features: *feature-matrix
-#
-#    steps:
-#    - name: Checkout code
-#      uses: actions/checkout@v4
-#
-#    - name: Update rustup
-#      run: rustup update
-#      
-#    - name: Update cargo
-#      run: cargo update
-#
-#    - name: Install wasm-pack
-#      uses: jetli/wasm-pack-action@v0.4.0
-#      with:
-#        version: 'latest'
-#      
-#    - name: Add WASM target
-#      run: rustup target add ${{ matrix.target }}
-#
-#    - name: Cache files
-#      uses: Swatinem/rust-cache@v2
-#      
-#    - name: Build
-#      run: cargo build --verbose
-#
-#    - name: Run tests
-#      run: wasm-pack test --headless ${{ matrix.browser }} --features ${{ matrix.features }} --no-default-features
+    - name: Test features
+      run: cargo hack test -p ${{ matrix.crate }} --feature-powerset --target ${{ matrix.platform.target }}

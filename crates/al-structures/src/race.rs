@@ -63,7 +63,7 @@ impl<'a, A, B> Future for Race<'a, A, B> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "noop_waker"))]
 mod tests {
     use super::*;
     use crate::noop_waker::noop_context;

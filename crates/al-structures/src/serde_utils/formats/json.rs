@@ -1,5 +1,7 @@
+#[cfg(feature = "collections")]
+use crate::serde_utils::serde_format::Format;
 use crate::serde_utils::serde_format::{
-    DeserializeReaderFormat, DeserializeSliceFormat, Format, SerializeFormat,
+    DeserializeReaderFormat, DeserializeSliceFormat, SerializeFormat,
 };
 use al_derive::TypeName;
 use std::error::Error;
@@ -18,6 +20,7 @@ crate::impl_erased_deserializer!(
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, TypeName)]
 pub struct JsonFormat;
 
+#[cfg(feature = "collections")]
 impl<T> From<JsonFormat> for Format<T> {
     fn from(value: JsonFormat) -> Self {
         Self::Serde(Box::new(value))

@@ -8,10 +8,7 @@ pub type Generation = u64;
 /// the index and the generation match the current state.
 /// This prevents use‑after‑free bugs even when indices are
 /// recycled.
-#[cfg_attr(
-    any(test, feature = "serde"),
-    derive(serde::Serialize, serde::Deserialize)
-)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GenerationKey {
     index: usize,
@@ -423,7 +420,7 @@ impl<T> From<StableVec<T>> for Vec<T> {
 }
 
 // Custom checked deserialization that validates invariants.
-#[cfg(any(test, feature = "serde"))]
+#[cfg(feature = "serde")]
 impl<'de, T: serde::Deserialize<'de>> serde::Deserialize<'de> for StableVec<T> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -517,12 +514,9 @@ impl std::fmt::Display for StableVecError {
 impl std::error::Error for StableVecError {}
 
 /// Unchecked StableVec creation for serde.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
-    any(test, feature = "serde"),
-    derive(serde::Serialize, serde::Deserialize)
-)]
-#[cfg_attr(
-    any(test, feature = "serde"),
+    feature = "serde",
     serde(bound(
         serialize = "T: serde::Serialize",
         deserialize = "T: serde::Deserialize<'de>"
