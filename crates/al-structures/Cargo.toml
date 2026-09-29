@@ -23,17 +23,6 @@ paste = { version = "1.0.15", optional = true }
 
 [features]
 default = []
-all = [
-    "noop_waker",
-    "enums",
-    "traits",
-    "race",
-    "cancellation",
-    "collections",
-    "serde_utils",
-    "json",
-    "binary",
-]
 paste = ["dep:paste"]
 noop_waker = []
 enums = []

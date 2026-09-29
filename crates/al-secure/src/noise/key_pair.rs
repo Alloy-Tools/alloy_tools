@@ -1,6 +1,5 @@
 use crate::noise::{NoiseError, DHLEN};
 use al_vault::{FixedSecret, SecureAccess};
-use zeroize::Zeroize;
 
 /// Holds the private key bytes in protected memory
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -11,19 +10,19 @@ impl KeyPair {
     pub fn new() -> Result<Self, NoiseError> {
         let private = FixedSecret::random(Self::KEY_PAIR_TAG);
         let public = private.with(|private| {
-            let mut secret = x25519_dalek::StaticSecret::from(*private);
+            // secret is `zeroized` on drop when the closure returns
+            let secret = x25519_dalek::StaticSecret::from(*private);
             let public = PublicKey::new(&secret);
-            secret.zeroize();
             public
         })?;
         Ok(Self(private, public))
     }
 
     pub fn from_bytes(private: [u8; DHLEN]) -> Self {
-        let mut secret = x25519_dalek::StaticSecret::from(private);
+        // secret is `zeroized` on drop when this function returns
+        let secret = x25519_dalek::StaticSecret::from(private);
         let private = FixedSecret::new(secret.to_bytes(), Self::KEY_PAIR_TAG);
         let public = PublicKey::new(&secret);
-        secret.zeroize();
         Self(private, public)
     }
 
@@ -53,7 +52,8 @@ impl PublicKey {
 
     pub fn from_bytes(public: &[u8]) -> Result<Self, NoiseError> {
         Ok(Self(x25519_dalek::PublicKey::from(
-            <[u8; DHLEN]>::try_from(public).map_err(|e| NoiseError::InvalidKeyLength(public.len(), e.to_string()))?,
+            <[u8; DHLEN]>::try_from(public)
+                .map_err(|e| NoiseError::InvalidKeyLength(public.len(), e.to_string()))?,
         )))
     }
 
