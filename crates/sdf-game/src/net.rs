@@ -102,12 +102,16 @@ pub struct ServerProjectile {
 }
 
 pub struct Hit {
+    owner: ConnId,
     target: ConnId,
     damage: f32,
 }
 impl Hit {
-    pub fn new(target: ConnId, damage: f32) -> Self {
-        Self { target, damage }
+    pub fn new(owner: ConnId, target: ConnId, damage: f32) -> Self {
+        Self { owner, target, damage }
+    }
+    pub fn owner(&self) -> ConnId {
+        self.owner
     }
     pub fn target(&self) -> ConnId {
         self.target
@@ -145,9 +149,6 @@ impl NetState {
         }
     }
 
-    pub fn server_id(&self) -> Option<ConnId> {
-        self.server_id
-    }
     pub fn set_server_id(&mut self, id: Option<ConnId>) {
         self.server_id = id
     }
@@ -296,7 +297,7 @@ impl NetState {
                     let dy = proj.pos[1] - p.pos[1];
                     let r = PROJECTILE_RADIUS + p.radius;
                     if dx * dx + dy * dy < r * r {
-                        hits.push(Hit::new(*id, DAMAGE_PER_HIT));
+                        hits.push(Hit::new(proj.owner, *id, DAMAGE_PER_HIT));
                         died = true;
                         break 'outer;
                     }

@@ -1,12 +1,10 @@
 use crate::{
+    app::App,
     game::{HealthUpdate, PlayerUpdate, ProjectileSpawn, Scoreboard, FIXED_DT, RESPAWN_DELAY},
     net::{Broadcast, NetEvent},
 };
 use al_events::{register_event, EventHelpers, FormatId};
-use std::{
-    io::{self, Write},
-    time::Instant,
-};
+use std::time::Instant;
 
 mod app;
 mod game;
@@ -26,6 +24,12 @@ enum Mode {
 }
 
 fn main() {
+    std::panic::set_hook(Box::new(|info| {
+        eprintln!("{info}");
+        eprintln!("\nPress Enter to exit...");
+        let _ = std::io::stdin().read_line(&mut String::new());
+    }));
+
     register_event!(NetEvent);
     register_event!(Broadcast);
     register_event!(PlayerUpdate);
@@ -35,18 +39,21 @@ fn main() {
     let f_id =
         al_events::register_format!(al_structures::serde_utils::formats::JsonFormat).unwrap();
 
-    let mode = parse_mode_from_str(
-        &std::env::args()
-            .nth(1)
-            .map(|s| s.to_lowercase())
-            .unwrap_or_default(),
-    )
-    .unwrap_or_else(prompt_for_mode);
+    let mut args = std::env::args();
+    let mode = args.nth(1).and_then(|s| parse_mode_from_str(&s));
     match mode {
-        Mode::Server => run_server(f_id),
-        Mode::Client => run_client(f_id),
-        Mode::Host => run_host(f_id),
-    }
+        Some(m) => match m {
+            Mode::Server => run_server(f_id),
+            Mode::Client => run_client(
+                args.next()
+                    .and_then(|s| parse_addr_from_str(s))
+                    .unwrap_or(CLIENT_ADDR.into()),
+                f_id,
+            ),
+            Mode::Host => run_host(f_id),
+        },
+        None => App::new_menu(f_id).run().unwrap(),
+    };
 }
 
 fn block_on<F: std::future::Future>(future: F) -> F::Output {
@@ -62,22 +69,6 @@ fn parse_mode_from_str(str: &str) -> Option<Mode> {
     }
 }
 
-fn prompt_for_mode() -> Mode {
-    loop {
-        println!("Run as [s]erver, [c]lient, or [h]ost? ");
-        io::stdout().flush().ok();
-        let mut s = String::new();
-        if io::stdin().read_line(&mut s).is_err() {
-            eprintln!("stdin read failed, defaulting to client");
-            return Mode::Client;
-        }
-        match parse_mode_from_str(&s.trim().to_lowercase()) {
-            Some(mode) => return mode,
-            None => println!("Please enter 's', 'c', or 'h'."),
-        }
-    }
-}
-
 fn parse_addr_from_str(str: String) -> Option<String> {
     if str.is_empty() {
         return Some(CLIENT_ADDR.to_string());
@@ -90,27 +81,11 @@ fn parse_addr_from_str(str: String) -> Option<String> {
     }
 }
 
-fn prompt_for_addr() -> String {
-    loop {
-        println!("Enter address to connect to [default is `127.0.0.1:7878`]: ");
-        io::stdout().flush().ok();
-        let mut s = String::new();
-        if io::stdin().read_line(&mut s).is_err() {
-            eprintln!("stdin read failed, defaulting to CLIENT_ADDR");
-            return CLIENT_ADDR.to_string();
-        }
-        match parse_addr_from_str(s.trim().to_lowercase()) {
-            Some(addr) => return addr,
-            None => println!("Please enter address to connect to [empty for `127.0.0.1:7878`]: "),
-        }
-    }
-}
-
-fn run_client(format_id: FormatId) {
-    let addr = prompt_for_addr();
-    println!("Connecting to server at '{addr}'");
-    block_on(app::App::new(
-        net::NetworkState::new_client(format_id, addr),
+fn run_client(addr: String, format_id: FormatId) {
+    println!("Connecting to server at '{addr}'.");
+    block_on(App::new_client(
+        format_id,
+        addr,
         std::time::Duration::from_millis(50),
         Default::default(),
         Default::default(),
@@ -120,48 +95,19 @@ fn run_client(format_id: FormatId) {
 }
 
 fn run_host(format_id: FormatId) {
-    use std::process::{Command, Stdio};
-
-    let exe = std::env::current_exe().expect("current exe");
-    let mut child = Command::new(exe)
-        .arg("server")
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .expect("Failed to spawn server subprocess");
-
-    // wait for server to start accepting connections
-    let addr = CLIENT_ADDR.to_string();
-    let mut connected = false;
-    for _ in 0..30 {
-        if std::net::TcpStream::connect(&addr).is_ok() {
-            connected = true;
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-    if !connected {
-        eprintln!("Server subprocess didn't start listening in time.");
-        let _ = child.kill();
-        std::process::exit(1);
-    }
-
-    let result = block_on(app::App::new(
-        net::NetworkState::new_client(format_id, addr),
+    println!("Starting server at '{SERVER_ADDR}' and joining.");
+    block_on(App::new_host(
+        format_id,
         std::time::Duration::from_millis(50),
         Default::default(),
         Default::default(),
     ))
-    .run();
-
-    // Parent exit: kill the child so a stray process isn't left.
-    let _ = child.kill();
-    let _ = child.wait();
-    result.unwrap();
+    .run()
+    .unwrap()
 }
 
 fn run_server(format_id: FormatId) {
-    println!("Starting server on {SERVER_ADDR}");
+    println!("Starting server at '{SERVER_ADDR}'.");
     let net_state = net::NetworkState::new_server(format_id, SERVER_ADDR.to_string());
     let dispatcher = net::Dispatcher::new(
         net_state.state().clone(),
@@ -212,13 +158,23 @@ fn run_server(format_id: FormatId) {
                     }
                 }
                 NetEvent::Disconnected(id) => {
-                    let mut s = state.write().await;
-                    if s.local_conn() == Some(id) {
-                        s.set_local_conn(None);
-                    }
-                    s.remove_player(id);
-                    s.remove_server_player(id);
+                    let scoreboard = {
+                        let mut s = state.write().await;
+                        s.remove_player(id);
+                        s.remove_server_player(id);
+                        s.server_scoreboard()
+                    };
                     println!("Client {id} disconnected");
+
+                    if let Err(e) = ctx
+                        .net()
+                        .broadcast(Some(vec![id]), NetEvent::Disconnected(id).to_msg())
+                    {
+                        eprintln!("Server `Disconnect` broadcast failed: {e}");
+                    }
+                    if let Err(e) = ctx.net().broadcast(None, scoreboard.to_msg()) {
+                        eprintln!("Server `Scoreboard` broadcast after disconnect failed: {e}");
+                    }
                 }
             }
         })
@@ -244,20 +200,26 @@ fn run_server(format_id: FormatId) {
             for hit in hits {
                 let (new_hp, scoreboard) = {
                     let mut s = block_on(net_state.state().write());
-                    let Some(target) = s.server_player_mut(hit.target()) else {
-                        continue;
+                    let (hp, was_alive) = {
+                        let Some(target) = s.server_player_mut(hit.target()) else {
+                            continue;
+                        };
+                        let was_alive = target.hp > 0.;
+                        target.hp = (target.hp - hit.damage()).max(0.);
+                        if target.hp <= 0. {
+                            target.deaths += 1;
+                            target.respawn_at = Some(Instant::now() + RESPAWN_DELAY);
+                        }
+                        (target.hp, was_alive)
                     };
-                    target.hp = (target.hp - hit.damage()).max(0.);
-                    if target.hp <= 0. {
-                        target.deaths += 1;
-                        target.respawn_at = Some(Instant::now() + RESPAWN_DELAY);
-                        //TODO: credit killer?
-                        /*if let Some(sh) = state.write().await.server_player_mut(shooter) {
+                    if was_alive && hp <= 0. {
+                        if let Some(sh) = s.server_player_mut(hit.owner()) {
                             sh.kills += 1;
-                        }*/
+                        }
                     }
-                    (target.hp, s.server_scoreboard())
+                    (hp, s.server_scoreboard())
                 };
+                //REVIEW: collect new hp's, send all updated hp's once after loop
                 if let Err(e) = net_state
                     .handle()
                     .broadcast(None, HealthUpdate::new(hit.target(), new_hp).to_msg())

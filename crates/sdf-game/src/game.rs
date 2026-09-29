@@ -227,7 +227,7 @@ pub struct ProjectileData {
 impl ProjectileData {
     pub fn new(game: &GameState) -> Self {
         let mut data = Self::zeroed();
-        let count = game.projectiles.len().max(MAX_PLAYERS);
+        let count = game.projectiles.len().min(MAX_PLAYERS);
         data.count = count as u32;
         for (i, p) in game.projectiles.iter().take(MAX_PROJECTILES).enumerate() {
             let is_local = if p.owner.is_none() { 1. } else { 0. };
@@ -432,7 +432,7 @@ impl GameState {
 
                 // Player hit
                 for (i, p) in self.players.iter().enumerate() {
-                    if !p.alive || i == self.local_index {
+                    if !p.alive || (proj.owner.is_none() && i == self.local_index) {
                         continue;
                     }
                     let dx = proj.pos[0] - p.pos[0];
@@ -460,7 +460,7 @@ impl GameState {
         let mut push_y = 0.0f32;
 
         for (i, other) in self.players.iter().enumerate() {
-            if i == local_idx {
+            if !other.alive || i == local_idx {
                 continue;
             }
 
@@ -585,7 +585,7 @@ impl GameState {
                 p.alive = hp > 0.;
             }
         }
-        if self.local_conn_id == Some(conn_id) && was_alive && hp <= 0. {
+        if self.server_id == Some(conn_id) && was_alive && hp <= 0. {
             // local just died
         }
     }
