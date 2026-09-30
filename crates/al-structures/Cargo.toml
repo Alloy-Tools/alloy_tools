@@ -1,0 +1,39 @@
+[package]
+name = "al-structures"
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+edition.workspace = true
+
+[package.metadata.docs.rs]
+rustdoc-args = ["--cfg", "docsrs"]
+
+[lib]
+doctest = false
+
+[dependencies]
+arc-swap = { version = "1.9.1", optional = true }
+serde = { version = "1.0.228", features = ["derive"], optional = true }
+erased-serde = { version = "0.4.10", optional = true }
+serde_json = { version = "1.0.15", optional = true }
+al-derive = { path = "../al-derive", optional = true }
+tynm = { version = "0.2.0", optional = true }
+bitcode = { version = "0.6.9", features = ["serde"], optional = true }
+paste = { version = "1.0.15", optional = true }
+
+[features]
+default = []
+paste = ["dep:paste"]
+noop_waker = []
+enums = []
+traits = ["dep:al-derive", "dep:tynm"]
+race = ["enums"]
+cancellation = []
+collections = ["dep:arc-swap", "paste", "traits"]
+serde = ["dep:serde"]
+serde_utils = ["traits", "serde", "dep:erased-serde"]
+json = ["serde_utils", "dep:serde_json"]
+binary = ["serde_utils", "collections", "dep:bitcode"]
+
+[dev-dependencies]
+serde_json = "1.0.15"

@@ -1,0 +1,47 @@
+// map `self` to `al_events` allowing the use of derive macros that use `al_events::..`
+extern crate self as al_events;
+mod command;
+mod event;
+mod markers;
+mod message;
+pub mod metadata;
+mod query;
+mod message_error;
+
+use message::define_message_kind;
+
+pub use al_derive::CommandMarker as DeriveCommandMarker;
+pub use al_derive::EventMarker as DeriveEventMarker;
+pub use al_derive::QueryMarker as DeriveQueryMarker;
+pub use al_derive::TypeName as DeriveTypeName;
+pub use al_derive::{command, event, query};
+pub use al_structures::traits::TypeName;
+
+// Expose `TypeId`, `FormatId`, `TypeFactory`, and `SerdeFormat` here
+#[cfg(feature = "serde")]
+pub type TypeId = al_structures::serde_utils::serde_registries::TypeId;
+#[cfg(feature = "serde")]
+pub type FormatId = al_structures::serde_utils::serde_registries::FormatId;
+#[cfg(feature = "serde")]
+pub type TypeFactory<T, F> = al_structures::serde_utils::serde_registries::TypeFactory<T, F>;
+#[cfg(feature = "serde")]
+pub use al_structures::serde_utils::serde_format::DeserializeInto;
+#[cfg(feature = "serde")]
+pub use al_structures::serde_utils::serde_format::SerdeFormat;
+
+#[cfg(feature = "serde")]
+pub use command::{try_register_command, try_register_command_with};
+pub use command::{Command, CommandHelpers, CommandMarker};
+#[cfg(feature = "serde")]
+pub use event::{try_register_event, try_register_event_with};
+pub use event::{Event, EventHelpers, EventMarker};
+pub use markers::{MessageMarker, MessageRequirements, ObjectTraits};
+#[cfg(feature = "borrow")]
+pub use message::BorrowedMessage;
+#[cfg(feature = "serde")]
+pub use message::{DynIdCache, IdCache, MESSAGE_FORMATS, MESSAGE_TYPE_IDS, MESSAGE_TYPE_REGISTRY};
+pub use message::{DynMessage, Message};
+#[cfg(feature = "serde")]
+pub use query::{try_register_query, try_register_query_with};
+pub use query::{Query, QueryHelpers, QueryMarker};
+pub use message_error::MessageError;
