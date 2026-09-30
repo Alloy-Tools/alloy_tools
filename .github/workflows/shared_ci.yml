@@ -29,7 +29,6 @@ jobs:
   test-native:
     name: 'Native ${{ matrix.platform.os }} - ${{ matrix.crate }} - ${{ matrix.platform.target }}'
     needs: list-crates
-    continue-on-error: true
     runs-on: ${{ matrix.platform.os }}
     strategy:
       fail-fast: false
@@ -60,3 +59,16 @@ jobs:
 
     - name: Test features
       run: cargo hack test -p ${{ matrix.crate }} --feature-powerset --target ${{ matrix.platform.target }}
+  
+  final-status:
+    needs: [test-native]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check matrix results
+        run: |
+          results=$(tr -d '\n' <<< '${{ toJSON(needs.*.result) }}')
+          if grep -q -E '(failure|cancelled)' <<< "$results"; then
+            echo "One or more required jobs failed or were cancelled"
+            exit 1
+          fi
