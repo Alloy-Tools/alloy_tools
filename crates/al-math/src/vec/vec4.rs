@@ -4,6 +4,7 @@ use super::Vec3;
 #[repr(C, align(16))]
 #[derive(Clone, Copy, Debug, Default)]
 #[cfg_attr(feature = "gpu", derive(bytemuck::Pod, bytemuck::Zeroable))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Vec4 {
     pub x: f32,
     pub y: f32,

@@ -10,6 +10,7 @@ macro_rules! define_mat_impls {
     ($mat_name:ident, $vec_name:ident, $dim:expr, $($col:ident),+; [$($ident_col:expr,)+]) => {
         impl $mat_name {
             pub const ZERO: Self = Self { cols: [$vec_name::ZERO; $dim] };
+            pub const IDENTITY: Self = Self{ cols: [$($ident_col),+] };
 
             #[inline]
             pub fn new($($col: $vec_name),+) -> Self {
@@ -22,12 +23,6 @@ macro_rules! define_mat_impls {
                 Self { cols }
             }
 
-            /// Returns the identity matrix.
-            #[inline]
-            pub fn identity() -> Self {
-                Self::from_cols([$($ident_col),+])
-            }
-
             #[inline]
             pub fn col(&self, i: usize) -> $vec_name {
                 self.cols[i]
@@ -36,6 +31,11 @@ macro_rules! define_mat_impls {
             #[inline]
             pub fn col_mut(&mut self, i: usize) -> &mut $vec_name {
                 &mut self.cols[i]
+            }
+
+            #[inline]
+            pub fn map_cols<F: FnMut(usize, $vec_name) -> $vec_name>(self, mut f: F) -> Self {
+                Self::from_cols(std::array::from_fn(|i| f(i, self.cols[i])))
             }
 
             #[inline]
@@ -73,6 +73,16 @@ macro_rules! define_mat_impls {
             #[inline]
             pub fn is_finite(&self) -> bool {
                 self.cols.iter().all(|c| c.to_array().iter().all(|f| f32::is_finite(*f)))
+            }
+
+            #[must_use]
+            #[inline]
+            pub fn approx_eq(&self, other: &Self, eps: f32) -> bool {
+                let mut ok = true;
+                for i in 0..$dim {
+                    ok &= self.cols[i].approx_eq(other.cols[i], eps);
+                }
+                ok
             }
 
             #[must_use]

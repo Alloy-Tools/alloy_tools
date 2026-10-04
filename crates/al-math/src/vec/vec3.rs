@@ -3,6 +3,7 @@ use super::{Vec2, Vec4};
 #[must_use]
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Vec3 {
     pub x: f32,
     pub y: f32,
@@ -18,11 +19,12 @@ encase::impl_vector!(3, Vec3, f32; using AsRef AsMut From);
 #[repr(C, align(16))]
 #[derive(Clone, Copy, Debug, Default)]
 #[cfg_attr(feature = "gpu", derive(bytemuck::Pod, bytemuck::Zeroable))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Vec3A {
     pub x: f32,
     pub y: f32,
     pub z: f32,
-    _pad: f32,
+    pub _pad: f32,
 }
 
 super::define_vec_impls!(Vec3A, 3, x, y, z; _pad);

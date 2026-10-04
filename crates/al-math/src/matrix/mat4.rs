@@ -5,17 +5,18 @@ use crate::{
 
 #[must_use]
 #[repr(C, align(16))]
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "gpu", derive(bytemuck::Pod, bytemuck::Zeroable))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Mat4 {
     pub cols: [Vec4; 4],
 }
 
 super::define_mat_impls!(Mat4, Vec4, 4, c0, c1, c2, c3; [
-    Vec4::new(1.0, 0.0, 0.0, 0.0),
-    Vec4::new(0.0, 1.0, 0.0, 0.0),
-    Vec4::new(0.0, 0.0, 1.0, 0.0),
-    Vec4::new(0.0, 0.0, 0.0, 1.0),
+    Vec4 { x: 1., y: 0., z: 0., w: 0. },
+    Vec4 { x: 0., y: 1., z: 0., w: 0. },
+    Vec4 { x: 0., y: 0., z: 1., w: 0. },
+    Vec4 { x: 0., y: 0., z: 0., w: 1. },
 ]);
 super::define_dense_mat_refs!(Mat4, 4);
 #[cfg(feature = "gpu")]
@@ -24,14 +25,14 @@ encase::impl_matrix!(4, 4, Mat4, f32; using AsRef AsMut From);
 impl Mat4 {
     #[inline]
     pub fn from_translation(t: Vec3) -> Self {
-        let mut m = Self::identity();
+        let mut m = Self::IDENTITY;
         m.cols[3] = Vec4::from_vec3(t, 1.0);
         m
     }
 
     #[inline]
     pub fn from_scale(s: Vec3) -> Self {
-        let mut m = Self::identity();
+        let mut m = Self::IDENTITY;
         m.cols[0].x = s.x;
         m.cols[1].y = s.y;
         m.cols[2].z = s.z;
@@ -154,7 +155,7 @@ impl Mat4 {
     }
 
     #[must_use]
-    pub fn inverse(&self) -> Option<Self> {
+    pub fn try_inverse(&self) -> Option<Self> {
         let c = &self.cols;
         // Row-major elements
         let (m00, m01, m02, m03) = (c[0].x, c[1].x, c[2].x, c[3].x);

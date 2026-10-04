@@ -5,15 +5,16 @@ use crate::{
 
 #[must_use]
 #[repr(C, align(4))]
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Mat3 {
     pub cols: [Vec3; 3],
 }
 
 super::define_mat_impls!(Mat3, Vec3, 3, c0, c1, c2; [
-    Vec3::new(1.0, 0.0, 0.0),
-    Vec3::new(0.0, 1.0, 0.0),
-    Vec3::new(0.0, 0.0, 1.0),
+    Vec3 { x: 1., y: 0., z: 0. },
+    Vec3 { x: 0., y: 1., z: 0. },
+    Vec3 { x: 0., y: 0., z: 1. },
 ]);
 mat3_helpers!(Mat3, Vec3);
 super::define_dense_mat_refs!(Mat3, 3);
@@ -22,16 +23,17 @@ encase::impl_matrix!(3, 3, Mat3, f32; using AsRef AsMut From);
 
 #[must_use]
 #[repr(C, align(16))]
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "gpu", derive(bytemuck::Pod, bytemuck::Zeroable))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Mat3A {
     pub cols: [Vec3A; 3],
 }
 
 super::define_mat_impls!(Mat3A, Vec3A, 3, c0, c1, c2; [
-    Vec3A::new(1.0, 0.0, 0.0),
-    Vec3A::new(0.0, 1.0, 0.0),
-    Vec3A::new(0.0, 0.0, 1.0),
+    Vec3A { x: 1., y: 0., z: 0., _pad: 0. },
+    Vec3A { x: 0., y: 1., z: 0., _pad: 0. },
+    Vec3A { x: 0., y: 0., z: 1., _pad: 0. },
 ]);
 mat3_helpers!(Mat3A, Vec3A);
 
@@ -132,7 +134,7 @@ macro_rules! mat3_helpers {
             }
 
             #[must_use]
-            pub fn inverse(&self) -> Option<Self> {
+            pub fn try_inverse(&self) -> Option<Self> {
                 let det = self.determinant();
                 if det.abs() < f32::EPSILON {
                     return None;

@@ -6,10 +6,12 @@ repository.workspace = true
 edition.workspace = true
 
 [dependencies]
-bytemuck = { version = "1.25.2", optional = true }
+bytemuck = { version = "1.25.2", features = ["derive"], optional = true }
 encase = { version = "0.13", optional = true }
+serde = { version = "1.0.229", features = ["derive"], optional = true }
 
 [features]
-default = ["gpu"]
+default = []
 sdf = []
 gpu = ["dep:bytemuck", "dep:encase"]
+serde = ["dep:serde"]
