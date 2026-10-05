@@ -62,10 +62,10 @@ fn vs_main(
 
     // World -> clip. view_size is the total visible height in world units.
     let aspect = globals.resolution.x / globals.resolution.y;
-    let ndc = 2.0 * (world - globals.camera_pos) / (globals.view_size * vec2<f32>(aspect, 1.0));
+    let ndc = 2. * (world - globals.camera_pos) / (globals.view_size * vec2<f32>(aspect, 1.));
 
     var out: VsOut;
-    out.clip = vec4<f32>(ndc, 0.0, 1.0);
+    out.clip = vec4<f32>(ndc, 0., 1.);
     out.world = world;
     out.color = prim.color;
     out.prim_idx = ii;
@@ -79,7 +79,7 @@ fn sd_circle(p: vec2<f32>, c: vec2<f32>, r: f32) -> f32 {
 fn sd_capsule(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
     let pa = p - a;
     let ba = b - a;
-    let h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-8), 0.0, 1.0);
+    let h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-8), 0., 1.);
     return length(pa - ba * h) - r;
 }
 
@@ -94,10 +94,15 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         d = sd_capsule(in.world, prim.origin, prim.tip, prim.radius);
     }
 
-    // Screen-space AA. fwidth gives ~1px in SDF units.
     let aa = max(fwidth(d), 1e-5);
-    let alpha = 1.0 - smoothstep(-aa, aa, d);
-    if alpha <= 0.0 { discard; }
+    let stroke_w = aa * 1.5;
+    let saa = smoothstep(-aa, aa, d);
+    let fill = 1. - saa;
+    let stroke = saa * (1. - smoothstep(stroke_w - aa, stroke_w + aa, d));
+    let alpha = fill + stroke;
+    if alpha <= 0. { discard; }
+    let col = mix(prim.color.rgb, prim.color.rgb * 0.3, stroke / max(alpha, 1e-5));
 
-    return vec4<f32>(in.color.rgb, in.color.a * alpha);
+    return vec4<f32>(col, prim.color.a * alpha);
+    //return vec4<f32>(in.color.rgb, in.color.a * alpha);
 }

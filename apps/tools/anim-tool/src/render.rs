@@ -33,6 +33,11 @@ pub struct SdfData {
     pub prims: [SdfPrim; MAX_SKELETON_PRIMS],
 }
 
+fn depth_tint(color: Vec4, depth: f32) -> Vec4 {
+    let f = (1. - depth * 0.22).clamp(0.35, 1.25);
+    Vec4::new(color.x * f, color.y * f, color.z * f, color.w)
+}
+
 pub struct RenderState {
     pub surface: Surface<'static>,
     pub device: wgpu::Device,
@@ -266,30 +271,32 @@ impl RenderState {
         let mut prims: Vec<SdfPrim> = Vec::with_capacity(MAX_SKELETON_PRIMS);
 
         // Body fills first (bottom layer).
-        for (i, j) in d.skeleton.joints().iter().enumerate() {
-            if j.radius() <= 0.0 {
+        for (i, joint) in d.skeleton.joints().iter().enumerate() {
+            if joint.radius() <= 0.0 {
                 continue;
             }
             let c = world[i].transform_point(Vec2::ZERO);
+            let base_color = Vec4::new(0.82, 0.85, 0.92, 1.);
             prims.push(SdfPrim {
                 origin: Vec2::new(c.x, c.y),
                 tip: Vec2::new(c.x, c.y),
-                radius: j.radius(),
+                radius: joint.radius(),
                 kind: 0,
                 _pad: Vec2::new(0., 0.),
-                color: Vec4::new(0.82, 0.85, 0.92, 1.),
+                color: depth_tint(base_color, joint.depth()),
             });
         }
-        for b in d.skeleton.bones() {
-            let a = world[b.origin_index()].transform_point(Vec2::ZERO);
-            let e = world[b.tip_index()].transform_point(Vec2::ZERO);
+        for bone in d.skeleton.bones() {
+            let a = world[bone.origin_index()].transform_point(Vec2::ZERO);
+            let e = world[bone.tip_index()].transform_point(Vec2::ZERO);
+            let base_color = Vec4::new(0.82, 0.85, 0.92, 1.);
             prims.push(SdfPrim {
                 origin: Vec2::new(a.x, a.y),
                 tip: Vec2::new(e.x, e.y),
-                radius: b.radius(),
+                radius: bone.radius(),
                 kind: 1,
                 _pad: Vec2::new(0., 0.),
-                color: Vec4::new(0.82, 0.85, 0.92, 1.),
+                color: depth_tint(base_color, bone.depth()),
             });
         }
 
@@ -364,21 +371,9 @@ impl RenderState {
             Some(self.config.width as f32),
             Some(self.config.height as f32),
         );
-        let hud = format!(
-        "designer — {} joints, {} bones | selected: {} | [Tab] cycle\n[T] pose mode: {} [F] following: {}\n undo: {} redo: {}\n{}",
-        d.skeleton.joints().len(),
-        d.skeleton.bones().len(),
-        d.selected
-            .map(|i| d.skeleton.joints()[i].name().to_string())
-            .unwrap_or_else(|| "none".into()),
-        if d.edit_pose { "ON" } else { "off" },
-        d.following,
-        d.history.undo_len(),
-        d.history.redo_len(),
-        d.status,
-    );
+        
         text_buffer.set_text(
-            &hud,
+            &d.hud_string(),
             &glyphon::Attrs::new().family(glyphon::Family::Monospace),
             glyphon::Shaping::Advanced,
             None,

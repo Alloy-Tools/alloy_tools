@@ -3,21 +3,23 @@ use al_math::vec::Vec2;
 
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Bone2D {
+pub struct Bone2d {
     name: String,
     origin_index: usize,
     tip_index: usize,
     radius: f32,
     group: ColliderGroup,
+    depth: f32,
 }
 
-impl Bone2D {
+impl Bone2d {
     pub fn new(
         name: String,
         origin_index: usize,
         tip_index: usize,
         radius: f32,
         group: ColliderGroup,
+        depth: f32,
     ) -> Self {
         Self {
             name,
@@ -25,6 +27,7 @@ impl Bone2D {
             tip_index,
             radius,
             group,
+            depth,
         }
     }
 
@@ -46,6 +49,10 @@ impl Bone2D {
 
     pub fn group(&self) -> ColliderGroup {
         self.group
+    }
+
+    pub fn depth(&self) -> f32 {
+        self.depth
     }
 
     #[inline]

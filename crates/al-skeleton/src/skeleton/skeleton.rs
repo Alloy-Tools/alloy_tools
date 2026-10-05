@@ -1,14 +1,17 @@
-use crate::skeleton::{Bone2D, Joint2D};
+use crate::{
+    collider::ColliderGroup,
+    skeleton::{Bone2d, Joint2d},
+};
 use al_math::{transform::Transform2D, vec::Vec2};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Skeleton2D {
-    joints: Vec<Joint2D>,
-    bones: Vec<Bone2D>,
+pub struct Skeleton2d {
+    joints: Vec<Joint2d>,
+    bones: Vec<Bone2d>,
 }
 
-impl Skeleton2D {
+impl Skeleton2d {
     pub(super) fn new() -> Self {
         Self {
             joints: vec![],
@@ -20,19 +23,19 @@ impl Skeleton2D {
         self.joints.iter().position(|j| j.name() == name)
     }
 
-    pub fn joints(&self) -> &[Joint2D] {
+    pub fn joints(&self) -> &[Joint2d] {
         &self.joints
     }
 
-    pub fn joints_mut(&mut self) -> &mut Vec<Joint2D> {
+    pub fn joints_mut(&mut self) -> &mut Vec<Joint2d> {
         &mut self.joints
     }
 
-    pub fn bones(&self) -> &[Bone2D] {
+    pub fn bones(&self) -> &[Bone2d] {
         &self.bones
     }
 
-    pub fn bones_mut(&mut self) -> &mut Vec<Bone2D> {
+    pub fn bones_mut(&mut self) -> &mut Vec<Bone2d> {
         &mut self.bones
     }
 
@@ -126,17 +129,13 @@ impl Skeleton2D {
     }
 
     /// Signed distance from `p` (world space) to the union of all colliders types in `kinds`.
-    pub fn sdf_of_group(
-        &self,
-        world: &[Transform2D],
-        p: Vec2,
-        kinds: &[crate::collider::ColliderKind],
-    ) -> f32 {
+    /// # Example
+    /// - let defender_hurt = skeleton.sdf_of_group(&world, p, ColliderGroup::HURT);
+    /// - let attacker_hit  = skeleton.sdf_of_group(&world, p, ColliderGroup::HIT);
+    pub fn sdf_of_group(&self, world: &[Transform2D], p: Vec2, mask: ColliderGroup) -> f32 {
         let mut d = f32::INFINITY;
-        let matches = |g: crate::collider::ColliderGroup| kinds.iter().any(|k| g.contains(*k));
-
         for (i, joint) in self.joints.iter().enumerate() {
-            if joint.radius() <= 0. || !matches(joint.group()) {
+            if joint.radius() <= 0. || !joint.group().intersects(mask) {
                 continue;
             }
             let c = world[i].transform_point(Vec2::ZERO);
@@ -144,7 +143,7 @@ impl Skeleton2D {
         }
 
         for bone in &self.bones {
-            if !matches(bone.group()) {
+            if !bone.group().intersects(mask) {
                 continue;
             }
             let a = world[bone.origin_index()].transform_point(Vec2::ZERO);

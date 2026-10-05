@@ -1,23 +1,57 @@
-use al_skeleton::{pose::Pose2d, skeleton::Skeleton2D};
+use std::time::Instant;
+
+use al_anim::anim_clip::AnimationClip2d;
+use al_skeleton::{pose::Pose2d, skeleton::Skeleton2d};
 
 use crate::Camera;
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum EditMode {
+    Pose,
+    Rest,
+}
+
+impl std::fmt::Display for EditMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EditMode::Pose => write!(f, "Pose"),
+            EditMode::Rest => write!(f, "Rest"),
+        }
+    }
+}
+
+impl EditMode {
+    pub fn cycle(&mut self) {
+        *self = match self {
+            EditMode::Pose => EditMode::Rest,
+            EditMode::Rest => EditMode::Pose,
+        }
+    }
+
+    pub fn status(&self) -> String {
+        match self {
+            EditMode::Pose => "Editing 'Pose' (rotations)".into(),
+            EditMode::Rest => "Editing 'Rest' (translations)".into(),
+        }
+    }
+}
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum DragMode {
     MoveJoint,
     RotateJoint,
-    Radius,
 }
 
 #[derive(Clone)]
-pub struct Snapshot {
-    pub skeleton: Skeleton2D,
-    pub pose: Pose2d,
+pub enum Snapshot {
+    Skeleton(Skeleton2d),
+    Pose(Pose2d),
+    Animation(Vec<AnimationClip2d>, usize),
 }
 
 pub struct History {
-    undo: Vec<Snapshot>,
-    redo: Vec<Snapshot>,
+    pub undo: Vec<Snapshot>,
+    pub redo: Vec<Snapshot>,
 }
 
 impl History {
@@ -28,48 +62,31 @@ impl History {
         }
     }
 
-    pub fn undo_len(&self) -> usize {
-        self.undo.len()
-    }
-
-    pub fn redo_len(&self) -> usize {
-        self.redo.len()
-    }
-
-    pub fn record(&mut self, skeleton: Skeleton2D, pose: Pose2d) {
-        self.undo.push(Snapshot { skeleton, pose });
-    }
-
-    pub fn undo(&mut self, skeleton: &Skeleton2D, pose: &Pose2d) -> Option<Snapshot> {
-        let Some(prev) = self.undo.pop() else {
-            return None;
-        };
-        self.redo.push(Snapshot {
-            skeleton: skeleton.clone(),
-            pose: pose.clone(),
-        });
-        Some(prev)
-    }
-
-    pub fn redo(&mut self, skeleton: &Skeleton2D, pose: &Pose2d) -> Option<Snapshot> {
-        let Some(next) = self.redo.pop() else {
-            return None;
-        };
-        self.undo.push(Snapshot {
-            skeleton: skeleton.clone(),
-            pose: pose.clone(),
-        });
-        Some(next)
+    pub fn record(&mut self, snapshot: Snapshot) {
+        self.undo.push(snapshot);
     }
 }
 
+#[derive(Default, Clone, Copy)]
+pub struct InputState {
+    pub ctrl_held: bool,
+    pub shift_held: bool,
+    pub alt_held: bool,
+}
+
 pub struct DesignerState {
-    pub skeleton: Skeleton2D,
+    pub skeleton: Skeleton2d,
     pub pose: Pose2d,
 
     pub selected: Option<usize>,
     pub drag: Option<DragMode>,
-    pub edit_pose: bool, // true = edit Pose, false = edit rest transforms
+    pub edit_mode: EditMode,
+
+    pub clips: Vec<AnimationClip2d>,
+    pub current_clip: usize,
+    pub time: f32,
+    pub playing: bool,
+    pub last_tick: Instant,
 
     pub camera: crate::Camera,
     pub following: bool,
@@ -80,22 +97,28 @@ pub struct DesignerState {
     pub resolution: [f32; 2],
 
     pub history: History,
+    pub last_scroll: Instant,
+    pub scroll_dirty: bool,
     pub drag_dirty: bool,
-    pub ctrl_held: bool,
-    pub shift_held: bool,
+    pub keys: InputState,
 
     pub status: String,
 }
 
 impl DesignerState {
-    pub fn new(skeleton: Skeleton2D) -> Self {
+    pub fn new(skeleton: Skeleton2d) -> Self {
         let pose = Pose2d::rest(skeleton.joints().len());
         Self {
             skeleton,
             pose,
             selected: None,
             drag: None,
-            edit_pose: false,
+            edit_mode: EditMode::Pose,
+            clips: vec![AnimationClip2d::new("default")],
+            current_clip: 0,
+            time: 0.,
+            playing: false,
+            last_tick: Instant::now(),
             camera: Camera::new([0., 0.], 1.4),
             following: true,
             panning: false,
@@ -104,9 +127,10 @@ impl DesignerState {
             cursor_world: al_math::vec::Vec2::ZERO,
             resolution: [800., 600.],
             history: History::new(),
+            last_scroll: Instant::now(),
+            scroll_dirty: false,
             drag_dirty: false,
-            ctrl_held: false,
-            shift_held: false,
+            keys: InputState::default(),
             status: "Ready.".into(),
         }
     }
@@ -126,26 +150,114 @@ impl DesignerState {
         best.map(|(i, _)| i)
     }
 
-    pub fn record(&mut self) {
-        self.history
-            .record(self.skeleton.clone(), self.pose.clone());
+    pub fn record(&mut self, snapshot: Snapshot) {
+        self.history.record(snapshot);
     }
 
     pub fn undo(&mut self) -> bool {
-        if let Some(Snapshot { skeleton, pose }) = self.history.undo(&self.skeleton, &self.pose) {
-            self.skeleton = skeleton;
-            self.pose = pose;
+        if let Some(snapshot) = self.history.undo.pop() {
+            match snapshot {
+                Snapshot::Skeleton(skeleton) => {
+                    self.history
+                        .redo
+                        .push(Snapshot::Skeleton(std::mem::take(&mut self.skeleton)));
+                    self.skeleton = skeleton;
+                }
+                Snapshot::Pose(pose) => {
+                    self.history
+                        .redo
+                        .push(Snapshot::Pose(std::mem::take(&mut self.pose)));
+                    self.pose = pose;
+                }
+                Snapshot::Animation(clips, current_clip) => {
+                    self.history.redo.push(Snapshot::Animation(
+                        std::mem::take(&mut self.clips),
+                        self.current_clip,
+                    ));
+                    self.clips = clips;
+                    self.current_clip = current_clip;
+                }
+            }
             return true;
         }
         false
     }
 
     pub fn redo(&mut self) -> bool {
-        if let Some(Snapshot { skeleton, pose }) = self.history.redo(&self.skeleton, &self.pose) {
-            self.skeleton = skeleton;
-            self.pose = pose;
+        if let Some(snapshot) = self.history.redo.pop() {
+            match snapshot {
+                Snapshot::Skeleton(skeleton) => {
+                    self.history
+                        .undo
+                        .push(Snapshot::Skeleton(std::mem::take(&mut self.skeleton)));
+                    self.skeleton = skeleton;
+                }
+                Snapshot::Pose(pose) => {
+                    self.history
+                        .undo
+                        .push(Snapshot::Pose(std::mem::take(&mut self.pose)));
+                    self.pose = pose;
+                }
+                Snapshot::Animation(clips, current_clip) => {
+                    self.history.undo.push(Snapshot::Animation(
+                        std::mem::take(&mut self.clips),
+                        self.current_clip,
+                    ));
+                    self.clips = clips;
+                    self.current_clip = current_clip;
+                }
+            }
             return true;
         }
         false
+    }
+
+    pub fn clip(&self) -> &AnimationClip2d {
+        &self.clips[self.current_clip]
+    }
+
+    pub fn clip_mut(&mut self) -> &mut AnimationClip2d {
+        &mut self.clips[self.current_clip]
+    }
+
+    pub fn with_clip<R>(&mut self, f: impl FnOnce(&mut AnimationClip2d) -> R) -> R {
+        f(&mut self.clips[self.current_clip])
+    }
+
+    pub fn cycle_clip(&mut self, delta: isize) {
+        if self.clips.is_empty() {
+            return;
+        }
+        let n = self.clips.len() as isize;
+        self.current_clip = (self.current_clip as isize + delta).rem_euclid(n) as usize;
+        self.time = 0.;
+        self.playing = false;
+        if !self.clip().keyframes().is_empty() {
+            self.pose = self.clip().sample(0.);
+        }
+    }
+
+    pub fn hud_string(&self) -> String {
+        let clip = self.clip();
+        format!(
+        "designer — {} joints, {} bones | [Tab] cycle: {}\n[T] pose mode: {} | [F] following: {} | clips: [{}]\nclip {}: {} {:.3}/{:.3} loop: {} | keys: {}\n[Space] play | [K/⇧K] key [←/→] step [G] snap\n undo: {} redo: {}\n{}",
+        self.skeleton.joints().len(),
+        self.skeleton.bones().len(),
+        self.selected
+            .map(|i| self.skeleton.joints()[i].name().to_string())
+            .unwrap_or_else(|| "none".into()),
+        self.edit_mode,
+        self.following,
+        self.clips.iter().map(|c| c.name()).collect::<Vec<_>>().join(" | "),
+        self.clip().name(),
+        if self.playing { "▶" } else { "▮▮" },
+        self.time,
+        clip.duration(),
+        if clip.looping() { "on" } else { "off" },
+        clip.keyframes().len(),
+        self.history.undo.len(),
+        self.history.redo.len(),
+        self.status,
+    )
     }
 }

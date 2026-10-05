@@ -3,21 +3,23 @@ use al_math::{transform::Transform2D, vec::Vec2};
 
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Joint2D {
+pub struct Joint2d {
     name: String,
     parent: Option<usize>,
     rest_transform: Transform2D,
     radius: f32,
     group: ColliderGroup,
+    depth: f32,
 }
 
-impl Joint2D {
+impl Joint2d {
     pub fn new(
         name: String,
         parent: Option<usize>,
         rest_transform: Transform2D,
         radius: f32,
         group: ColliderGroup,
+        depth: f32,
     ) -> Self {
         Self {
             name,
@@ -25,6 +27,7 @@ impl Joint2D {
             rest_transform,
             radius,
             group,
+            depth,
         }
     }
 
@@ -58,6 +61,10 @@ impl Joint2D {
 
     pub fn set_group(&mut self, g: ColliderGroup) {
         self.group = g;
+    }
+
+    pub fn depth(&self) -> f32 {
+        self.depth
     }
 
     #[inline]

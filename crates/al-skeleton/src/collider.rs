@@ -1,61 +1,82 @@
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum ColliderGroup {
-    None,
-    One(ColliderKind),
-    Two(ColliderKind, ColliderKind),
-    All,
-}
-
-impl std::fmt::Display for ColliderGroup {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ColliderGroup::None => write!(f, "None"),
-            ColliderGroup::One(k) => write!(f, "One( {k} )"),
-            ColliderGroup::Two(k1, k2) => write!(f, "Two( {k1}, {k2} )"),
-            ColliderGroup::All => {
-                write!(f, "All( ")?;
-                if let Some((last, head)) = ColliderKind::ALL.split_last() {
-                    for k in head {
-                        write!(f, "{k}, ")?;
-                    }
-                    write!(f, "{last} ")?;
-                }
-                write!(f, ")")
-            }
-        }
-    }
-}
+pub struct ColliderGroup(u8);
 
 impl ColliderGroup {
-    pub fn contains(&self, kind: ColliderKind) -> bool {
-        match self {
-            ColliderGroup::None => false,
-            ColliderGroup::One(k) => *k == kind,
-            ColliderGroup::Two(a, b) => *a == kind || *b == kind,
-            ColliderGroup::All => true,
-        }
+    pub const NONE: Self = Self(0);
+    pub const HIT: Self = Self(1 << 0);
+    pub const HURT: Self = Self(1 << 1);
+    pub const PUSH: Self = Self(1 << 2);
+    pub const ALL: Self = Self(0b111);
+
+    pub const fn empty() -> Self {
+        Self::NONE
+    }
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    pub const fn contains(self, other: Self) -> bool {
+        (self.0 & other.0) == other.0
+    }
+    pub const fn intersects(self, other: Self) -> bool {
+        (self.0 & other.0) != 0
+    }
+
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+    pub const fn without(self, other: Self) -> Self {
+        Self(self.0 & !other.0)
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum ColliderKind {
-    Hit,
-    Hurt,
-    Push,
+impl std::ops::BitOr for ColliderGroup {
+    type Output = Self;
+    fn bitor(self, rhs: Self) -> Self {
+        self.union(rhs)
+    }
 }
 
-impl std::fmt::Display for ColliderKind {
+impl std::ops::BitOrAssign for ColliderGroup {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
+}
+
+impl std::ops::BitAnd for ColliderGroup {
+    type Output = Self;
+    fn bitand(self, rhs: Self) -> Self {
+        Self(self.0 & rhs.0)
+    }
+}
+
+impl std::ops::Not for ColliderGroup {
+    type Output = Self;
+    fn not(self) -> Self {
+        Self(!self.0 & Self::ALL.0)
+    }
+}
+
+impl std::fmt::Debug for ColliderGroup {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ColliderKind::Hit => write!(f, "Hit"),
-            ColliderKind::Hurt => write!(f, "Hurt"),
-            ColliderKind::Push => write!(f, "Push"),
+        if self.is_empty() {
+            return write!(f, "None");
         }
+        let mut first = true;
+        for (name, bit) in [
+            ("Hit", Self::HIT),
+            ("Hurt", Self::HURT),
+            ("Push", Self::PUSH),
+        ] {
+            if self.intersects(bit) {
+                if !first {
+                    write!(f, "|")?;
+                }
+                write!(f, "{name}")?;
+                first = false;
+            }
+        }
+        Ok(())
     }
-}
-
-impl ColliderKind {
-    pub const ALL: [ColliderKind; 3] = [ColliderKind::Hit, ColliderKind::Hurt, ColliderKind::Push];
 }
