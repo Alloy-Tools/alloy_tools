@@ -1,8 +1,11 @@
-use al_anim::anim_clip::AnimationClip2d;
-use al_skeleton::{pose::Pose2d, skeleton::Skeleton2d};
+use al_anim::{anim_clip::AnimationClip2d, Easing};
+use al_skeleton::{
+    pose::Pose2d,
+    skeleton::{ColliderRef, Skeleton2d},
+};
 use std::time::Instant;
 
-use crate::Camera;
+use crate::{app::SCRUB_TOL, Camera};
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum EditMode {
@@ -76,10 +79,13 @@ pub struct InputState {
 pub struct DesignerState {
     pub skeleton: Skeleton2d,
     pub pose: Pose2d,
+    pub easing: Easing,
 
-    pub selected: Option<usize>,
+    pub selected: Option<ColliderRef>,
     pub drag: Option<DragMode>,
     pub edit_mode: EditMode,
+    pub show_extras: bool,
+    pub extra_active: Vec<bool>,
 
     pub clips: Vec<AnimationClip2d>,
     pub current_clip: usize,
@@ -106,13 +112,17 @@ pub struct DesignerState {
 
 impl DesignerState {
     pub fn new(skeleton: Skeleton2d) -> Self {
-        let pose = Pose2d::rest(skeleton.joints().len());
+        let len = skeleton.joints().len();
+        let pose = Pose2d::rest(len);
         Self {
             skeleton,
             pose,
+            easing: Easing::Linear,
             selected: None,
             drag: None,
             edit_mode: EditMode::Pose,
+            show_extras: false,
+            extra_active: vec![false; len],
             clips: vec![AnimationClip2d::new("default")],
             current_clip: 0,
             time: 0.,
@@ -135,15 +145,15 @@ impl DesignerState {
     }
 
     /// Nearest joint origin within ~2% of view height.
-    pub fn pick(&self) -> Option<usize> {
+    pub fn pick(&self) -> Option<ColliderRef> {
         let world = self.skeleton.world_transforms(&self.pose);
         let pick_r = 0.02 * self.camera.view_size; // ~2% of view height
-        let mut best: Option<(usize, f32)> = None;
+        let mut best: Option<(ColliderRef, f32)> = None;
         for (i, _) in self.skeleton.joints().iter().enumerate() {
             let c = world[i].transform_point(al_math::vec::Vec2::ZERO);
             let d = (c - self.cursor_world).length();
             if d <= pick_r && best.map_or(true, |(_, bd)| d < bd) {
-                best = Some((i, d));
+                best = Some((ColliderRef::Joint(i), d));
             }
         }
         best.map(|(i, _)| i)
@@ -239,17 +249,18 @@ impl DesignerState {
     pub fn hud_string(&self) -> String {
         let clip = self.clip();
         format!(
-        "designer — {} joints, {} bones | [Tab] cycle: {}\n[T] pose mode: {} | [F] following: {} | clips: [{}]\nclip {}: {} {:.3}/{:.3} loop: {} | keys: {}\n[Space] play | [K/⇧K] key [←/→] step [G] snap\n undo: {} redo: {}\n{}",
+        "designer — {} joints, {} bones | [Tab] cycle: {}\n[T] pose mode: {} | [F] following: {} | clips: [{}]\nclip {}: {} {} {:.3}/{:.3} loop: {} | keys: {}\n[Space] play | [K/⇧K] key [←/→] step [G] snap\n undo: {} redo: {}\n{}",
         self.skeleton.joints().len(),
         self.skeleton.bones().len(),
         self.selected
-            .map(|i| self.skeleton.joints()[i].name().to_string())
+            .map(|cr| if let ColliderRef::Joint(i) = cr { self.skeleton.joints()[i].name().to_string()} else { "none".into() })
             .unwrap_or_else(|| "none".into()),
         self.edit_mode,
         self.following,
         self.clips.iter().map(|c| c.name()).collect::<Vec<_>>().join(" | "),
         self.clip().name(),
         if self.playing { "▶" } else { "▮▮" },
+        self.clip().easing_at(self.time, SCRUB_TOL).unwrap_or(Easing::Linear),
         self.time,
         clip.duration(),
         if clip.looping() { "on" } else { "off" },

@@ -9,6 +9,10 @@ impl ColliderKind {
     pub const PUSH: Self = Self(1 << 2);
     pub const ALL: Self = Self(0b111);
 
+    pub const fn inner(self) -> u8 {
+        self.0
+    }
+
     pub const fn empty() -> Self {
         Self::NONE
     }

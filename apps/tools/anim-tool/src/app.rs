@@ -6,11 +6,15 @@ use crate::{
     state::{DesignerState, DragMode, Snapshot},
 };
 use al_math::{transform::Transform2d, vec::Vec2};
-use al_skeleton::{collider_kind::ColliderKind, skeleton::Skeleton2DBuilder};
+use al_skeleton::{
+    collider_kind::ColliderKind,
+    skeleton::{ColliderRef, Skeleton2DBuilder},
+};
 use winit::{application::ApplicationHandler, event::WindowEvent, window::Window};
 
 const TITLE: &str = "Skeleton2D Designer Tool";
 const START_SIZE: winit::dpi::LogicalSize<i32> = winit::dpi::LogicalSize::new(800, 600);
+pub const SCRUB_TOL: f32 = 1. / 30.;
 
 pub struct App {
     window: Option<Arc<Window>>,
@@ -35,74 +39,43 @@ impl App {
         builder.bone("neck", chest, head, 0.045, hurt, 0.);
 
         // ----- arms -----
-        let sh_f = builder.joint(
-            "shoulder_f",
-            Some(chest),
-            t(0.07, 0.03),
-            0.,
-            none,
-            -0.6,
-        );
+        let sh_f = builder.joint("shoulder_f", Some(chest), t(0.07, 0.03), 0., none, -0.6);
         let el_f = builder.joint("elbow_f", Some(sh_f), t(0.1, -0.12), 0., none, -0.6);
-        let hd_f = builder.joint(
-            "hand_f",
-            Some(el_f),
-            t(0.1, -0.1),
-            0.045,
-            hurt,
-            -0.6,
-        );
+        let hd_f = builder.joint("hand_f", Some(el_f), t(0.1, -0.1), 0.045, hurt, -0.6);
 
         builder.bone("upper_arm_f", sh_f, el_f, 0.045, hurt, -0.6);
         builder.bone("forearm_f", el_f, hd_f, 0.04, hurt, -0.6);
 
-        let sh_b = builder.joint(
-            "shoulder_b",
-            Some(chest),
-            t(-0.05, 0.03),
-            0.,
-            none,
-            0.6,
-        );
+        let sh_b = builder.joint("shoulder_b", Some(chest), t(-0.05, 0.03), 0., none, 0.6);
         let el_b = builder.joint("elbow_b", Some(sh_b), t(-0.1, -0.14), 0., none, 0.6);
-        let hd_b = builder.joint(
-            "hand_b",
-            Some(el_b),
-            t(0.07, -0.08),
-            0.045,
-            hurt,
-            0.6,
-        );
+        let hd_b = builder.joint("hand_b", Some(el_b), t(0.07, -0.08), 0.045, hurt, 0.6);
 
         builder.bone("upper_arm_b", sh_b, el_b, 0.045, hurt, 0.6);
         builder.bone("forearm_b", el_b, hd_b, 0.04, hurt, 0.6);
 
         // ----- legs -----
         let kn_f = builder.joint("knee_f", Some(hips), t(0.08, -0.22), 0., hurt, -0.6);
-        let ft_f = builder.joint(
-            "foot_f",
-            Some(kn_f),
-            t(0.04, -0.22),
-            0.055,
-            hurt,
-            -0.6,
-        );
+        let ft_f = builder.joint("foot_f", Some(kn_f), t(0.04, -0.22), 0.055, hurt, -0.6);
 
         builder.bone("thigh_f", hips, kn_f, 0.06, hurt, -0.6);
         builder.bone("shin_f", kn_f, ft_f, 0.05, hurt, -0.6);
 
         let kn_b = builder.joint("knee_b", Some(hips), t(-0.06, -0.22), 0., hurt, 0.6);
-        let ft_b = builder.joint(
-            "foot_b",
-            Some(kn_b),
-            t(-0.06, -0.22),
-            0.055,
-            hurt,
-            0.6,
-        );
+        let ft_b = builder.joint("foot_b", Some(kn_b), t(-0.06, -0.22), 0.055, hurt, 0.6);
 
         builder.bone("thigh_b", hips, kn_b, 0.06, hurt, 0.6);
         builder.bone("shin_b", kn_b, ft_b, 0.05, hurt, 0.6);
+
+        let _e1 = builder.extra(
+            "blade_front",
+            Some(hd_f),
+            al_skeleton::collider::Shape2d::Capsule {
+                origin: t(0.02, 0.),
+                tip: t(0.1, 0.),
+                radius: 0.015,
+            },
+            ColliderKind::HIT,
+        );
 
         let skeleton = builder.build();
         if let Err(e) = skeleton.validate() {
@@ -149,24 +122,6 @@ impl App {
 
             if !designer.clip().keyframes().is_empty() {
                 designer.pose = designer.clip().sample(designer.time);
-                //TODO: Remove
-                if let Some(selected) = designer.selected {
-                    designer.status = format!(
-                        "t={:.3} dur={:.3} n={} rot[{}]={:.3} rscale=({:.2},{:.2})",
-                        designer.time,
-                        designer.clip().duration(),
-                        designer.clip().keyframes().len(),
-                        selected,
-                        designer
-                            .pose
-                            .rotations
-                            .get(selected)
-                            .copied()
-                            .unwrap_or(f32::NAN),
-                        designer.pose.root_scale.x,
-                        designer.pose.root_scale.y,
-                    );
-                }
             }
         }
     }
@@ -252,7 +207,9 @@ impl ApplicationHandler for App {
                         + (-cy / designer.resolution[1]) * designer.camera.view_size,
                 );
 
-                if let (Some(i), Some(mode)) = (designer.selected, designer.drag) {
+                if let (Some(ColliderRef::Joint(i)), Some(mode)) =
+                    (designer.selected, designer.drag)
+                {
                     apply_drag(designer, i, mode);
                 }
             }
@@ -285,7 +242,7 @@ impl ApplicationHandler for App {
                     winit::event::MouseScrollDelta::LineDelta(_, y) => y,
                     winit::event::MouseScrollDelta::PixelDelta(p) => (p.y as f32) / 40.0,
                 };
-                if let Some(i) = designer.selected {
+                if let Some(ColliderRef::Joint(i)) = designer.selected {
                     if designer.scroll_dirty && designer.last_scroll.elapsed().as_millis() >= 250 {
                         designer.record(Snapshot::Skeleton(designer.skeleton.clone()));
                     }
@@ -323,8 +280,8 @@ impl ApplicationHandler for App {
                             let n = designer.skeleton.joints().len();
                             if n > 0 {
                                 designer.selected = Some(match designer.selected {
-                                    None => 0,
-                                    Some(i) => (i + 1) % n,
+                                    Some(ColliderRef::Joint(i)) => ColliderRef::Joint((i + 1) % n),
+                                    _ => ColliderRef::Joint(0),
                                 });
                             }
                         }
@@ -364,7 +321,8 @@ impl ApplicationHandler for App {
                                 ));
                                 let time = designer.time;
                                 let pose = designer.pose.clone();
-                                designer.clip_mut().insert(time, pose);
+                                let easing = designer.easing;
+                                designer.clip_mut().insert(time, pose, easing);
                                 designer.status = format!(
                                     "Key inserted at t={:.3} ({} total)",
                                     designer.time,
@@ -483,11 +441,25 @@ impl ApplicationHandler for App {
                             );
                         }
                         KeyCode::KeyE => {
-                            designer.record(Snapshot::Pose(designer.pose.clone()));
-                            designer.pose.root_scale = Vec2::new(
-                                (designer.pose.root_scale.x + 0.05).min(3.0),
-                                (designer.pose.root_scale.y - 0.05).max(0.2),
-                            );
+                            if designer.keys.ctrl_held {
+                                let current = designer.clip().easing_at(designer.time, SCRUB_TOL);
+                                if let Some(curr) = current {
+                                    let next = curr.next();
+                                    let time = designer.time;
+                                    designer
+                                        .clip_mut()
+                                        .set_easing_at(time, next, SCRUB_TOL);
+                                    designer.status = format!("Easing {curr} -> {next}");
+                                } else {
+                                    designer.status = "No keyframes near playhead.".into();
+                                }
+                            } else {
+                                designer.record(Snapshot::Pose(designer.pose.clone()));
+                                designer.pose.root_scale = Vec2::new(
+                                    (designer.pose.root_scale.x + 0.05).min(3.0),
+                                    (designer.pose.root_scale.y - 0.05).max(0.2),
+                                );
+                            }
                         }
                         KeyCode::KeyZ => {
                             if designer.keys.ctrl_held {
@@ -506,6 +478,16 @@ impl ApplicationHandler for App {
                                 designer.pose.root_rotation = 0.0;
                                 designer.pose.root_translation = Vec2::ZERO;
                                 designer.status = "Root transform reset.".into();
+                            }
+                        }
+
+                        KeyCode::KeyX if designer.keys.shift_held => {
+                            designer.show_extras = !designer.show_extras;
+                        }
+
+                        KeyCode::KeyA if designer.keys.shift_held => {
+                            if let Some(ColliderRef::Extra(i)) = designer.selected {
+                                designer.extra_active[i] = !designer.extra_active[i];
                             }
                         }
 

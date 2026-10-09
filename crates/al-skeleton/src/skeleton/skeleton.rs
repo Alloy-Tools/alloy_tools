@@ -6,6 +6,32 @@ use crate::{
 };
 use al_math::{transform::Transform2d, vec::Vec2};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ActiveCollider {
+    pub target: ColliderRef,
+    pub start_frame: u32,
+    pub end_frame: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum ColliderRef {
+    Joint(usize),
+    Bone(usize),
+    Extra(usize),
+}
+
+impl std::fmt::Display for ColliderRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ColliderRef::Joint(i) => write!(f, "Joint `{i}`"),
+            ColliderRef::Bone(i) => write!(f, "Bone `{i}`"),
+            ColliderRef::Extra(i) => write!(f, "Extra `{i}`"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Skeleton2d {
@@ -197,7 +223,7 @@ impl Skeleton2d {
     }
 }
 
-fn active_extra(extra: &Collider2d, world: &[Transform2d], p: Vec2) -> f32 {
+pub fn active_extra(extra: &Collider2d, world: &[Transform2d], p: Vec2) -> f32 {
     match extra.shape() {
         crate::collider::Shape2d::Circle { origin, radius } => {
             let offset = origin.to_components().0;

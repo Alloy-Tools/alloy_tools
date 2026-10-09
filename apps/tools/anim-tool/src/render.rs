@@ -1,4 +1,5 @@
 use al_math::vec::{Vec2, Vec4};
+use al_skeleton::skeleton::ColliderRef;
 use bytemuck::Zeroable;
 use wgpu::{Surface, SurfaceConfiguration};
 
@@ -300,10 +301,56 @@ impl RenderState {
             });
         }
 
+        if d.show_extras {
+            for (i, extra) in d.skeleton.extras().iter().enumerate() {
+                let active = d.extra_active.get(i).copied().unwrap_or(false);
+                let (o, t, r) = match extra.shape() {
+                    al_skeleton::collider::Shape2d::Circle { origin, radius } => {
+                        let o_offset = origin.to_components().0;
+                        let o = if let Some(idx) = extra.parent() {
+                            world[idx].transform_point(o_offset)
+                        } else {
+                            o_offset
+                        };
+                        (o, o, radius)
+                    }
+                    al_skeleton::collider::Shape2d::Capsule {
+                        origin,
+                        tip,
+                        radius,
+                    } => {
+                        let o_offset = origin.to_components().0;
+                        let t_offset = tip.to_components().0;
+                        let (o, t) = if let Some(idx) = extra.parent() {
+                            (
+                                world[idx].transform_point(o_offset),
+                                world[idx].transform_point(t_offset),
+                            )
+                        } else {
+                            (o_offset, t_offset)
+                        };
+                        (o, t, radius)
+                    }
+                };
+                prims.push(SdfPrim {
+                    origin: o,
+                    tip: t,
+                    radius: r,
+                    kind: al_skeleton::collider_kind::ColliderKind::HIT.inner() as u32,
+                    _pad: Vec2::ZERO,
+                    color: if active {
+                        Vec4::new(0.3, 0.95, 0.3, 1.)
+                    } else {
+                        Vec4::new(0.3, 0.55, 0.3, 0.35)
+                    },
+                });
+            }
+        }
+
         // Joint markers on top — small dots, selected joint highlighted.
         for (i, _) in d.skeleton.joints().iter().enumerate() {
             let c = world[i].transform_point(Vec2::ZERO);
-            let selected = d.selected == Some(i);
+            let selected = d.selected == Some(ColliderRef::Joint(i));
             prims.push(SdfPrim {
                 origin: Vec2::new(c.x, c.y),
                 tip: Vec2::new(c.x, c.y),
@@ -371,7 +418,7 @@ impl RenderState {
             Some(self.config.width as f32),
             Some(self.config.height as f32),
         );
-        
+
         text_buffer.set_text(
             &d.hud_string(),
             &glyphon::Attrs::new().family(glyphon::Family::Monospace),

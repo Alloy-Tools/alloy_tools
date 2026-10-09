@@ -1,3 +1,4 @@
+use crate::Easing;
 use al_skeleton::pose::Pose2d;
 
 #[derive(Clone, Debug)]
@@ -5,6 +6,7 @@ use al_skeleton::pose::Pose2d;
 pub struct KeyFrame2d {
     pub time: f32,
     pub pose: Pose2d,
+    pub easing: Easing,
 }
 
 #[derive(Clone, Debug)]
@@ -52,7 +54,7 @@ impl AnimationClip2d {
         &self.keyframes
     }
 
-    pub fn insert(&mut self, time: f32, pose: Pose2d) {
+    pub fn insert(&mut self, time: f32, pose: Pose2d, easing: Easing) {
         let pos = self
             .keyframes
             .partition_point(|kf| kf.time < time - Self::EPS);
@@ -60,7 +62,8 @@ impl AnimationClip2d {
             self.keyframes[pos].pose = pose;
             return;
         }
-        self.keyframes.insert(pos, KeyFrame2d { time, pose });
+        self.keyframes
+            .insert(pos, KeyFrame2d { time, pose, easing });
 
         if time > self.duration {
             self.duration = time;
@@ -89,6 +92,39 @@ impl AnimationClip2d {
         } else {
             false
         }
+    }
+
+    pub fn set_easing_at(&mut self, time: f32, easing: Easing, tolerance: f32) -> bool {
+        let Some(pos) = self
+            .keyframes
+            .iter()
+            .enumerate()
+            .min_by(|(_, a), (_, b)| {
+                (a.time - time)
+                    .abs()
+                    .partial_cmp(&(b.time - time).abs())
+                    .unwrap()
+            })
+            .filter(|(_, kf)| (kf.time - time).abs() <= tolerance)
+            .map(|(i, _)| i)
+        else {
+            return false;
+        };
+        self.keyframes[pos].easing = easing;
+        true
+    }
+
+    pub fn easing_at(&self, time: f32, tolerance: f32) -> Option<Easing> {
+        self.keyframes
+            .iter()
+            .min_by(|a, b| {
+                (a.time - time)
+                    .abs()
+                    .partial_cmp(&(b.time - time).abs())
+                    .unwrap()
+            })
+            .filter(|kf| (kf.time - time).abs() <= tolerance)
+            .map(|kf| kf.easing)
     }
 
     pub fn nearest_keyframe_time(&self, t: f32) -> Option<f32> {
@@ -124,6 +160,7 @@ impl AnimationClip2d {
         let b = &self.keyframes[i];
         let span = (b.time - a.time).max(f32::EPSILON);
         let u = ((t - a.time) / span).clamp(0., 1.);
-        a.pose.blend(&b.pose, u)
+        let e = a.easing.apply(u);
+        a.pose.blend(&b.pose, e)
     }
 }
