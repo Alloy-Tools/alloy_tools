@@ -119,7 +119,7 @@ impl Aabb2d {
     ///
     /// Returns `self` unchanged if empty (min > max).
     #[inline]
-    pub fn transformed_by(self, t: crate::transform::Transform2D) -> Self {
+    pub fn transformed_by(self, t: crate::transform::Transform2d) -> Self {
         if !self.is_valid() {
             return self;
         }

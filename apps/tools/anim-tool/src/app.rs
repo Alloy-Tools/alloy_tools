@@ -5,8 +5,8 @@ use crate::{
     render::RenderState,
     state::{DesignerState, DragMode, Snapshot},
 };
-use al_math::{transform::Transform2D, vec::Vec2};
-use al_skeleton::{collider::ColliderGroup, skeleton::Skeleton2DBuilder};
+use al_math::{transform::Transform2d, vec::Vec2};
+use al_skeleton::{collider_kind::ColliderKind, skeleton::Skeleton2DBuilder};
 use winit::{application::ApplicationHandler, event::WindowEvent, window::Window};
 
 const TITLE: &str = "Skeleton2D Designer Tool";
@@ -20,46 +20,53 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
-        let t = |x, y| Transform2D::from_translation(Vec2::new(x, y));
-        let hurt = ColliderGroup::HURT;
-        let none = ColliderGroup::NONE;
+        let t = |x, y| Transform2d::from_translation(Vec2::new(x, y));
+        let hurt = ColliderKind::HURT;
+        let none = ColliderKind::NONE;
         let mut builder = Skeleton2DBuilder::new();
         // ----- spine -----
-        let hips = builder.joint("hips".into(), None, t(0., -0.05), 0.075, hurt, 0.);
-        let chest = builder.joint("chest".into(), Some(hips), t(0.02, 0.20), 0.085, hurt, 0.);
+        let hips = builder.joint("hips", None, t(0., -0.05), 0.075, hurt, 0.);
+        let chest = builder.joint("chest", Some(hips), t(0.02, 0.20), 0.085, hurt, 0.);
 
-        let neck = builder.joint("neck".into(), Some(chest), t(0.01, 0.14), 0., none, 0.);
-        let head = builder.joint("head".into(), Some(neck), t(0.02, 0.05), 0.09, hurt, 0.);
+        let neck = builder.joint("neck", Some(chest), t(0.01, 0.14), 0., none, 0.);
+        let head = builder.joint("head", Some(neck), t(0.02, 0.05), 0.09, hurt, 0.);
 
-        builder.bone("torso".into(), hips, chest, 0.09, hurt, 0.);
-        builder.bone("neck".into(), chest, head, 0.045, hurt, 0.);
+        builder.bone("torso", hips, chest, 0.09, hurt, 0.);
+        builder.bone("neck", chest, head, 0.045, hurt, 0.);
 
         // ----- arms -----
         let sh_f = builder.joint(
-            "shoulder_f".into(),
+            "shoulder_f",
             Some(chest),
             t(0.07, 0.03),
             0.,
             none,
             -0.6,
         );
-        let el_f = builder.joint("elbow_f".into(), Some(sh_f), t(0.1, -0.12), 0., none, -0.6);
-        let hd_f = builder.joint("hand_f".into(), Some(el_f), t(0.1, -0.1), 0.045, hurt, -0.6);
+        let el_f = builder.joint("elbow_f", Some(sh_f), t(0.1, -0.12), 0., none, -0.6);
+        let hd_f = builder.joint(
+            "hand_f",
+            Some(el_f),
+            t(0.1, -0.1),
+            0.045,
+            hurt,
+            -0.6,
+        );
 
-        builder.bone("upper_arm_f".into(), sh_f, el_f, 0.045, hurt, -0.6);
-        builder.bone("forearm_f".into(), el_f, hd_f, 0.04, hurt, -0.6);
+        builder.bone("upper_arm_f", sh_f, el_f, 0.045, hurt, -0.6);
+        builder.bone("forearm_f", el_f, hd_f, 0.04, hurt, -0.6);
 
         let sh_b = builder.joint(
-            "shoulder_b".into(),
+            "shoulder_b",
             Some(chest),
             t(-0.05, 0.03),
             0.,
             none,
             0.6,
         );
-        let el_b = builder.joint("elbow_b".into(), Some(sh_b), t(-0.1, -0.14), 0., none, 0.6);
+        let el_b = builder.joint("elbow_b", Some(sh_b), t(-0.1, -0.14), 0., none, 0.6);
         let hd_b = builder.joint(
-            "hand_b".into(),
+            "hand_b",
             Some(el_b),
             t(0.07, -0.08),
             0.045,
@@ -67,13 +74,13 @@ impl App {
             0.6,
         );
 
-        builder.bone("upper_arm_b".into(), sh_b, el_b, 0.045, hurt, 0.6);
-        builder.bone("forearm_b".into(), el_b, hd_b, 0.04, hurt, 0.6);
+        builder.bone("upper_arm_b", sh_b, el_b, 0.045, hurt, 0.6);
+        builder.bone("forearm_b", el_b, hd_b, 0.04, hurt, 0.6);
 
         // ----- legs -----
-        let kn_f = builder.joint("knee_f".into(), Some(hips), t(0.08, -0.22), 0., hurt, -0.6);
+        let kn_f = builder.joint("knee_f", Some(hips), t(0.08, -0.22), 0., hurt, -0.6);
         let ft_f = builder.joint(
-            "foot_f".into(),
+            "foot_f",
             Some(kn_f),
             t(0.04, -0.22),
             0.055,
@@ -81,12 +88,12 @@ impl App {
             -0.6,
         );
 
-        builder.bone("thigh_f".into(), hips, kn_f, 0.06, hurt, -0.6);
-        builder.bone("shin_f".into(), kn_f, ft_f, 0.05, hurt, -0.6);
+        builder.bone("thigh_f", hips, kn_f, 0.06, hurt, -0.6);
+        builder.bone("shin_f", kn_f, ft_f, 0.05, hurt, -0.6);
 
-        let kn_b = builder.joint("knee_b".into(), Some(hips), t(-0.06, -0.22), 0., hurt, 0.6);
+        let kn_b = builder.joint("knee_b", Some(hips), t(-0.06, -0.22), 0., hurt, 0.6);
         let ft_b = builder.joint(
-            "foot_b".into(),
+            "foot_b",
             Some(kn_b),
             t(-0.06, -0.22),
             0.055,
@@ -94,8 +101,8 @@ impl App {
             0.6,
         );
 
-        builder.bone("thigh_b".into(), hips, kn_b, 0.06, hurt, 0.6);
-        builder.bone("shin_b".into(), kn_b, ft_b, 0.05, hurt, 0.6);
+        builder.bone("thigh_b", hips, kn_b, 0.06, hurt, 0.6);
+        builder.bone("shin_b", kn_b, ft_b, 0.05, hurt, 0.6);
 
         let skeleton = builder.build();
         if let Err(e) = skeleton.validate() {
@@ -117,7 +124,7 @@ impl App {
         if designer.following {
             let world = designer.skeleton.world_transforms(&designer.pose);
             if !world.is_empty() {
-                let root = world[0].transform_point(al_math::vec::Vec2::ZERO);
+                let root = world[0].transform_point(Vec2::ZERO);
                 let target = [root.x, root.y];
                 let dt = 1.0 / 60.0;
                 designer.camera.update(target, dt);
@@ -238,7 +245,7 @@ impl ApplicationHandler for App {
                 // Recompute world before applying drag
                 let cx = designer.cursor_px[0] - 0.5 * designer.resolution[0];
                 let cy = designer.cursor_px[1] - 0.5 * designer.resolution[1];
-                designer.cursor_world = al_math::vec::Vec2::new(
+                designer.cursor_world = Vec2::new(
                     designer.camera.pos[0]
                         + (cx / designer.resolution[1]) * designer.camera.view_size,
                     designer.camera.pos[1]
@@ -470,14 +477,14 @@ impl ApplicationHandler for App {
                         // Reset root transforms (nudge squash/stretch by hand via keys)
                         KeyCode::KeyQ => {
                             designer.record(Snapshot::Pose(designer.pose.clone()));
-                            designer.pose.root_scale = al_math::vec::Vec2::new(
+                            designer.pose.root_scale = Vec2::new(
                                 (designer.pose.root_scale.x - 0.05).max(0.2),
                                 (designer.pose.root_scale.y + 0.05).min(3.0),
                             );
                         }
                         KeyCode::KeyE => {
                             designer.record(Snapshot::Pose(designer.pose.clone()));
-                            designer.pose.root_scale = al_math::vec::Vec2::new(
+                            designer.pose.root_scale = Vec2::new(
                                 (designer.pose.root_scale.x + 0.05).min(3.0),
                                 (designer.pose.root_scale.y - 0.05).max(0.2),
                             );
@@ -495,9 +502,9 @@ impl ApplicationHandler for App {
                                 }
                             } else {
                                 designer.record(Snapshot::Pose(designer.pose.clone()));
-                                designer.pose.root_scale = al_math::vec::Vec2::ONE;
+                                designer.pose.root_scale = Vec2::ONE;
                                 designer.pose.root_rotation = 0.0;
-                                designer.pose.root_translation = al_math::vec::Vec2::ZERO;
+                                designer.pose.root_translation = Vec2::ZERO;
                                 designer.status = "Root transform reset.".into();
                             }
                         }
@@ -560,15 +567,15 @@ fn apply_drag(designer: &mut DesignerState, i: usize, mode: DragMode) {
                         designer.drag_dirty = true;
                     }
                     let j = &mut designer.skeleton.joints_mut()[i];
-                    let mut t = j.rest_transform();
+                    let mut t = j.transform();
                     t.translation = target_local;
-                    *j.rest_transform_mut() = t;
+                    *j.transform_mut() = t;
                 }
             }
         }
         DragMode::RotateJoint => {
             // Rotation applied in the parent's local frame.
-            let origin = designer.skeleton.joints()[i].rest_transform().translation;
+            let origin = designer.skeleton.joints()[i].transform().to_components().0;
             let v = target_local - origin;
             if v.length() < 1e-5 {
                 return;
@@ -582,10 +589,7 @@ fn apply_drag(designer: &mut DesignerState, i: usize, mode: DragMode) {
                         designer.drag_dirty = true;
                     }
                     // Pose rotation is added on top of rest_rotation.
-                    let rest_rot = designer.skeleton.joints()[i]
-                        .rest_transform()
-                        .to_components()
-                        .1;
+                    let rest_rot = designer.skeleton.joints()[i].transform().to_components().1;
                     designer.pose.rotations[i] = angle - rest_rot;
                 }
                 crate::state::EditMode::Rest => {
@@ -594,10 +598,10 @@ fn apply_drag(designer: &mut DesignerState, i: usize, mode: DragMode) {
                         designer.drag_dirty = true;
                     }
                     let (tr, _, sc) = designer.skeleton.joints_mut()[i]
-                        .rest_transform()
+                        .transform()
                         .to_components();
-                    *designer.skeleton.joints_mut()[i].rest_transform_mut() =
-                        al_math::transform::Transform2D::new(tr, angle, sc);
+                    *designer.skeleton.joints_mut()[i].transform_mut() =
+                        al_math::transform::Transform2d::new(tr, angle, sc);
                 }
             }
         }

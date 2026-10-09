@@ -7,19 +7,19 @@ use crate::{
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Transform3D {
+pub struct Transform3d {
     pub translation: Vec3,
     pub linear: Mat3,
 }
-super::impl_transform!(Transform3D, Vec3, Mat3);
+super::impl_transform!(Transform3d, Vec3, Mat3);
 
-impl Default for Transform3D {
+impl Default for Transform3d {
     fn default() -> Self {
         Self::IDENTITY
     }
 }
 
-impl Transform3D {
+impl Transform3d {
     pub const IDENTITY: Self = Self {
         translation: Vec3::ZERO,
         linear: Mat3::IDENTITY,

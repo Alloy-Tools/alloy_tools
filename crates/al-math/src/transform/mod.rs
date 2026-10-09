@@ -1,8 +1,8 @@
 mod transform2d;
 mod transform3d;
 
-pub use transform2d::Transform2D;
-pub use transform3d::Transform3D;
+pub use transform2d::Transform2d;
+pub use transform3d::Transform3d;
 
 macro_rules! impl_transform {
     ($transform:ident, $vec:ident, $mat:ident) => {

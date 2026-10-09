@@ -130,7 +130,7 @@ impl Aabb3d {
     ///
     /// Returns `self` unchanged if empty (min > max).
     #[inline]
-    pub fn transformed_by(self, t: crate::transform::Transform3D) -> Self {
+    pub fn transformed_by(self, t: crate::transform::Transform3d) -> Self {
         if !self.is_valid() {
             return self;
         }

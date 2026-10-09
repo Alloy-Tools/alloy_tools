@@ -1,7 +1,6 @@
-use std::time::Instant;
-
 use al_anim::anim_clip::AnimationClip2d;
 use al_skeleton::{pose::Pose2d, skeleton::Skeleton2d};
+use std::time::Instant;
 
 use crate::Camera;
 

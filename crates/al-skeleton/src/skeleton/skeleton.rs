@@ -1,14 +1,17 @@
 use crate::{
-    collider::ColliderGroup,
+    collider::Collider2d,
+    collider_kind::ColliderKind,
+    sdf::{capsule_sdf, circle_sdf},
     skeleton::{Bone2d, Joint2d},
 };
-use al_math::{transform::Transform2D, vec::Vec2};
+use al_math::{transform::Transform2d, vec::Vec2};
 
 #[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Skeleton2d {
     joints: Vec<Joint2d>,
     bones: Vec<Bone2d>,
+    extras: Vec<Collider2d>,
 }
 
 impl Skeleton2d {
@@ -16,6 +19,7 @@ impl Skeleton2d {
         Self {
             joints: vec![],
             bones: vec![],
+            extras: vec![],
         }
     }
 
@@ -37,6 +41,14 @@ impl Skeleton2d {
 
     pub fn bones_mut(&mut self) -> &mut Vec<Bone2d> {
         &mut self.bones
+    }
+
+    pub fn extras(&self) -> &[Collider2d] {
+        &self.extras
+    }
+
+    pub fn extras_mut(&mut self) -> &mut Vec<Collider2d> {
+        &mut self.extras
     }
 
     pub fn validate(&self) -> Result<(), String> {
@@ -61,15 +73,15 @@ impl Skeleton2d {
         Ok(())
     }
 
-    pub fn world_transforms(&self, pose: &crate::pose::Pose2d) -> Vec<Transform2D> {
-        let mut world = vec![Transform2D::IDENTITY; self.joints.len()];
+    pub fn world_transforms(&self, pose: &crate::pose::Pose2d) -> Vec<Transform2d> {
+        let mut world = vec![Transform2d::IDENTITY; self.joints.len()];
         let root_override =
-            Transform2D::new(pose.root_translation, pose.root_rotation, pose.root_scale);
+            Transform2d::new(pose.root_translation, pose.root_rotation, pose.root_scale);
         for (i, joint) in self.joints.iter().enumerate() {
             let delta = pose.rotations.get(i).copied().unwrap_or(0.);
             let local = joint
-                .rest_transform()
-                .compose(&Transform2D::from_rotation(delta));
+                .transform()
+                .compose(&Transform2d::from_rotation(delta));
             world[i] = match joint.parent() {
                 None => root_override.compose(&local),
                 Some(p) => world[p].compose(&local),
@@ -82,7 +94,7 @@ impl Skeleton2d {
     /// Emit (position, radius) for each joint that has radius > 0.
     pub fn joint_circles<'a>(
         &'a self,
-        world: &'a [Transform2D],
+        world: &'a [Transform2d],
     ) -> impl Iterator<Item = (usize, Vec2, f32)> + 'a {
         self.joints
             .iter()
@@ -96,7 +108,7 @@ impl Skeleton2d {
     /// Emit (origin, tip, radius) for each bone.
     pub fn bone_capsules<'a>(
         &'a self,
-        world: &'a [Transform2D],
+        world: &'a [Transform2d],
     ) -> impl Iterator<Item = (Vec2, Vec2, f32)> + 'a {
         self.bones.iter().map(move |bone| {
             (
@@ -108,21 +120,22 @@ impl Skeleton2d {
     }
 
     /// Signed distance from `p` (world space) to the union of all colliders.
-    pub fn sdf(&self, world: &[Transform2D], p: Vec2) -> f32 {
+    pub fn body_sdf(&self, world: &[Transform2d], p: Vec2) -> f32 {
         let mut d = f32::INFINITY;
 
         for (i, joint) in self.joints.iter().enumerate() {
-            if joint.radius() <= 0. {
+            let rad = joint.radius();
+            if rad <= 0. {
                 continue;
             }
             let c = world[i].transform_point(Vec2::ZERO);
-            d = d.min(joint.circle_sdf(p, c));
+            d = d.min(circle_sdf(rad, p, c));
         }
 
         for bone in &self.bones {
             let a = world[bone.origin_index()].transform_point(Vec2::ZERO);
             let b = world[bone.tip_index()].transform_point(Vec2::ZERO);
-            d = d.min(bone.capsule_sdf(p, a, b));
+            d = d.min(capsule_sdf(bone.radius(), p, a, b));
         }
 
         d
@@ -132,25 +145,85 @@ impl Skeleton2d {
     /// # Example
     /// - let defender_hurt = skeleton.sdf_of_group(&world, p, ColliderGroup::HURT);
     /// - let attacker_hit  = skeleton.sdf_of_group(&world, p, ColliderGroup::HIT);
-    pub fn sdf_of_group(&self, world: &[Transform2D], p: Vec2, mask: ColliderGroup) -> f32 {
+    pub fn body_sdf_of_group(&self, world: &[Transform2d], p: Vec2, mask: ColliderKind) -> f32 {
         let mut d = f32::INFINITY;
         for (i, joint) in self.joints.iter().enumerate() {
-            if joint.radius() <= 0. || !joint.group().intersects(mask) {
+            let rad = joint.radius();
+            if rad <= 0. || !joint.kind().intersects(mask) {
                 continue;
             }
             let c = world[i].transform_point(Vec2::ZERO);
-            d = d.min(joint.circle_sdf(p, c));
+            d = d.min(circle_sdf(rad, p, c));
         }
 
         for bone in &self.bones {
-            if !bone.group().intersects(mask) {
+            if !bone.kind().intersects(mask) {
                 continue;
             }
             let a = world[bone.origin_index()].transform_point(Vec2::ZERO);
             let e = world[bone.tip_index()].transform_point(Vec2::ZERO);
-            d = d.min(bone.capsule_sdf(p, a, e));
+            d = d.min(capsule_sdf(bone.radius(), p, a, e));
         }
 
         d
+    }
+
+    pub fn extra_sdf(&self, world: &[Transform2d], p: Vec2, active: &[bool]) -> f32 {
+        let mut d = f32::INFINITY;
+        for (i, extra) in self.extras.iter().enumerate() {
+            if !active.get(i).copied().unwrap_or(false) {
+                continue;
+            }
+            d = d.min(active_extra(extra, world, p))
+        }
+        d
+    }
+
+    pub fn extra_sdf_of_group(
+        &self,
+        world: &[Transform2d],
+        p: Vec2,
+        mask: ColliderKind,
+        active: &[bool],
+    ) -> f32 {
+        let mut d = f32::INFINITY;
+        for (i, extra) in self.extras.iter().enumerate() {
+            if !active.get(i).copied().unwrap_or(false) || !extra.kind().intersects(mask) {
+                continue;
+            }
+            d = d.min(active_extra(extra, world, p))
+        }
+        d
+    }
+}
+
+fn active_extra(extra: &Collider2d, world: &[Transform2d], p: Vec2) -> f32 {
+    match extra.shape() {
+        crate::collider::Shape2d::Circle { origin, radius } => {
+            let offset = origin.to_components().0;
+            let o = if let Some(idx) = extra.parent() {
+                world[idx].transform_point(offset)
+            } else {
+                offset
+            };
+            circle_sdf(radius, p, o)
+        }
+        crate::collider::Shape2d::Capsule {
+            origin,
+            tip,
+            radius,
+        } => {
+            let o_offset = origin.to_components().0;
+            let t_offset = tip.to_components().0;
+            let (o, t) = if let Some(idx) = extra.parent() {
+                (
+                    world[idx].transform_point(o_offset),
+                    world[idx].transform_point(t_offset),
+                )
+            } else {
+                (o_offset, t_offset)
+            };
+            capsule_sdf(radius, p, o, t)
+        }
     }
 }

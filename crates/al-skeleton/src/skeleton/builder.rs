@@ -1,8 +1,8 @@
 use crate::{
-    collider::ColliderGroup,
+    collider::{Collider2d, Shape2d},
+    collider_kind::ColliderKind,
     skeleton::{bone::Bone2d, joint::Joint2d, Skeleton2d},
 };
-use al_math::transform::Transform2D;
 
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -19,11 +19,11 @@ impl Skeleton2DBuilder {
 
     pub fn joint(
         &mut self,
-        name: String,
+        name: impl Into<String>,
         parent: Option<usize>,
-        local: Transform2D,
+        transform: al_math::transform::Transform2d,
         radius: f32,
-        group: ColliderGroup,
+        kind: ColliderKind,
         depth: f32,
     ) -> usize {
         let joints = self.skeleton.joints_mut();
@@ -31,27 +31,47 @@ impl Skeleton2DBuilder {
         if let Some(p) = parent {
             assert!(p < idx);
         }
-        joints.push(Joint2d::new(name, parent, local, radius, group, depth));
+        joints.push(Joint2d::new(
+            name.into(),
+            parent,
+            transform,
+            radius,
+            kind,
+            depth,
+        ));
         idx
     }
 
     pub fn bone(
         &mut self,
-        name: String,
+        name: impl Into<String>,
         origin_index: usize,
         tip_index: usize,
         radius: f32,
-        group: ColliderGroup,
+        kind: ColliderKind,
         depth: f32,
     ) {
         self.skeleton.bones_mut().push(Bone2d::new(
-            name,
+            name.into(),
             origin_index,
             tip_index,
             radius,
-            group,
+            kind,
             depth,
         ));
+    }
+
+    pub fn extra(
+        &mut self,
+        name: impl Into<String>,
+        parent: Option<usize>,
+        shape: Shape2d,
+        kind: ColliderKind,
+    ) -> usize {
+        let extras = self.skeleton.extras_mut();
+        let idx = extras.len();
+        extras.push(Collider2d::new(name.into(), parent, shape, kind));
+        idx
     }
 
     pub fn build(self) -> Skeleton2d {

@@ -1,82 +1,109 @@
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+use crate::collider_kind::ColliderKind;
+use al_math::transform::Transform2d;
+
+#[derive(Clone, Copy, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ColliderGroup(u8);
-
-impl ColliderGroup {
-    pub const NONE: Self = Self(0);
-    pub const HIT: Self = Self(1 << 0);
-    pub const HURT: Self = Self(1 << 1);
-    pub const PUSH: Self = Self(1 << 2);
-    pub const ALL: Self = Self(0b111);
-
-    pub const fn empty() -> Self {
-        Self::NONE
-    }
-    pub const fn is_empty(self) -> bool {
-        self.0 == 0
-    }
-
-    pub const fn contains(self, other: Self) -> bool {
-        (self.0 & other.0) == other.0
-    }
-    pub const fn intersects(self, other: Self) -> bool {
-        (self.0 & other.0) != 0
-    }
-
-    pub const fn union(self, other: Self) -> Self {
-        Self(self.0 | other.0)
-    }
-    pub const fn without(self, other: Self) -> Self {
-        Self(self.0 & !other.0)
-    }
+pub enum Shape2d {
+    Circle {
+        origin: Transform2d,
+        radius: f32,
+    },
+    Capsule {
+        origin: Transform2d,
+        tip: Transform2d,
+        radius: f32,
+    },
 }
 
-impl std::ops::BitOr for ColliderGroup {
-    type Output = Self;
-    fn bitor(self, rhs: Self) -> Self {
-        self.union(rhs)
+impl Shape2d {
+    pub fn circle(origin: Transform2d, radius: f32) -> Self {
+        Self::Circle { origin, radius }
     }
-}
 
-impl std::ops::BitOrAssign for ColliderGroup {
-    fn bitor_assign(&mut self, rhs: Self) {
-        self.0 |= rhs.0;
-    }
-}
-
-impl std::ops::BitAnd for ColliderGroup {
-    type Output = Self;
-    fn bitand(self, rhs: Self) -> Self {
-        Self(self.0 & rhs.0)
-    }
-}
-
-impl std::ops::Not for ColliderGroup {
-    type Output = Self;
-    fn not(self) -> Self {
-        Self(!self.0 & Self::ALL.0)
-    }
-}
-
-impl std::fmt::Debug for ColliderGroup {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.is_empty() {
-            return write!(f, "None");
+    pub fn capsule(origin: Transform2d, tip: Transform2d, radius: f32) -> Self {
+        Self::Capsule {
+            origin,
+            tip,
+            radius,
         }
-        let mut first = true;
-        for (name, bit) in [
-            ("Hit", Self::HIT),
-            ("Hurt", Self::HURT),
-            ("Push", Self::PUSH),
-        ] {
-            if self.intersects(bit) {
-                if !first {
-                    write!(f, "|")?;
-                }
-                write!(f, "{name}")?;
-                first = false;
-            }
+    }
+
+    pub fn radius(&self) -> f32 {
+        match self {
+            Shape2d::Circle { radius, .. } => *radius,
+            Shape2d::Capsule { radius, .. } => *radius,
         }
-        Ok(())
+    }
+
+    pub fn set_radius(&mut self, radius: f32) {
+        *match self {
+            Shape2d::Circle { radius, .. } => radius,
+            Shape2d::Capsule { radius, .. } => radius,
+        } = radius;
+    }
+
+    pub fn origin(&self) -> Transform2d {
+        match self {
+            Shape2d::Circle { origin, .. } => *origin,
+            Shape2d::Capsule { origin, .. } => *origin,
+        }
+    }
+
+    pub fn set_origin(&mut self, origin: Transform2d) {
+        *match self {
+            Shape2d::Circle { origin, .. } => origin,
+            Shape2d::Capsule { origin, .. } => origin,
+        } = origin;
+    }
+
+    pub fn origin_mut(&mut self) -> &mut Transform2d {
+        match self {
+            Shape2d::Circle { origin, .. } => origin,
+            Shape2d::Capsule { origin, .. } => origin,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Collider2d {
+    name: String,
+    parent: Option<usize>,
+    shape: Shape2d,
+    kind: ColliderKind,
+}
+
+impl Collider2d {
+    pub fn new(name: String, parent: Option<usize>, shape: Shape2d, kind: ColliderKind) -> Self {
+        Self {
+            name,
+            parent,
+            shape,
+            kind,
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn parent(&self) -> Option<usize> {
+        self.parent
+    }
+
+    pub fn shape(&self) -> Shape2d {
+        self.shape
+    }
+
+    pub fn shape_mut(&mut self) -> &mut Shape2d {
+        &mut self.shape
+    }
+
+    pub fn kind(&self) -> ColliderKind {
+        self.kind
+    }
+
+    pub fn set_kind(&mut self, kind: ColliderKind) {
+        self.kind = kind
     }
 }

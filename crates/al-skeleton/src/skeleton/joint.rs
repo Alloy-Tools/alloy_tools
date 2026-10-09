@@ -1,14 +1,13 @@
-use crate::collider::ColliderGroup;
-use al_math::{transform::Transform2D, vec::Vec2};
+use crate::{
+    collider::{Collider2d, Shape2d},
+    collider_kind::ColliderKind,
+};
+use al_math::transform::Transform2d;
 
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Joint2d {
-    name: String,
-    parent: Option<usize>,
-    rest_transform: Transform2D,
-    radius: f32,
-    group: ColliderGroup,
+    collider: Collider2d,
     depth: f32,
 }
 
@@ -16,59 +15,50 @@ impl Joint2d {
     pub fn new(
         name: String,
         parent: Option<usize>,
-        rest_transform: Transform2D,
+        transform: Transform2d,
         radius: f32,
-        group: ColliderGroup,
+        kind: ColliderKind,
         depth: f32,
     ) -> Self {
         Self {
-            name,
-            parent,
-            rest_transform,
-            radius,
-            group,
+            collider: Collider2d::new(name, parent, Shape2d::circle(transform, radius), kind),
             depth,
         }
     }
 
     pub fn name(&self) -> &str {
-        &self.name
+        &self.collider.name()
     }
 
     pub fn parent(&self) -> Option<usize> {
-        self.parent
+        self.collider.parent()
     }
 
-    pub fn rest_transform(&self) -> Transform2D {
-        self.rest_transform
+    pub fn transform(&self) -> Transform2d {
+        self.collider.shape().origin()
     }
 
-    pub fn rest_transform_mut(&mut self) -> &mut Transform2D {
-        &mut self.rest_transform
+    pub fn transform_mut(&mut self) -> &mut Transform2d {
+        self.collider.shape_mut().origin_mut()
     }
 
     pub fn radius(&self) -> f32 {
-        self.radius
+        self.collider.shape().radius()
     }
 
     pub fn set_radius(&mut self, r: f32) {
-        self.radius = r;
+        self.collider.shape().set_radius(r)
     }
 
-    pub fn group(&self) -> ColliderGroup {
-        self.group
+    pub fn kind(&self) -> ColliderKind {
+        self.collider.kind()
     }
 
-    pub fn set_group(&mut self, g: ColliderGroup) {
-        self.group = g;
+    pub fn set_kind(&mut self, k: ColliderKind) {
+        self.collider.set_kind(k)
     }
 
     pub fn depth(&self) -> f32 {
         self.depth
-    }
-
-    #[inline]
-    pub fn circle_sdf(&self, point: Vec2, origin: Vec2) -> f32 {
-        (point - origin).length() - self.radius
     }
 }
