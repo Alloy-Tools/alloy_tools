@@ -1,7 +1,12 @@
-use al_math::vec::{Vec2, Vec4};
+use al_math::{
+    transform::Transform2d,
+    vec::{Vec2, Vec4},
+};
 use al_skeleton::skeleton::ColliderRef;
 use bytemuck::Zeroable;
 use wgpu::{Surface, SurfaceConfiguration};
+
+use crate::app::FPS;
 
 pub const MAX_SKELETON_PRIMS: usize = 256;
 
@@ -268,11 +273,69 @@ impl RenderState {
             .write_buffer(&self.globals_buffer, 0, bytemuck::bytes_of(&globals));
 
         // ---- Build the rig primitive list ----
-        let world = d.skeleton.world_transforms(&d.pose);
         let mut prims: Vec<SdfPrim> = Vec::with_capacity(MAX_SKELETON_PRIMS);
 
-        // Body fills first (bottom layer).
-        for (i, joint) in d.skeleton.joints().iter().enumerate() {
+        // Onion skins (always lowest).
+        if d.onion_keys > 0 {
+            let clip = d.clip();
+            let keys = clip.keyframes();
+            if !keys.is_empty() {
+                let curr = keys.partition_point(|kf| kf.time <= d.time);
+
+                match d.onion_mode {
+                    crate::state::OnionMode::Keys => {
+                        for offset in 1..=d.onion_keys {
+                            let alpha = 0.22 / offset as f32;
+                            if let Some(idx) = curr.checked_sub(offset) {
+                                push_body_prims(
+                                    d,
+                                    &mut prims,
+                                    &d.skeleton.world_transforms(&keys[idx].pose),
+                                    Vec4::new(1., 0.35, 0.35, 1.),
+                                    alpha,
+                                );
+                            }
+                            let next_idx = curr + offset - 1;
+                            if next_idx < keys.len() {
+                                push_body_prims(
+                                    d,
+                                    &mut prims,
+                                    &d.skeleton.world_transforms(&keys[next_idx].pose),
+                                    Vec4::new(0.35, 0.55, 1., 1.),
+                                    alpha,
+                                );
+                            }
+                        }
+                    }
+                    crate::state::OnionMode::Time => {
+                        for k in 1..=d.onion_keys {
+                            let dt = k as f32 / FPS;
+                            let alpha = 0.22 / k as f32;
+                            for (t, color) in [
+                                (d.time - dt, Vec4::new(1., 0.35, 0.35, 1.)),
+                                (d.time + dt, Vec4::new(0.35, 0.55, 1., 1.)),
+                            ] {
+                                if t < 0. || t > clip.duration() {
+                                    continue;
+                                }
+                                push_body_prims(
+                                    d,
+                                    &mut prims,
+                                    &d.skeleton.world_transforms(&clip.sample(t)),
+                                    color,
+                                    alpha,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Live body (bottom layer).
+        let world = d.skeleton.world_transforms(&d.pose);
+        push_body_prims(d, &mut prims, &world, Vec4::new(0.82, 0.85, 0.92, 1.), 1.);
+        /*for (i, joint) in d.skeleton.joints().iter().enumerate() {
             if joint.radius() <= 0.0 {
                 continue;
             }
@@ -299,7 +362,7 @@ impl RenderState {
                 _pad: Vec2::new(0., 0.),
                 color: depth_tint(base_color, bone.depth()),
             });
-        }
+        }*/
 
         if d.show_extras {
             for (i, extra) in d.skeleton.extras().iter().enumerate() {
@@ -485,5 +548,44 @@ impl RenderState {
         self.queue.submit(Some(encoder.finish()));
         self.atlas.trim();
         self.queue.present(surface_texture);
+    }
+}
+
+fn push_body_prims(
+    d: &crate::state::DesignerState,
+    prims: &mut Vec<SdfPrim>,
+    world: &[Transform2d],
+    base_color: Vec4,
+    alpha_mul: f32,
+) {
+    for (i, joint) in d.skeleton.joints().iter().enumerate() {
+        let rad = joint.radius();
+        if rad <= 0. {
+            continue;
+        }
+        let c = world[i].transform_point(Vec2::ZERO);
+        let col = depth_tint(base_color, joint.depth());
+        prims.push(SdfPrim {
+            origin: c,
+            tip: c,
+            radius: rad,
+            kind: joint.kind().inner() as u32,
+            _pad: Vec2::ZERO,
+            color: Vec4::new(col.x, col.y, col.z, col.w * alpha_mul),
+        });
+    }
+
+    for bone in d.skeleton.bones() {
+        let o = world[bone.origin_index()].transform_point(Vec2::ZERO);
+        let t = world[bone.tip_index()].transform_point(Vec2::ZERO);
+        let col = depth_tint(base_color, bone.depth());
+        prims.push(SdfPrim {
+            origin: o,
+            tip: t,
+            radius: bone.radius(),
+            kind: bone.kind().inner() as u32,
+            _pad: Vec2::ZERO,
+            color: Vec4::new(col.x, col.y, col.z, col.w * alpha_mul),
+        });
     }
 }

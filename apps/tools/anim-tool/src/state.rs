@@ -1,3 +1,4 @@
+use crate::{app::SCRUB_TOL, Camera};
 use al_anim::{anim_clip::AnimationClip2d, Easing};
 use al_skeleton::{
     pose::Pose2d,
@@ -5,9 +6,7 @@ use al_skeleton::{
 };
 use std::time::Instant;
 
-use crate::{app::SCRUB_TOL, Camera};
-
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum EditMode {
     Pose,
     Rest,
@@ -38,13 +37,13 @@ impl EditMode {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum DragMode {
     MoveJoint,
     RotateJoint,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Snapshot {
     Skeleton(Skeleton2d),
     Pose(Pose2d),
@@ -69,11 +68,27 @@ impl History {
     }
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, Debug)]
 pub struct InputState {
     pub ctrl_held: bool,
     pub shift_held: bool,
     pub alt_held: bool,
+}
+
+#[derive(Default, Clone, Copy, Debug)]
+pub enum OnionMode {
+    #[default]
+    Keys,
+    Time,
+}
+
+impl OnionMode {
+    pub fn cycle(self) -> Self {
+        match self {
+            OnionMode::Keys => OnionMode::Time,
+            OnionMode::Time => OnionMode::Keys,
+        }
+    }
 }
 
 pub struct DesignerState {
@@ -86,6 +101,8 @@ pub struct DesignerState {
     pub edit_mode: EditMode,
     pub show_extras: bool,
     pub extra_active: Vec<bool>,
+    pub onion_keys: usize,
+    pub onion_mode: OnionMode,
 
     pub clips: Vec<AnimationClip2d>,
     pub current_clip: usize,
@@ -123,6 +140,8 @@ impl DesignerState {
             edit_mode: EditMode::Pose,
             show_extras: false,
             extra_active: vec![false; len],
+            onion_keys: 0,
+            onion_mode: Default::default(),
             clips: vec![AnimationClip2d::new("default")],
             current_clip: 0,
             time: 0.,

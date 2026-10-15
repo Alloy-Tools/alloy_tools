@@ -22,7 +22,7 @@ impl std::fmt::Display for Easing {
 }
 
 impl Easing {
-    pub const All: [Easing; 5] = [
+    pub const ALL: [Easing; 5] = [
         Self::Linear,
         Self::EaseIn,
         Self::EaseOut,
@@ -31,8 +31,8 @@ impl Easing {
     ];
 
     pub fn next(self) -> Self {
-        let i = Self::All.iter().position(|e| self == *e).unwrap_or(0);
-        Self::All[(i + 1) % Self::All.len()]
+        let i = Self::ALL.iter().position(|e| self == *e).unwrap_or(0);
+        Self::ALL[(i + 1) % Self::ALL.len()]
     }
 
     pub fn apply(self, t: f32) -> f32 {

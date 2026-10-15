@@ -1,9 +1,7 @@
 use std::{sync::Arc, time::Instant};
 
 use crate::{
-    block_on,
-    render::RenderState,
-    state::{DesignerState, DragMode, Snapshot},
+    block_on, render::RenderState, state::{DesignerState, DragMode, OnionMode, Snapshot},
 };
 use al_math::{transform::Transform2d, vec::Vec2};
 use al_skeleton::{
@@ -15,6 +13,8 @@ use winit::{application::ApplicationHandler, event::WindowEvent, window::Window}
 const TITLE: &str = "Skeleton2D Designer Tool";
 const START_SIZE: winit::dpi::LogicalSize<i32> = winit::dpi::LogicalSize::new(800, 600);
 pub const SCRUB_TOL: f32 = 1. / 30.;
+pub const FPS: f32 = 60.;
+pub const DT: f32 = 1. / FPS;
 
 pub struct App {
     window: Option<Arc<Window>>,
@@ -99,8 +99,7 @@ impl App {
             if !world.is_empty() {
                 let root = world[0].transform_point(Vec2::ZERO);
                 let target = [root.x, root.y];
-                let dt = 1.0 / 60.0;
-                designer.camera.update(target, dt);
+                designer.camera.update(target, DT);
             }
         }
         if designer.playing {
@@ -376,11 +375,7 @@ impl ApplicationHandler for App {
                         }
 
                         KeyCode::ArrowLeft => {
-                            let step = if designer.keys.alt_held {
-                                1. / 60.
-                            } else {
-                                5. / 60.
-                            };
+                            let step = if designer.keys.alt_held { DT } else { 5. * DT };
                             //REIVEW: Cycle to clip duration instead of clamping?
                             designer.time = (designer.time - step).max(0.);
                             if !designer.clip().keyframes().is_empty() {
@@ -389,11 +384,7 @@ impl ApplicationHandler for App {
                         }
 
                         KeyCode::ArrowRight => {
-                            let step = if designer.keys.alt_held {
-                                1. / 60.
-                            } else {
-                                5. / 60.
-                            };
+                            let step = if designer.keys.alt_held { DT } else { 5. * DT };
                             designer.time = designer.time + step;
                             if !designer.clip().keyframes().is_empty() {
                                 designer.pose = designer.clip().sample(designer.time);
@@ -446,9 +437,7 @@ impl ApplicationHandler for App {
                                 if let Some(curr) = current {
                                     let next = curr.next();
                                     let time = designer.time;
-                                    designer
-                                        .clip_mut()
-                                        .set_easing_at(time, next, SCRUB_TOL);
+                                    designer.clip_mut().set_easing_at(time, next, SCRUB_TOL);
                                     designer.status = format!("Easing {curr} -> {next}");
                                 } else {
                                     designer.status = "No keyframes near playhead.".into();
@@ -488,6 +477,26 @@ impl ApplicationHandler for App {
                         KeyCode::KeyA if designer.keys.shift_held => {
                             if let Some(ColliderRef::Extra(i)) = designer.selected {
                                 designer.extra_active[i] = !designer.extra_active[i];
+                            }
+                        }
+
+                        KeyCode::KeyO if designer.keys.ctrl_held => {
+                            if designer.keys.shift_held {
+                                designer.onion_keys = (designer.onion_keys + 1) % 4;
+                                designer.status = if designer.onion_keys == 0 {
+                                    "Onion view: Off".into()
+                                } else {
+                                    format!(
+                                        "Onion view: {} prev/next {}",
+                                        designer.onion_keys,
+                                        match designer.onion_mode {
+                                            OnionMode::Keys => "keys",
+                                            OnionMode::Time => "time"
+                                        }
+                                    )
+                                }
+                            } else {
+                                designer.onion_mode = designer.onion_mode.cycle();
                             }
                         }
 
