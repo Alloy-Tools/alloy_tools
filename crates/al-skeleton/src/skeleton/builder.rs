@@ -22,8 +22,9 @@ impl Skeleton2DBuilder {
         &mut self,
         name: impl Into<String>,
         parent: Option<usize>,
-        transform: al_math::transform::Transform2d,
+        center: al_math::vec::Vec2,
         radius: f32,
+        rotation: f32,
         kind: ColliderKind,
         depth: f32,
     ) -> usize {
@@ -35,8 +36,9 @@ impl Skeleton2DBuilder {
         joints.push(Joint2d::new(
             name.into(),
             parent,
-            transform,
+            center,
             radius,
+            rotation,
             kind,
             depth,
         ));

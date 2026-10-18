@@ -2,12 +2,13 @@ use crate::{
     collider::Collider2d,
     collider_kind::ColliderKind,
 };
-use al_math::{sdf::Sdf2d, transform::Transform2d};
+use al_math::{sdf::Sdf2d, vec::Vec2};
 
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Joint2d {
     collider: Collider2d,
+    rotation: f32,
     depth: f32,
 }
 
@@ -15,13 +16,15 @@ impl Joint2d {
     pub fn new(
         name: String,
         parent: Option<usize>,
-        transform: Transform2d,
+        center: Vec2,
         radius: f32,
+        rotation: f32,
         kind: ColliderKind,
         depth: f32,
     ) -> Self {
         Self {
-            collider: Collider2d::new(name, parent, Sdf2d::circle(transform, radius), kind),
+            collider: Collider2d::new(name, parent, Sdf2d::circle(center, radius), kind),
+            rotation,
             depth,
         }
     }
@@ -34,28 +37,48 @@ impl Joint2d {
         self.collider.parent()
     }
 
-    pub fn transform(&self) -> Transform2d {
-        self.collider.shape().origin()
+    pub fn center(&self) -> Vec2 {
+        let Sdf2d::Circle { center, .. } = self.collider.shape() else {
+            panic!("Joint has shape `{}` instead of `Circle`", self.collider.shape().name())
+        };
+        center
     }
 
-    pub fn transform_mut(&mut self) -> &mut Transform2d {
-        self.collider.shape_mut().origin_mut()
+    pub fn set_center(&mut self, center: Vec2) {
+        let Sdf2d::Circle { center: cen, .. } = self.collider.shape_mut() else {
+            panic!("Joint has shape `{}` instead of `Circle`", self.collider.shape().name())
+        };
+        *cen = center;
     }
 
     pub fn radius(&self) -> f32 {
-        self.collider.shape().radius()
+        let Sdf2d::Circle { radius, .. } = self.collider.shape() else {
+            panic!("Joint has shape `{}` instead of `Circle`", self.collider.shape().name())
+        };
+        radius
     }
 
-    pub fn set_radius(&mut self, r: f32) {
-        self.collider.shape().set_radius(r)
+    pub fn set_radius(&mut self, radius: f32) {
+        let Sdf2d::Circle { radius: rad, .. } = self.collider.shape_mut() else {
+            panic!("Joint has shape `{}` instead of `Circle`", self.collider.shape().name())
+        };
+        *rad = radius;
+    }
+
+    pub fn rotation(&self) -> f32 {
+        self.rotation
+    }
+
+    pub fn set_rotation(&mut self, rotation: f32) {
+        self.rotation = rotation;
     }
 
     pub fn kind(&self) -> ColliderKind {
         self.collider.kind()
     }
 
-    pub fn set_kind(&mut self, k: ColliderKind) {
-        self.collider.set_kind(k)
+    pub fn set_kind(&mut self, kind: ColliderKind) {
+        self.collider.set_kind(kind);
     }
 
     pub fn depth(&self) -> f32 {

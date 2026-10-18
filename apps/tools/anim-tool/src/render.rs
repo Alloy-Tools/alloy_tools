@@ -484,9 +484,9 @@ impl RenderState {
                     Vec4::new(0.3, 0.55, 0.3, 0.35)
                 };
                 prims.push(if let Some(idx) = extra.parent() {
-                    Sdf2dPrim::from_shape(shape, |p: Vec2| world[idx].transform_point(p), color)
+                    shape.to_prim(|p| world[idx].transform_point(p), color)
                 } else {
-                    Sdf2dPrim::from_shape(shape, |p: Vec2| p, color)
+                    shape.to_prim(|p| p, color)
                 });
             }
         }

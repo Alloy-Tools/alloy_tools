@@ -118,15 +118,20 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
     return out;
 }
 
-fn sd_circle(p: vec2<f32>, c: vec2<f32>, r: f32) -> f32 {
+fn sdf_circle(p: vec2<f32>, c: vec2<f32>, r: f32) -> f32 {
     return length(p - c) - r;
 }
 
-fn sd_capsule(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
+fn sdf_capsule(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
     let pa = p - a;
     let ba = b - a;
     let h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-8), 0., 1.);
     return length(pa - ba * h) - r;
+}
+
+fn sdf_rect(p: vec2<f32>, c: vec2<f32>, h: vec2<f32>, r: f32) -> f32 {
+    let q = abs(p - c) - h + vec2<f32>(r);
+    return length(max(q, vec2<f32>(0.))) + min(max(q.x, q.y), 0.) - r;
 }
 
 @fragment
@@ -135,9 +140,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     var d: f32;
     if prim.kind == 0u {
-        d = sd_circle(in.world, prim.a, prim.radius);
-    } else {
-        d = sd_capsule(in.world, prim.a, prim.b, prim.radius);
+        d = sdf_circle(in.world, prim.a, prim.radius);
+    } else if prim.kind == 1u {
+        d = sdf_capsule(in.world, prim.a, prim.b, prim.radius);
+    } else if prim.kind == 2u {
+        d = sdf_rect(in.world, prim.a, prim.b, prim.radius);
     }
 
     let aa = max(fwidth(d), 1e-5);

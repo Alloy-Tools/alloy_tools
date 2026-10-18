@@ -13,6 +13,16 @@ pub struct KeyFrame2d {
     pub easing: Easing,
 }
 
+// TODO: Wire up camera insert/delete keybinds
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct CameraKeyFrame2d {
+    pub time: f32,
+    pub pos: [f32; 2],
+    pub view_size: f32,
+    pub easing: Easing,
+}
+
 #[derive(Copy, Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum AttachType {
@@ -31,6 +41,7 @@ pub struct AnimationClip2d {
     duration: f32,
     looping: bool,
     keyframes: Vec<KeyFrame2d>,
+    camera_keys: Vec<CameraKeyFrame2d>,
     vfx: Vec<Vfx2d>,
 }
 
@@ -43,6 +54,7 @@ impl AnimationClip2d {
             duration: 0.,
             looping: false,
             keyframes: Vec::new(),
+            camera_keys: Vec::new(),
             vfx: Vec::new(),
         }
     }
@@ -69,6 +81,10 @@ impl AnimationClip2d {
 
     pub fn keyframes(&self) -> &[KeyFrame2d] {
         &self.keyframes
+    }
+
+    pub fn camera_keyframes(&self) -> &[CameraKeyFrame2d] {
+        &self.camera_keys
     }
 
     pub fn vfx(&self) -> &[Vfx2d] {
@@ -194,6 +210,15 @@ impl AnimationClip2d {
         t: f32,
         skeleton: &al_skeleton::skeleton::Skeleton2d,
     ) -> Vec<Sdf2dPrim> {
+        if self.keyframes.is_empty() {
+            return Vec::new();
+        }
+        let t = if self.looping && self.duration > 0. {
+            t.rem_euclid(self.duration)
+        } else {
+            t.clamp(0., self.duration)
+        };
+
         let mut out = Vec::new();
         //REVIEW: Should this use easing as well?
         let curr_world = skeleton.world_transforms(&self.sample(t));
@@ -221,15 +246,12 @@ impl AnimationClip2d {
                 AttachType::World { pos } => (al_math::transform::Transform2d::IDENTITY, pos),
             };
 
-            let xform = |p: Vec2| {
-                let r = p.rotate(rotation) * scale + frame_offset;
-                frame_tf.transform_point(r) + motion
-            };
-
             let col = vfx.color();
-            out.push(Sdf2dPrim::from_shape(
-                vfx.shape(),
-                xform,
+            out.push(vfx.shape().to_prim(
+                |p: Vec2| {
+                    let r = p.rotate(rotation) * scale + frame_offset;
+                    frame_tf.transform_point(r) + motion
+                },
                 Vec4::new(col.x, col.y, col.z, col.w * alpha),
             ));
         }

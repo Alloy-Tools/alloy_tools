@@ -4,7 +4,7 @@ use crate::{
     skeleton::{Bone2d, Joint2d},
 };
 use al_math::{
-    sdf::{capsule_sdf_2d, circle_sdf_2d, Sdf2d},
+    sdf::{capsule_sdf_2d, circle_sdf_2d, rect_sdf_2d, Sdf2d},
     transform::Transform2d,
     vec::Vec2,
 };
@@ -108,9 +108,7 @@ impl Skeleton2d {
             Transform2d::new(pose.root_translation, pose.root_rotation, pose.root_scale);
         for (i, joint) in self.joints.iter().enumerate() {
             let delta = pose.rotations.get(i).copied().unwrap_or(0.);
-            let local = joint
-                .transform()
-                .compose(&Transform2d::from_rotation(delta));
+            let local = Transform2d::from_translation(joint.center()).with_rotation(delta);
             world[i] = match joint.parent() {
                 None => root_override.compose(&local),
                 Some(p) => world[p].compose(&local),
@@ -157,14 +155,13 @@ impl Skeleton2d {
             if rad <= 0. {
                 continue;
             }
-            let c = world[i].transform_point(Vec2::ZERO);
-            d = d.min(circle_sdf_2d(rad, p, c));
+            d = d.min(circle_sdf_2d(p, rad, world[i].transform_point(Vec2::ZERO)));
         }
 
         for bone in &self.bones {
             let a = world[bone.origin_index()].transform_point(Vec2::ZERO);
             let b = world[bone.tip_index()].transform_point(Vec2::ZERO);
-            d = d.min(capsule_sdf_2d(bone.radius(), p, a, b));
+            d = d.min(capsule_sdf_2d(p, bone.radius(), a, b));
         }
 
         d
@@ -181,8 +178,7 @@ impl Skeleton2d {
             if rad <= 0. || !joint.kind().intersects(mask) {
                 continue;
             }
-            let c = world[i].transform_point(Vec2::ZERO);
-            d = d.min(circle_sdf_2d(rad, p, c));
+            d = d.min(circle_sdf_2d(p, rad, world[i].transform_point(Vec2::ZERO)));
         }
 
         for bone in &self.bones {
@@ -191,7 +187,7 @@ impl Skeleton2d {
             }
             let a = world[bone.origin_index()].transform_point(Vec2::ZERO);
             let e = world[bone.tip_index()].transform_point(Vec2::ZERO);
-            d = d.min(capsule_sdf_2d(bone.radius(), p, a, e));
+            d = d.min(capsule_sdf_2d(p, bone.radius(), a, e));
         }
 
         d
@@ -228,31 +224,40 @@ impl Skeleton2d {
 
 pub fn active_extra(extra: &Collider2d, world: &[Transform2d], p: Vec2) -> f32 {
     match extra.shape() {
-        Sdf2d::Circle { origin, radius } => {
-            let offset = origin.to_components().0;
-            let o = if let Some(idx) = extra.parent() {
-                world[idx].transform_point(offset)
+        Sdf2d::Circle { center, radius } => {
+            let c = if let Some(idx) = extra.parent() {
+                world[idx].transform_point(center)
             } else {
-                offset
+                center
             };
-            circle_sdf_2d(radius, p, o)
+            circle_sdf_2d(p, radius, c)
         }
         Sdf2d::Capsule {
             origin,
             tip,
             radius,
         } => {
-            let o_offset = origin.to_components().0;
-            let t_offset = tip.to_components().0;
             let (o, t) = if let Some(idx) = extra.parent() {
                 (
-                    world[idx].transform_point(o_offset),
-                    world[idx].transform_point(t_offset),
+                    world[idx].transform_point(origin),
+                    world[idx].transform_point(tip),
                 )
             } else {
-                (o_offset, t_offset)
+                (origin, tip)
             };
-            capsule_sdf_2d(radius, p, o, t)
+            capsule_sdf_2d(p, radius, o, t)
+        }
+        Sdf2d::Rect {
+            center,
+            half_size,
+            corner_radius,
+        } => {
+            let c = if let Some(idx) = extra.parent() {
+                world[idx].transform_point(center)
+            } else {
+                center
+            };
+            rect_sdf_2d(p, c, half_size, corner_radius)
         }
     }
 }

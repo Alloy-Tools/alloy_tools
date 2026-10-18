@@ -1,15 +1,12 @@
-use crate::{
-    sdf::sdf_2d::Sdf2d,
-    vec::{Vec2, Vec4},
-};
+use crate::vec::{Vec2, Vec4};
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 #[cfg_attr(feature = "gpu", derive(bytemuck::Pod, bytemuck::Zeroable,))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Sdf2dPrim {
-    origin: Vec2,
-    tip: Vec2,
+    a: Vec2,
+    b: Vec2,
     radius: f32,
     kind: u32,
     _pad: Vec2,
@@ -19,11 +16,12 @@ pub struct Sdf2dPrim {
 impl Sdf2dPrim {
     const CIRCLE: u32 = 0;
     const CAPSULE: u32 = 1;
+    const RECT: u32 = 2;
 
-    fn new(origin: Vec2, tip: Vec2, radius: f32, kind: u32, color: Vec4) -> Self {
+    fn new(a: Vec2, b: Vec2, radius: f32, kind: u32, color: Vec4) -> Self {
         Self {
-            origin,
-            tip,
+            a,
+            b,
             radius,
             kind,
             _pad: Vec2::ZERO,
@@ -31,29 +29,15 @@ impl Sdf2dPrim {
         }
     }
 
-    pub fn from_shape(shape: Sdf2d, transform: impl Fn(Vec2) -> Vec2, color: Vec4) -> Self {
-        match shape {
-            Sdf2d::Circle { origin, radius } => {
-                Self::circle(transform(origin.to_components().0), radius, color)
-            }
-            Sdf2d::Capsule {
-                origin,
-                tip,
-                radius,
-            } => Self::capsule(
-                transform(origin.to_components().0),
-                transform(tip.to_components().0),
-                radius,
-                color,
-            ),
-        }
-    }
-
-    pub fn circle(origin: Vec2, radius: f32, color: Vec4) -> Self {
-        Self::new(origin, origin, radius, Self::CIRCLE, color)
+    pub fn circle(center: Vec2, radius: f32, color: Vec4) -> Self {
+        Self::new(center, center, radius, Self::CIRCLE, color)
     }
 
     pub fn capsule(origin: Vec2, tip: Vec2, radius: f32, color: Vec4) -> Self {
         Self::new(origin, tip, radius, Self::CAPSULE, color)
+    }
+
+    pub fn rect(center: Vec2, half_size: Vec2, corner_radius: f32, color: Vec4) -> Self {
+        Self::new(center, half_size, corner_radius, Self::RECT, color)
     }
 }

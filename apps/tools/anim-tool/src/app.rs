@@ -8,7 +8,6 @@ use crate::{
 use al_anim::{anim_clip::AttachType, vfx::Vfx2d, Easing};
 use al_math::{
     sdf::Sdf2d,
-    transform::Transform2d,
     vec::{Vec2, Vec4},
 };
 use al_skeleton::{
@@ -31,44 +30,139 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
-        let t = |x, y| Transform2d::from_translation(Vec2::new(x, y));
         let hurt = ColliderKind::HURT;
         let none = ColliderKind::NONE;
         let mut builder = Skeleton2DBuilder::new();
         // ----- spine -----
-        let hips = builder.joint("hips", None, t(0., -0.05), 0.075, hurt, 0.);
-        let chest = builder.joint("chest", Some(hips), t(0.02, 0.20), 0.085, hurt, 0.);
+        let hips = builder.joint("hips", None, Vec2::new(0., -0.05), 0.075, 0., hurt, 0.);
+        let chest = builder.joint(
+            "chest",
+            Some(hips),
+            Vec2::new(0.02, 0.20),
+            0.085,
+            0.,
+            hurt,
+            0.,
+        );
 
-        let neck = builder.joint("neck", Some(chest), t(0.01, 0.14), 0., none, 0.);
-        let head = builder.joint("head", Some(neck), t(0.02, 0.05), 0.09, hurt, 0.);
+        let neck = builder.joint("neck", Some(chest), Vec2::new(0.01, 0.14), 0., 0., none, 0.);
+        let head = builder.joint(
+            "head",
+            Some(neck),
+            Vec2::new(0.02, 0.05),
+            0.09,
+            0.,
+            hurt,
+            0.,
+        );
 
         builder.bone("torso", hips, chest, 0.09, hurt, 0.);
         builder.bone("neck", chest, head, 0.045, hurt, 0.);
 
         // ----- arms -----
-        let sh_f = builder.joint("shoulder_f", Some(chest), t(0.07, 0.03), 0., none, -0.6);
-        let el_f = builder.joint("elbow_f", Some(sh_f), t(0.1, -0.12), 0., none, -0.6);
-        let hd_f = builder.joint("hand_f", Some(el_f), t(0.1, -0.1), 0.045, hurt, -0.6);
+        let sh_f = builder.joint(
+            "shoulder_f",
+            Some(chest),
+            Vec2::new(0.07, 0.03),
+            0.,
+            0.,
+            none,
+            -0.6,
+        );
+        let el_f = builder.joint(
+            "elbow_f",
+            Some(sh_f),
+            Vec2::new(0.1, -0.12),
+            0.,
+            0.,
+            none,
+            -0.6,
+        );
+        let hd_f = builder.joint(
+            "hand_f",
+            Some(el_f),
+            Vec2::new(0.1, -0.1),
+            0.045,
+            0.,
+            hurt,
+            -0.6,
+        );
 
         builder.bone("upper_arm_f", sh_f, el_f, 0.045, hurt, -0.6);
         builder.bone("forearm_f", el_f, hd_f, 0.04, hurt, -0.6);
 
-        let sh_b = builder.joint("shoulder_b", Some(chest), t(-0.05, 0.03), 0., none, 0.6);
-        let el_b = builder.joint("elbow_b", Some(sh_b), t(-0.1, -0.14), 0., none, 0.6);
-        let hd_b = builder.joint("hand_b", Some(el_b), t(0.07, -0.08), 0.045, hurt, 0.6);
+        let sh_b = builder.joint(
+            "shoulder_b",
+            Some(chest),
+            Vec2::new(-0.05, 0.03),
+            0.,
+            0.,
+            none,
+            0.6,
+        );
+        let el_b = builder.joint(
+            "elbow_b",
+            Some(sh_b),
+            Vec2::new(-0.1, -0.14),
+            0.,
+            0.,
+            none,
+            0.6,
+        );
+        let hd_b = builder.joint(
+            "hand_b",
+            Some(el_b),
+            Vec2::new(0.07, -0.08),
+            0.045,
+            0.,
+            hurt,
+            0.6,
+        );
 
         builder.bone("upper_arm_b", sh_b, el_b, 0.045, hurt, 0.6);
         builder.bone("forearm_b", el_b, hd_b, 0.04, hurt, 0.6);
 
         // ----- legs -----
-        let kn_f = builder.joint("knee_f", Some(hips), t(0.08, -0.22), 0., hurt, -0.6);
-        let ft_f = builder.joint("foot_f", Some(kn_f), t(0.04, -0.22), 0.055, hurt, -0.6);
+        let kn_f = builder.joint(
+            "knee_f",
+            Some(hips),
+            Vec2::new(0.08, -0.22),
+            0.,
+            0.,
+            hurt,
+            -0.6,
+        );
+        let ft_f = builder.joint(
+            "foot_f",
+            Some(kn_f),
+            Vec2::new(0.04, -0.22),
+            0.055,
+            0.,
+            hurt,
+            -0.6,
+        );
 
         builder.bone("thigh_f", hips, kn_f, 0.06, hurt, -0.6);
         builder.bone("shin_f", kn_f, ft_f, 0.05, hurt, -0.6);
 
-        let kn_b = builder.joint("knee_b", Some(hips), t(-0.06, -0.22), 0., hurt, 0.6);
-        let ft_b = builder.joint("foot_b", Some(kn_b), t(-0.06, -0.22), 0.055, hurt, 0.6);
+        let kn_b = builder.joint(
+            "knee_b",
+            Some(hips),
+            Vec2::new(-0.06, -0.22),
+            0.,
+            0.,
+            hurt,
+            0.6,
+        );
+        let ft_b = builder.joint(
+            "foot_b",
+            Some(kn_b),
+            Vec2::new(-0.06, -0.22),
+            0.055,
+            0.,
+            hurt,
+            0.6,
+        );
 
         builder.bone("thigh_b", hips, kn_b, 0.06, hurt, 0.6);
         builder.bone("shin_b", kn_b, ft_b, 0.05, hurt, 0.6);
@@ -76,7 +170,7 @@ impl App {
         let _e1 = builder.extra(
             "blade_front",
             Some(hd_f),
-            al_math::sdf::Sdf2d::capsule(t(0.02, 0.), t(0.1, 0.), 0.015),
+            al_math::sdf::Sdf2d::capsule(Vec2::new(0.02, 0.), Vec2::new(0.1, 0.), 0.015),
             ColliderKind::HIT,
         );
 
@@ -92,7 +186,7 @@ impl App {
                 joint: hd_f,
                 offset: Vec2::ZERO,
             },
-            Sdf2d::circle(Transform2d::from_translation(Vec2::ZERO), 0.07),
+            Sdf2d::circle(Vec2::ZERO, 0.07),
             (0.4, 1.6),
             (1., 0.),
             (0., 0.),
@@ -109,7 +203,7 @@ impl App {
                 joint: hd_f,
                 offset: Vec2::ZERO,
             },
-            Sdf2d::circle(Transform2d::from_translation(Vec2::ZERO), 0.1),
+            Sdf2d::circle(Vec2::ZERO, 0.1),
             (0.5, 2.2),
             (0.95, 0.),
             (0., 0.),
@@ -126,7 +220,7 @@ impl App {
                 joint: hd_f,
                 offset: Vec2::ZERO,
             },
-            Sdf2d::circle(Transform2d::from_translation(Vec2::ZERO), 0.13),
+            Sdf2d::circle(Vec2::ZERO, 0.13),
             (0.8, 3.2),
             (0.55, 0.),
             (0., 0.),
@@ -143,11 +237,7 @@ impl App {
                 joint: hd_f,
                 offset: Vec2::ZERO,
             },
-            Sdf2d::capsule(
-                Transform2d::from_translation(Vec2::new(-0.02, 0.)),
-                Transform2d::from_translation(Vec2::new(0.02, 0.)),
-                0.004,
-            ),
+            Sdf2d::capsule(Vec2::new(-0.02, 0.), Vec2::new(0.02, 0.), 0.004),
             (0.5, 14.0),
             (1., 0.),
             (0., 0.),
@@ -755,16 +845,13 @@ fn apply_drag(designer: &mut DesignerState, i: usize, mode: DragMode) {
                         designer.drag_dirty = true;
                     }
                     let j = &mut designer.skeleton.joints_mut()[i];
-                    let mut t = j.transform();
-                    t.translation = target_local;
-                    *j.transform_mut() = t;
+                    j.set_center(target_local);
                 }
             }
         }
         DragMode::RotateJoint => {
             // Rotation applied in the parent's local frame.
-            let origin = designer.skeleton.joints()[i].transform().to_components().0;
-            let v = target_local - origin;
+            let v = target_local - designer.skeleton.joints()[i].center();
             if v.length() < 1e-5 {
                 return;
             }
@@ -777,19 +864,14 @@ fn apply_drag(designer: &mut DesignerState, i: usize, mode: DragMode) {
                         designer.drag_dirty = true;
                     }
                     // Pose rotation is added on top of rest_rotation.
-                    let rest_rot = designer.skeleton.joints()[i].transform().to_components().1;
-                    designer.pose.rotations[i] = angle - rest_rot;
+                    designer.pose.rotations[i] = angle - designer.skeleton.joints()[i].rotation();
                 }
                 crate::state::EditMode::Rest => {
                     if !designer.drag_dirty {
                         designer.record(Snapshot::Skeleton(designer.skeleton.clone()));
                         designer.drag_dirty = true;
                     }
-                    let (tr, _, sc) = designer.skeleton.joints_mut()[i]
-                        .transform()
-                        .to_components();
-                    *designer.skeleton.joints_mut()[i].transform_mut() =
-                        al_math::transform::Transform2d::new(tr, angle, sc);
+                    designer.skeleton.joints_mut()[i].set_rotation(angle);
                 }
             }
         }
