@@ -1,9 +1,16 @@
 use std::{sync::Arc, time::Instant};
 
 use crate::{
-    block_on, render::RenderState, state::{DesignerState, DragMode, OnionMode, Snapshot},
+    block_on,
+    render::RenderState,
+    state::{DesignerState, DragMode, OnionMode, Snapshot},
 };
-use al_math::{transform::Transform2d, vec::Vec2};
+use al_anim::{anim_clip::AttachType, vfx::Vfx2d, Easing};
+use al_math::{
+    sdf::Sdf2d,
+    transform::Transform2d,
+    vec::{Vec2, Vec4},
+};
 use al_skeleton::{
     collider_kind::ColliderKind,
     skeleton::{ColliderRef, Skeleton2DBuilder},
@@ -69,13 +76,191 @@ impl App {
         let _e1 = builder.extra(
             "blade_front",
             Some(hd_f),
-            al_skeleton::collider::Shape2d::Capsule {
-                origin: t(0.02, 0.),
-                tip: t(0.1, 0.),
-                radius: 0.015,
-            },
+            al_math::sdf::Sdf2d::capsule(t(0.02, 0.), t(0.1, 0.), 0.015),
             ColliderKind::HIT,
         );
+
+        let mut vfx = Vec::new();
+        // Explosion
+        let explosion_start = 0.2;
+        // White flash
+        vfx.push(Vfx2d::new(
+            "explosion.flash",
+            explosion_start,
+            0.08,
+            AttachType::From {
+                joint: hd_f,
+                offset: Vec2::ZERO,
+            },
+            Sdf2d::circle(Transform2d::from_translation(Vec2::ZERO), 0.07),
+            (0.4, 1.6),
+            (1., 0.),
+            (0., 0.),
+            Vec2::ZERO,
+            Vec4::new(1., 1., 0.9, 1.),
+            Easing::EaseOut,
+        ));
+        // Orange core
+        vfx.push(Vfx2d::new(
+            "explosion.core",
+            explosion_start,
+            0.25,
+            AttachType::From {
+                joint: hd_f,
+                offset: Vec2::ZERO,
+            },
+            Sdf2d::circle(Transform2d::from_translation(Vec2::ZERO), 0.1),
+            (0.5, 2.2),
+            (0.95, 0.),
+            (0., 0.),
+            Vec2::new(0., 0.01),
+            Vec4::new(1., 0.55, 0.15, 1.),
+            Easing::EaseOut,
+        ));
+        // Smoke
+        vfx.push(Vfx2d::new(
+            "explosion.Smoke",
+            explosion_start + 0.03,
+            0.55,
+            AttachType::From {
+                joint: hd_f,
+                offset: Vec2::ZERO,
+            },
+            Sdf2d::circle(Transform2d::from_translation(Vec2::ZERO), 0.13),
+            (0.8, 3.2),
+            (0.55, 0.),
+            (0., 0.),
+            Vec2::new(-0.1, 0.04),
+            Vec4::new(0.2, 0.16, 0.14, 1.),
+            Easing::EaseOut,
+        ));
+        // Ring
+        vfx.push(Vfx2d::new(
+            "explosion.ring",
+            explosion_start,
+            0.15,
+            AttachType::From {
+                joint: hd_f,
+                offset: Vec2::ZERO,
+            },
+            Sdf2d::capsule(
+                Transform2d::from_translation(Vec2::new(-0.02, 0.)),
+                Transform2d::from_translation(Vec2::new(0.02, 0.)),
+                0.004,
+            ),
+            (0.5, 14.0),
+            (1., 0.),
+            (0., 0.),
+            Vec2::ZERO,
+            Vec4::new(1., 0.85, 0.4, 1.),
+            Easing::EaseOut,
+        ));
+
+        /*// Laser
+        let laser_start = 0.15;
+        let laser_len = 0.32;//10.;
+        // Charge
+        vfx.push(Vfx2d::new(
+            "laser.charge",
+            laser_start - 0.1,
+            0.12,
+            AttachType::Follow {
+                joint: hd_f,
+                offset: Vec2::ZERO,
+            },
+            Sdf2d::circle(
+                Transform2d::from_translation(Vec2::ZERO),
+                0.03,
+            ),
+            (0.2, 1.4),
+            (0.3, 1.),
+            (0., 0.),
+            Vec2::ZERO,
+            Vec4::new(0.5, 0.9, 1., 1.),
+            Easing::EaseIn,
+        ));
+        // Core
+        vfx.push(Vfx2d::new(
+            "laser.core",
+            laser_start,
+            0.28,
+            AttachType::Follow {
+                joint: hd_f,
+                offset: Vec2::ZERO,
+            },
+            Sdf2d::capsule(
+                Transform2d::from_translation(Vec2::ZERO),
+                Transform2d::from_translation(Vec2::new(laser_len, 0.)),
+                0.005,
+            ),
+            (0.05, 1.),
+            (1., 0.4),
+            (0., 0.),
+            Vec2::ZERO,
+            Vec4::new(1., 1., 1., 1.),
+            Easing::EaseOut,
+        ));
+        // Glow
+        vfx.push(Vfx2d::new(
+            "laser.glow",
+            laser_start,
+            0.28,
+            AttachType::Follow {
+                joint: hd_f,
+                offset: Vec2::ZERO,
+            },
+            Sdf2d::capsule(
+                Transform2d::from_translation(Vec2::ZERO),
+                Transform2d::from_translation(Vec2::new(laser_len, 0.)),
+                0.015,
+            ),
+            (0.05, 1.),
+            (0.7, 0.2),
+            (0., 0.),
+            Vec2::ZERO,
+            Vec4::new(0.3, 0.75, 1., 1.),
+            Easing::EaseOut,
+        ));
+        // Flash
+        vfx.push(Vfx2d::new(
+            "laser.flash",
+            laser_start,
+            0.07,
+            AttachType::Follow {
+                joint: hd_f,
+                offset: Vec2::ZERO,
+            },
+            Sdf2d::circle(
+                Transform2d::from_translation(Vec2::ZERO),
+                0.045,
+            ),
+            (0.3, 1.5),
+            (1., 0.),
+            (0., 0.),
+            Vec2::ZERO,
+            Vec4::new(0.9, 1., 1., 1.),
+            Easing::EaseOut,
+        ));
+        // Impact
+        vfx.push(Vfx2d::new(
+            "laser.impact",
+            laser_start + 0.02,
+            0.16,
+            AttachType::Follow {
+                joint: hd_f,
+                offset: Vec2::new(laser_len, 0.),
+            },
+            Sdf2d::circle(
+                Transform2d::from_translation(Vec2::ZERO),
+                0.05,
+            ),
+            (0.4, 1.8),
+            (1., 0.),
+            (0., 0.),
+            Vec2::ZERO,
+            Vec4::new(0.6, 0.9, 1., 1.),
+            Easing::EaseOut,
+        ));*/
 
         let skeleton = builder.build();
         if let Err(e) = skeleton.validate() {
@@ -84,7 +269,7 @@ impl App {
         Self {
             window: None,
             render_state: None,
-            state: DesignerState::new(skeleton),
+            state: DesignerState::new(skeleton, &vfx),
         }
     }
 
@@ -470,8 +655,20 @@ impl ApplicationHandler for App {
                             }
                         }
 
+                        KeyCode::KeyV if designer.keys.shift_held => {
+                            designer.show_vfx = !designer.show_vfx;
+                            designer.status = format!(
+                                "VFX preview: {}",
+                                if designer.show_vfx { "on" } else { "off" }
+                            );
+                        }
+
                         KeyCode::KeyX if designer.keys.shift_held => {
                             designer.show_extras = !designer.show_extras;
+                            designer.status = format!(
+                                "Extras preview: {}",
+                                if designer.show_extras { "on" } else { "off" }
+                            );
                         }
 
                         KeyCode::KeyA if designer.keys.shift_held => {
@@ -491,7 +688,7 @@ impl ApplicationHandler for App {
                                         designer.onion_keys,
                                         match designer.onion_mode {
                                             OnionMode::Keys => "keys",
-                                            OnionMode::Time => "time"
+                                            OnionMode::Time => "time",
                                         }
                                     )
                                 }

@@ -1,5 +1,5 @@
 #[cfg(feature = "sdf")]
-mod sdf;
+pub mod sdf;
 
 pub mod aabb;
 pub mod matrix;

@@ -1,8 +1,8 @@
 use crate::{
-    collider::{Collider2d, Shape2d},
+    collider::Collider2d,
     collider_kind::ColliderKind,
 };
-use al_math::transform::Transform2d;
+use al_math::{sdf::Sdf2d, transform::Transform2d};
 
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -21,7 +21,7 @@ impl Joint2d {
         depth: f32,
     ) -> Self {
         Self {
-            collider: Collider2d::new(name, parent, Shape2d::circle(transform, radius), kind),
+            collider: Collider2d::new(name, parent, Sdf2d::circle(transform, radius), kind),
             depth,
         }
     }

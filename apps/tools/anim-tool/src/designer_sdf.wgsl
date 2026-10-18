@@ -4,17 +4,17 @@ struct Globals {
     cursor_world: vec2<f32>,
     view_size: f32,
     _pad: f32,
-};
+}
 
 //REVIEW: Could remove kind branching and always draw capsules
 struct SdfPrim {
-    origin: vec2<f32>,  // circle center, or capsule origin
-    tip: vec2<f32>,     // capsule tip
+    a: vec2<f32>, // circle center, or capsule origin
+    b: vec2<f32>, // capsule tip
     radius: f32,
-    kind: u32,          // 0 = circle, 1 = capsule
-    _pad: vec2<f32>,    // keeps color 16-byte aligned
+    kind: u32, // 0 = circle, 1 = capsule
+    _pad: vec2<f32>, // keeps color 16-byte aligned
     color: vec4<f32>,
-};
+}
 
 struct SdfData {
     count: u32,
@@ -22,42 +22,88 @@ struct SdfData {
     _pad1: u32,
     _pad2: u32,
     prims: array<SdfPrim, 256>,
-};
+}
 
-@group(0) @binding(0) var<uniform> globals: Globals;
-@group(0) @binding(1) var<uniform> sdf: SdfData;
+@group(0) @binding(0)
+var<uniform> globals: Globals;
+@group(0) @binding(1)
+var<uniform> sdf: SdfData;
 
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) world: vec2<f32>,
     @location(1) color: vec4<f32>,
-    @location(2) @interpolate(flat) prim_idx: u32,
-};
+    @interpolate(flat)
+    @location(2) prim_idx: u32,
+}
+
+struct BgVsOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) world: vec2<f32>,
+}
 
 @vertex
-fn vs_main(
-    @builtin(vertex_index) vi: u32,
-    @builtin(instance_index) ii: u32,
-) -> VsOut {
+fn vs_bg(@builtin(vertex_index) vi: u32) -> BgVsOut {
+    var pos = array<vec2<f32>, 3>(vec2<f32>(-1., -3.), vec2<f32>(-1., 1.), vec2<f32>(3., 1.));
+    let p = pos[vi];
+    let aspect = globals.resolution.x / globals.resolution.y;
+    let world = globals.camera_pos + p * 0.5 * globals.view_size * vec2<f32>(aspect, 1.);
+    var out: BgVsOut;
+    out.clip = vec4<f32>(p, 0., 1.);
+    out.world = world;
+    return out;
+}
+
+fn grid_line(world: vec2<f32>, cell: f32, thickness: f32) -> f32 {
+    let g = world / cell;
+    let d = abs(fract(g - 0.5) - 0.5);
+    let px = max(fwidth(g.x), fwidth(g.y));
+    return 1. - smoothstep(0., px * thickness, min(d.x, d.y));
+}
+
+@fragment
+fn fs_bg(in: BgVsOut) -> @location(0) vec4<f32> {
+    let fine = grid_line(in.world, 0.05, 1.);
+    let coarse = grid_line(in.world, 0.25, 1.5);
+
+    let px = fwidth(in.world);
+    let ax = 1. - smoothstep(0., px.x * 1.5, abs(in.world.x));
+    let ay = 1. - smoothstep(0., px.y * 1.5, abs(in.world.y));
+    let axis = max(ax, ay);
+
+    let base = vec3<f32>(0.06, 0.06, 0.08);
+    let fine_c = vec3<f32>(0.11, 0.11, 0.14);
+    let coarse_c = vec3<f32>(0.20, 0.20, 0.26);
+    let axis_c = vec3<f32>(0.55, 0.25, 0.35);
+
+    var col = base;
+    col = mix(col, fine_c, fine);
+    col = mix(col, coarse_c, coarse);
+    col = mix(col, axis_c, axis);
+    return vec4<f32>(col, 1.);
+}
+
+@vertex
+fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VsOut {
     let prim = sdf.prims[ii];
 
     // Two triangles spanning [0,1]^2.
     var corners = array<vec2<f32>, 6>(
-        vec2<f32>(0.0, 0.0),
-        vec2<f32>(1.0, 0.0),
-        vec2<f32>(0.0, 1.0),
-        vec2<f32>(1.0, 0.0),
-        vec2<f32>(1.0, 1.0),
-        vec2<f32>(0.0, 1.0),
-    );
+            vec2<f32>(0.0, 0.0),
+            vec2<f32>(1.0, 0.0),
+            vec2<f32>(0.0, 1.0),
+            vec2<f32>(1.0, 0.0),
+            vec2<f32>(1.0, 1.0),
+            vec2<f32>(0.0, 1.0),
+        );
     let c = corners[vi];
 
     // One pixel worth of world-space padding for AA.
     let px_world = globals.view_size / globals.resolution.y;
     let pad = vec2<f32>(prim.radius + px_world * 1.5);
 
-    let mn = min(prim.origin, prim.tip) - pad;
-    let mx = max(prim.origin, prim.tip) + pad;
+    let mn = min(prim.a, prim.b) - pad;
+    let mx = max(prim.a, prim.b) + pad;
     let world = mix(mn, mx, c);
 
     // World -> clip. view_size is the total visible height in world units.
@@ -89,9 +135,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     var d: f32;
     if prim.kind == 0u {
-        d = sd_circle(in.world, prim.origin, prim.radius);
+        d = sd_circle(in.world, prim.a, prim.radius);
     } else {
-        d = sd_capsule(in.world, prim.origin, prim.tip, prim.radius);
+        d = sd_capsule(in.world, prim.a, prim.b, prim.radius);
     }
 
     let aa = max(fwidth(d), 1e-5);
@@ -100,9 +146,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let fill = 1. - saa;
     let stroke = saa * (1. - smoothstep(stroke_w - aa, stroke_w + aa, d));
     let alpha = fill + stroke;
-    if alpha <= 0. { discard; }
+    if alpha <= 0. {
+        discard;
+    }
     let col = mix(prim.color.rgb, prim.color.rgb * 0.3, stroke / max(alpha, 1e-5));
 
     return vec4<f32>(col, prim.color.a * alpha);
-    //return vec4<f32>(in.color.rgb, in.color.a * alpha);
 }

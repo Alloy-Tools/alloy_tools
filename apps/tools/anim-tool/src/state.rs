@@ -1,5 +1,5 @@
 use crate::{app::SCRUB_TOL, Camera};
-use al_anim::{anim_clip::AnimationClip2d, Easing};
+use al_anim::{anim_clip::AnimationClip2d, vfx::Vfx2d, Easing};
 use al_skeleton::{
     pose::Pose2d,
     skeleton::{ColliderRef, Skeleton2d},
@@ -99,6 +99,7 @@ pub struct DesignerState {
     pub selected: Option<ColliderRef>,
     pub drag: Option<DragMode>,
     pub edit_mode: EditMode,
+    pub show_vfx: bool,
     pub show_extras: bool,
     pub extra_active: Vec<bool>,
     pub onion_keys: usize,
@@ -128,9 +129,11 @@ pub struct DesignerState {
 }
 
 impl DesignerState {
-    pub fn new(skeleton: Skeleton2d) -> Self {
-        let len = skeleton.joints().len();
-        let pose = Pose2d::rest(len);
+    pub fn new(skeleton: Skeleton2d, vfx: &[Vfx2d]) -> Self {
+        let extra_len = skeleton.extras().len();
+        let pose = Pose2d::rest(skeleton.joints().len());
+        let mut default_clip = AnimationClip2d::new("default");
+        default_clip.vfx_mut().extend_from_slice(vfx);
         Self {
             skeleton,
             pose,
@@ -138,11 +141,12 @@ impl DesignerState {
             selected: None,
             drag: None,
             edit_mode: EditMode::Pose,
+            show_vfx: true,
             show_extras: false,
-            extra_active: vec![false; len],
+            extra_active: vec![false; extra_len],
             onion_keys: 0,
             onion_mode: Default::default(),
-            clips: vec![AnimationClip2d::new("default")],
+            clips: vec![default_clip],
             current_clip: 0,
             time: 0.,
             playing: false,
@@ -266,27 +270,67 @@ impl DesignerState {
     }
 
     pub fn hud_string(&self) -> String {
-        let clip = self.clip();
+        let body_line = format!(
+            "{} joints, {} bones | [Tab] cycle: {} | [T] pose mode: {} | [F] following: {}",
+            self.skeleton.joints().len(),
+            self.skeleton.bones().len(),
+            self.selected
+                .map(|cr| if let ColliderRef::Joint(i) = cr {
+                    self.skeleton.joints()[i].name().to_string()
+                } else {
+                    "none".into()
+                })
+                .unwrap_or_else(|| "none".into()),
+            self.edit_mode,
+            self.following,
+        );
+        let clip: &AnimationClip2d = self.clip();
+        let playback_line = format!(
+            "clips: [{}]\nclip {}: {} {} {:.3}/{:.3} loop: {} | keys: {}\n[Space] play | [K/⇧K] key [←/→] step [G]",
+            self.clips
+                .iter()
+                .map(|c| c.name())
+                .collect::<Vec<_>>()
+                .join(" | "),
+            self.clip().name(),
+            if self.playing { "▶" } else { "▮▮" },
+            self.clip()
+                .easing_at(self.time, SCRUB_TOL)
+                .unwrap_or(Easing::Linear),
+            self.time,
+            clip.duration(),
+            if clip.looping() { "on" } else { "off" },
+            clip.keyframes().len()
+        );
+        let vfx = clip.vfx();
+        let vfx_line = if vfx.is_empty() {
+            "vfx: none".to_string()
+        } else {
+            let active = vfx
+                .iter()
+                .filter(|v| {
+                    self.time >= v.start_time() && self.time <= v.start_time() + v.duration()
+                })
+                .map(|v| v.name())
+                .collect::<Vec<_>>();
+            format!(
+                "vfx: {} total | active: {}",
+                vfx.len(),
+                if active.is_empty() {
+                    "-".to_string()
+                } else {
+                    active.join(", ")
+                }
+            )
+        };
+        let history_line = format!(
+            "undo: {} redo: {}",
+            self.history.undo.len(),
+            self.history.redo.len(),
+        );
         format!(
-        "designer — {} joints, {} bones | [Tab] cycle: {}\n[T] pose mode: {} | [F] following: {} | clips: [{}]\nclip {}: {} {} {:.3}/{:.3} loop: {} | keys: {}\n[Space] play | [K/⇧K] key [←/→] step [G] snap\n undo: {} redo: {}\n{}",
-        self.skeleton.joints().len(),
-        self.skeleton.bones().len(),
-        self.selected
-            .map(|cr| if let ColliderRef::Joint(i) = cr { self.skeleton.joints()[i].name().to_string()} else { "none".into() })
-            .unwrap_or_else(|| "none".into()),
-        self.edit_mode,
-        self.following,
-        self.clips.iter().map(|c| c.name()).collect::<Vec<_>>().join(" | "),
-        self.clip().name(),
-        if self.playing { "▶" } else { "▮▮" },
-        self.clip().easing_at(self.time, SCRUB_TOL).unwrap_or(Easing::Linear),
-        self.time,
-        clip.duration(),
-        if clip.looping() { "on" } else { "off" },
-        clip.keyframes().len(),
-        self.history.undo.len(),
-        self.history.redo.len(),
-        self.status,
-    )
+            "{}\n{}\n{}\n{}\n{}",
+            body_line, playback_line, vfx_line, history_line, self.status,
+        )
     }
 }

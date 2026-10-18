@@ -1,10 +1,13 @@
 use crate::{
     collider::Collider2d,
     collider_kind::ColliderKind,
-    sdf::{capsule_sdf, circle_sdf},
     skeleton::{Bone2d, Joint2d},
 };
-use al_math::{transform::Transform2d, vec::Vec2};
+use al_math::{
+    sdf::{capsule_sdf_2d, circle_sdf_2d, Sdf2d},
+    transform::Transform2d,
+    vec::Vec2,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -155,13 +158,13 @@ impl Skeleton2d {
                 continue;
             }
             let c = world[i].transform_point(Vec2::ZERO);
-            d = d.min(circle_sdf(rad, p, c));
+            d = d.min(circle_sdf_2d(rad, p, c));
         }
 
         for bone in &self.bones {
             let a = world[bone.origin_index()].transform_point(Vec2::ZERO);
             let b = world[bone.tip_index()].transform_point(Vec2::ZERO);
-            d = d.min(capsule_sdf(bone.radius(), p, a, b));
+            d = d.min(capsule_sdf_2d(bone.radius(), p, a, b));
         }
 
         d
@@ -179,7 +182,7 @@ impl Skeleton2d {
                 continue;
             }
             let c = world[i].transform_point(Vec2::ZERO);
-            d = d.min(circle_sdf(rad, p, c));
+            d = d.min(circle_sdf_2d(rad, p, c));
         }
 
         for bone in &self.bones {
@@ -188,7 +191,7 @@ impl Skeleton2d {
             }
             let a = world[bone.origin_index()].transform_point(Vec2::ZERO);
             let e = world[bone.tip_index()].transform_point(Vec2::ZERO);
-            d = d.min(capsule_sdf(bone.radius(), p, a, e));
+            d = d.min(capsule_sdf_2d(bone.radius(), p, a, e));
         }
 
         d
@@ -225,16 +228,16 @@ impl Skeleton2d {
 
 pub fn active_extra(extra: &Collider2d, world: &[Transform2d], p: Vec2) -> f32 {
     match extra.shape() {
-        crate::collider::Shape2d::Circle { origin, radius } => {
+        Sdf2d::Circle { origin, radius } => {
             let offset = origin.to_components().0;
             let o = if let Some(idx) = extra.parent() {
                 world[idx].transform_point(offset)
             } else {
                 offset
             };
-            circle_sdf(radius, p, o)
+            circle_sdf_2d(radius, p, o)
         }
-        crate::collider::Shape2d::Capsule {
+        Sdf2d::Capsule {
             origin,
             tip,
             radius,
@@ -249,7 +252,7 @@ pub fn active_extra(extra: &Collider2d, world: &[Transform2d], p: Vec2) -> f32 {
             } else {
                 (o_offset, t_offset)
             };
-            capsule_sdf(radius, p, o, t)
+            capsule_sdf_2d(radius, p, o, t)
         }
     }
 }

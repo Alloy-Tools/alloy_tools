@@ -1,4 +1,8 @@
-use crate::Easing;
+use crate::{vfx::Vfx2d, Easing};
+use al_math::{
+    sdf::Sdf2dPrim,
+    vec::{Vec2, Vec4},
+};
 use al_skeleton::pose::Pose2d;
 
 #[derive(Clone, Debug)]
@@ -9,6 +13,17 @@ pub struct KeyFrame2d {
     pub easing: Easing,
 }
 
+#[derive(Copy, Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum AttachType {
+    /// Follows `joint` every frame
+    Follow { joint: usize, offset: Vec2 },
+    /// World space, starting from `joint`
+    From { joint: usize, offset: Vec2 },
+    /// World space
+    World { pos: Vec2 },
+}
+
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AnimationClip2d {
@@ -16,6 +31,7 @@ pub struct AnimationClip2d {
     duration: f32,
     looping: bool,
     keyframes: Vec<KeyFrame2d>,
+    vfx: Vec<Vfx2d>,
 }
 
 impl AnimationClip2d {
@@ -27,6 +43,7 @@ impl AnimationClip2d {
             duration: 0.,
             looping: false,
             keyframes: Vec::new(),
+            vfx: Vec::new(),
         }
     }
 
@@ -52,6 +69,14 @@ impl AnimationClip2d {
 
     pub fn keyframes(&self) -> &[KeyFrame2d] {
         &self.keyframes
+    }
+
+    pub fn vfx(&self) -> &[Vfx2d] {
+        &self.vfx
+    }
+
+    pub fn vfx_mut(&mut self) -> &mut Vec<Vfx2d> {
+        &mut self.vfx
     }
 
     pub fn insert(&mut self, time: f32, pose: Pose2d, easing: Easing) {
@@ -163,4 +188,57 @@ impl AnimationClip2d {
         let e = a.easing.apply(u);
         a.pose.blend(&b.pose, e)
     }
+
+    pub fn vfx_instances(
+        &self,
+        t: f32,
+        skeleton: &al_skeleton::skeleton::Skeleton2d,
+    ) -> Vec<Sdf2dPrim> {
+        let mut out = Vec::new();
+        //REVIEW: Should this use easing as well?
+        let curr_world = skeleton.world_transforms(&self.sample(t));
+
+        for vfx in &self.vfx {
+            let st = vfx.start_time();
+            let dur = vfx.duration();
+            if t < st || t > st + dur {
+                continue;
+            }
+
+            let u = ((t - st) / dur.max(1e-6)).clamp(0., 1.);
+            let e = vfx.easing().apply(u);
+            let scale = lerp(vfx.start_scale(), vfx.end_scale(), e);
+            let alpha = lerp(vfx.start_alpha(), vfx.end_alpha(), e);
+            let rotation = lerp(vfx.start_rotation(), vfx.end_rotation(), e);
+            //REVIEW: should this ease?
+            let motion = vfx.motion() * u;
+
+            let (frame_tf, frame_offset) = match vfx.attach_type() {
+                AttachType::Follow { joint, offset } => (curr_world[joint], offset),
+                AttachType::From { joint, offset } => {
+                    (skeleton.world_transforms(&self.sample(st))[joint], offset)
+                }
+                AttachType::World { pos } => (al_math::transform::Transform2d::IDENTITY, pos),
+            };
+
+            let xform = |p: Vec2| {
+                let r = p.rotate(rotation) * scale + frame_offset;
+                frame_tf.transform_point(r) + motion
+            };
+
+            let col = vfx.color();
+            out.push(Sdf2dPrim::from_shape(
+                vfx.shape(),
+                xform,
+                Vec4::new(col.x, col.y, col.z, col.w * alpha),
+            ));
+        }
+
+        out
+    }
+}
+
+#[inline]
+pub fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
 }

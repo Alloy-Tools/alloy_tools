@@ -6,7 +6,7 @@ repository.workspace = true
 edition.workspace = true
 
 [dependencies]
-al-math = { path = "../al-math" }
+al-math = { path = "../al-math", features = ["sdf"] }
 al-skeleton = { path = "../al-skeleton" }
 serde = { version = "1.0.229", features = ["derive"], optional = true }
 

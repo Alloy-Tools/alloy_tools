@@ -6,9 +6,9 @@ repository.workspace = true
 edition.workspace = true
 
 [dependencies]
-al-math = { path = "../../../crates/al-math", features = ["gpu"] }
+al-math = { path = "../../../crates/al-math", features = ["gpu", "sdf"] }
 al-skeleton = { path = "../../../crates/al-skeleton" }
-al-anim = { path = "../../../crates/al-anim"}
+al-anim = { path = "../../../crates/al-anim" }
 winit = "0.30.5"
 wgpu = "30.0.1"
 pollster = "1.0.1"

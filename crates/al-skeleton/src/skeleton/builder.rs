@@ -1,8 +1,9 @@
 use crate::{
-    collider::{Collider2d, Shape2d},
+    collider::Collider2d,
     collider_kind::ColliderKind,
     skeleton::{bone::Bone2d, joint::Joint2d, Skeleton2d},
 };
+use al_math::sdf::Sdf2d;
 
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -65,7 +66,7 @@ impl Skeleton2DBuilder {
         &mut self,
         name: impl Into<String>,
         parent: Option<usize>,
-        shape: Shape2d,
+        shape: Sdf2d,
         kind: ColliderKind,
     ) -> usize {
         let extras = self.skeleton.extras_mut();
