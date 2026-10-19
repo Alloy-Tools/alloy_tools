@@ -1,5 +1,6 @@
 use crate::{
     sdf::Sdf2dPrim,
+    transform::Transform2d,
     vec::{Vec2, Vec4},
 };
 
@@ -51,19 +52,34 @@ impl Sdf2d {
         }
     }
 
-    pub fn to_prim(self, transform: impl Fn(Vec2) -> Vec2, color: Vec4) -> Sdf2dPrim {
+    pub fn to_prim(self, world: Transform2d, color: Vec4) -> Sdf2dPrim {
+        let (_, rot, scale) = world.to_components();
+        //REVIEW: Only uniform scale is currently implemented
+        let s = scale.x.min(scale.y);
         match self {
-            Self::Circle { center, radius } => Sdf2dPrim::circle(transform(center), radius, color),
+            Self::Circle { center, radius } => {
+                Sdf2dPrim::circle(world.transform_point(center), radius * s, color)
+            }
             Self::Capsule {
                 origin,
                 tip,
                 radius,
-            } => Sdf2dPrim::capsule(transform(origin), transform(tip), radius, color),
+            } => {
+                let wo = world.transform_point(origin);
+                let wt = world.transform_point(tip);
+                Sdf2dPrim::capsule(wo, wt - wo, radius * s, color)
+            }
             Self::Rect {
                 center,
                 half_size,
                 corner_radius,
-            } => Sdf2dPrim::rect(transform(center), half_size, corner_radius, color),
+            } => Sdf2dPrim::rect(
+                world.transform_point(center),
+                half_size * s,
+                corner_radius * s,
+                rot,
+                color,
+            ),
         }
     }
 }

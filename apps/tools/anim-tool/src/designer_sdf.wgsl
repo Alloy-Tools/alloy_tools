@@ -6,13 +6,13 @@ struct Globals {
     _pad: f32,
 }
 
-//REVIEW: Could remove kind branching and always draw capsules
 struct SdfPrim {
-    a: vec2<f32>, // circle center, or capsule origin
-    b: vec2<f32>, // capsule tip
+    a: vec2<f32>,
+    b: vec2<f32>,
     radius: f32,
-    kind: u32, // 0 = circle, 1 = capsule
-    _pad: vec2<f32>, // keeps color 16-byte aligned
+    rotation: f32,
+    kind: u32,
+    op: u32,
     color: vec4<f32>,
 }
 
@@ -98,12 +98,36 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
         );
     let c = corners[vi];
 
+    var mn: vec2<f32>;
+    var mx: vec2<f32>;
+
+    switch prim.kind {
+        case 1u {
+            let tip = prim.a + prim.b;
+            mn = min(prim.a, tip);
+            mx = max(prim.a, tip);
+        }
+        case 2u {
+            let c = cos(prim.rotation);
+            let s = sin(prim.rotation);
+            let hx = prim.b.x;
+            let hy = prim.b.y;
+            let rx = abs(hx * c) + abs(hy * s);
+            let ry = abs(hx * s) + abs(hy * c);
+            mn = prim.a - vec2<f32>(rx, ry);
+            mx = prim.a + vec2<f32>(rx, ry);
+        }
+        default {
+            mn = prim.a;
+            mx = prim.a;
+        }
+    }
+    
     // One pixel worth of world-space padding for AA.
     let px_world = globals.view_size / globals.resolution.y;
     let pad = vec2<f32>(prim.radius + px_world * 1.5);
-
-    let mn = min(prim.a, prim.b) - pad;
-    let mx = max(prim.a, prim.b) + pad;
+    mn = mn - pad;
+    mx = mx + pad;
     let world = mix(mn, mx, c);
 
     // World -> clip. view_size is the total visible height in world units.
@@ -118,34 +142,41 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
     return out;
 }
 
-fn sdf_circle(p: vec2<f32>, c: vec2<f32>, r: f32) -> f32 {
-    return length(p - c) - r;
+// Gathered from `Inigo Quilez` at `https://iquilezles.org/articles/distfunctions2d/`
+fn sdf_circle(p: vec2<f32>, r: f32) -> f32 {
+    return length(p) - r;
 }
 
-fn sdf_capsule(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
-    let pa = p - a;
-    let ba = b - a;
-    let h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-8), 0., 1.);
-    return length(pa - ba * h) - r;
+fn sdf_capsule(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
+    let h = clamp(dot(p, b) / max(dot(b, b), 1e-8), 0., 1.);
+    return length(p - b * h) - r;
 }
 
-fn sdf_rect(p: vec2<f32>, c: vec2<f32>, h: vec2<f32>, r: f32) -> f32 {
-    let q = abs(p - c) - h + vec2<f32>(r);
+fn sdf_rect(p: vec2<f32>, h: vec2<f32>, r: f32) -> f32 {
+    let q = abs(p) - h + r;
     return length(max(q, vec2<f32>(0.))) + min(max(q.x, q.y), 0.) - r;
+}
+
+fn rotate(p: vec2<f32>, a: f32) -> vec2<f32> {
+    let c = cos(a);
+    let s = sin(a);
+    return vec2<f32>(p.x * c - p.y * s, p.x * s + p.y * c);
+}
+
+fn eval_sdf(p: vec2<f32>, prim: SdfPrim) -> f32 {
+    let local = rotate(p - prim.a, -prim.rotation);
+    switch prim.kind {
+        case 0u { return sdf_circle(local, prim.radius); }
+        case 1u { return sdf_capsule(local, prim.b, prim.radius); }
+        case 2u { return sdf_rect(local, prim.b, prim.radius); }
+        default { return 1e10; }
+    }
 }
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let prim = sdf.prims[in.prim_idx];
-
-    var d: f32;
-    if prim.kind == 0u {
-        d = sdf_circle(in.world, prim.a, prim.radius);
-    } else if prim.kind == 1u {
-        d = sdf_capsule(in.world, prim.a, prim.b, prim.radius);
-    } else if prim.kind == 2u {
-        d = sdf_rect(in.world, prim.a, prim.b, prim.radius);
-    }
+    let d = eval_sdf(in.world, prim);
 
     let aa = max(fwidth(d), 1e-5);
     let stroke_w = aa * 1.5;

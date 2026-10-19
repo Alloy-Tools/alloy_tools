@@ -1,9 +1,11 @@
 use crate::{vfx::Vfx2d, Easing};
 use al_math::{
     sdf::Sdf2dPrim,
+    transform::Transform2d,
     vec::{Vec2, Vec4},
 };
 use al_skeleton::pose::Pose2d;
+use std::collections::HashMap;
 
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -220,9 +222,8 @@ impl AnimationClip2d {
         };
 
         let mut out = Vec::new();
-        //REVIEW: Should this use easing as well?
+        let mut cache = HashMap::new();
         let curr_world = skeleton.world_transforms(&self.sample(t));
-
         for vfx in &self.vfx {
             let st = vfx.start_time();
             let dur = vfx.duration();
@@ -235,25 +236,28 @@ impl AnimationClip2d {
             let scale = lerp(vfx.start_scale(), vfx.end_scale(), e);
             let alpha = lerp(vfx.start_alpha(), vfx.end_alpha(), e);
             let rotation = lerp(vfx.start_rotation(), vfx.end_rotation(), e);
-            //REVIEW: should this ease?
             let motion = vfx.motion() * u;
 
             let (frame_tf, frame_offset) = match vfx.attach_type() {
                 AttachType::Follow { joint, offset } => (curr_world[joint], offset),
                 AttachType::From { joint, offset } => {
-                    (skeleton.world_transforms(&self.sample(st))[joint], offset)
+                    let world = cache
+                        .entry(st.to_bits())
+                        .or_insert_with(|| skeleton.world_transforms(&self.sample(st)));
+                    (world[joint], offset)
                 }
-                AttachType::World { pos } => (al_math::transform::Transform2d::IDENTITY, pos),
+                AttachType::World { pos } => (Transform2d::IDENTITY, pos),
             };
 
+            let vfx_local = Transform2d::new(frame_offset, rotation, Vec2::new(scale, scale));
+            let mut trans = frame_tf.compose(&vfx_local);
+            trans.translation = trans.translation + motion;
+
             let col = vfx.color();
-            out.push(vfx.shape().to_prim(
-                |p: Vec2| {
-                    let r = p.rotate(rotation) * scale + frame_offset;
-                    frame_tf.transform_point(r) + motion
-                },
-                Vec4::new(col.x, col.y, col.z, col.w * alpha),
-            ));
+            out.push(
+                vfx.shape()
+                    .to_prim(trans, Vec4::new(col.x, col.y, col.z, col.w * alpha)),
+            );
         }
 
         out

@@ -9,8 +9,7 @@ use wgpu::{Surface, SurfaceConfiguration};
 
 use crate::app::FPS;
 
-pub const MAX_SKELETON_PRIMS: usize = 256;
-pub const MAX_VFX_PRIMS: usize = 256;
+pub const MAX_SDF_PRIMS: usize = 256;
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, Zeroable)]
@@ -27,7 +26,7 @@ pub struct Globals {
 pub struct SdfData {
     pub count: u32,
     pub _pad: [u32; 3],
-    pub prims: [Sdf2dPrim; MAX_SKELETON_PRIMS],
+    pub prims: [Sdf2dPrim; MAX_SDF_PRIMS],
 }
 
 fn depth_tint(color: Vec4, depth: f32) -> Vec4 {
@@ -410,8 +409,8 @@ impl RenderState {
             .write_buffer(&self.globals_buffer, 0, bytemuck::bytes_of(&globals));
 
         // ---- Build the rig primitive list ----
-        let mut prims = Vec::with_capacity(MAX_SKELETON_PRIMS);
-        let mut vfx_prims = Vec::with_capacity(MAX_VFX_PRIMS);
+        let mut prims = Vec::with_capacity(MAX_SDF_PRIMS);
+        let mut vfx_prims = Vec::with_capacity(MAX_SDF_PRIMS);
 
         // Onion skins (always lowest).
         if d.onion_keys > 0 {
@@ -484,9 +483,9 @@ impl RenderState {
                     Vec4::new(0.3, 0.55, 0.3, 0.35)
                 };
                 prims.push(if let Some(idx) = extra.parent() {
-                    shape.to_prim(|p| world[idx].transform_point(p), color)
+                    shape.to_prim(world[idx], color)
                 } else {
-                    shape.to_prim(|p| p, color)
+                    shape.to_prim(Transform2d::IDENTITY, color)
                 });
             }
         }
@@ -518,7 +517,7 @@ impl RenderState {
             Vec4::new(0.4, 1., 0.6, 1.),
         ));
 
-        let n = prims.len().min(MAX_SKELETON_PRIMS);
+        let n = prims.len().min(MAX_SDF_PRIMS);
         let mut data = SdfData::zeroed();
         data.count = n as u32;
         data.prims[..n].copy_from_slice(&prims[..n]);
@@ -573,7 +572,7 @@ impl RenderState {
         }
 
         // ----- VFX Pass -----
-        let n = vfx_prims.len().min(MAX_VFX_PRIMS);
+        let n = vfx_prims.len().min(MAX_SDF_PRIMS);
         let mut data = SdfData::zeroed();
         data.count = n as u32;
         data.prims[..n].copy_from_slice(&vfx_prims[..n]);
@@ -700,9 +699,11 @@ fn push_body_prims(
 
     for bone in d.skeleton.bones() {
         let col = depth_tint(base_color, bone.depth());
+        let wo = world[bone.origin_index()].transform_point(Vec2::ZERO);
+        let wt = world[bone.tip_index()].transform_point(Vec2::ZERO);
         prims.push(Sdf2dPrim::capsule(
-            world[bone.origin_index()].transform_point(Vec2::ZERO),
-            world[bone.tip_index()].transform_point(Vec2::ZERO),
+            wo,
+            wt - wo,
             bone.radius(),
             Vec4::new(col.x, col.y, col.z, col.w * alpha_mul),
         ));

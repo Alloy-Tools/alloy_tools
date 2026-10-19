@@ -314,8 +314,9 @@ impl DesignerState {
                 .map(|v| v.name())
                 .collect::<Vec<_>>();
             format!(
-                "vfx: {} total | active: {}",
+                "vfx: {} | [⇧V] {} | active: {}",
                 vfx.len(),
+                if self.show_vfx { "on" } else { "off" },
                 if active.is_empty() {
                     "-".to_string()
                 } else {
