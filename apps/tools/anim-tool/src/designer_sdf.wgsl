@@ -12,7 +12,7 @@ struct SdfPrim {
     radius: f32,
     rotation: f32,
     kind: u32,
-    op: u32,
+    aux: u32,
     color: vec4<f32>,
 }
 
@@ -122,10 +122,10 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
             mx = prim.a;
         }
     }
-    
+
     // One pixel worth of world-space padding for AA.
     let px_world = globals.view_size / globals.resolution.y;
-    let pad = vec2<f32>(prim.radius + px_world * 1.5);
+    let pad = vec2<f32>(prim.radius + px_world * 6.);
     mn = mn - pad;
     mx = mx + pad;
     let world = mix(mn, mx, c);
@@ -190,4 +190,94 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let col = mix(prim.color.rgb, prim.color.rgb * 0.3, stroke / max(alpha, 1e-5));
 
     return vec4<f32>(col, prim.color.a * alpha);
+}
+
+// ----------------------------------------
+// Boolean pass
+// ----------------------------------------
+struct BooleanUnionOut {
+    @location(0) color: vec4<f32>,
+    @location(1) d: f32,
+}
+
+@fragment
+fn fs_boolean_union(in: VsOut) -> BooleanUnionOut {
+    let prim = sdf.prims[in.prim_idx];
+    let d = eval_sdf(in.world, prim);
+    let aa = globals.view_size / globals.resolution.y;
+
+    if d > aa * 5. {
+        discard;
+    }
+
+    var out: BooleanUnionOut;
+    if d < 0. {
+        out.color = prim.color;
+    } else {
+        out.color = vec4<f32>(0.);
+    }
+    out.d = d;
+    return out;
+}
+
+struct BooleanSubtractOut {
+    @location(0) d: f32,
+}
+
+@fragment
+fn fs_boolean_subtract(in: VsOut) -> BooleanSubtractOut {
+    let prim = sdf.prims[in.prim_idx];
+    let d = eval_sdf(in.world, prim);
+
+    var out: BooleanSubtractOut;
+    out.d = -d;
+    return out;
+}
+
+struct CompositeOut {
+    @builtin(position) clip: vec4<f32>,
+}
+
+@vertex
+fn vs_composite(@builtin(vertex_index) vi: u32) -> CompositeOut {
+    var pos = array<vec2<f32>, 3>(vec2<f32>(-1., -3.), vec2<f32>(-1., 1.), vec2<f32>(3., 1.));
+    let p = pos[vi];
+    var out: CompositeOut;
+    out.clip = vec4<f32>(p, 0., 1.);
+    return out;
+}
+
+@group(0) @binding(0)
+var union_tex: texture_2d<f32>;
+@group(0) @binding(1)
+var subtract_tex: texture_2d<f32>;
+@group(0) @binding(2)
+var color_tex: texture_2d<f32>;
+@group(0) @binding(3)
+var<uniform> composite_globals: Globals;
+
+@fragment
+fn fs_composite(in: CompositeOut) -> @location(0) vec4<f32> {
+    let coords = vec2<i32>(in.clip.xy);
+    let d_union = textureLoad(union_tex, coords, 0).r;
+    let neg_d_sub = textureLoad(subtract_tex, coords, 0).r;
+    let color = textureLoad(color_tex, coords, 0);
+
+    let aa = composite_globals.view_size / composite_globals.resolution.y;
+    let d = max(d_union, neg_d_sub);
+    let stroke_w = aa * 3.5;
+
+    if d > stroke_w + aa { discard; }
+
+    let saa = smoothstep(-aa, aa, d);
+    let fill = 1. - saa;
+    let stroke = saa * (1. - smoothstep(stroke_w - aa, stroke_w + aa, d));
+    let alpha = min(fill + stroke, 1.);
+    if alpha <= 0. {
+        discard;
+    }
+
+    let stroke_color = vec3<f32>(0.18, 0.32, 0.55);
+    let rgb = mix(color.rgb, stroke_color, stroke / max(alpha, 1e-5));
+    return vec4<f32>(rgb, alpha);
 }

@@ -21,6 +21,7 @@ const START_SIZE: winit::dpi::LogicalSize<i32> = winit::dpi::LogicalSize::new(80
 pub const SCRUB_TOL: f32 = 1. / 30.;
 pub const FPS: f32 = 60.;
 pub const DT: f32 = 1. / FPS;
+pub const CAM_KEY_SPEED: f32 = 0.5;
 
 pub struct App {
     window: Option<Arc<Window>>,
@@ -67,7 +68,7 @@ impl App {
             0.,
             0.,
             none,
-            -0.6,
+            1.2,
         );
         let el_f = builder.joint(
             "elbow_f",
@@ -76,7 +77,7 @@ impl App {
             0.,
             0.,
             none,
-            -0.6,
+            1.2,
         );
         let hd_f = builder.joint(
             "hand_f",
@@ -85,11 +86,11 @@ impl App {
             0.045,
             0.,
             hurt,
-            -0.6,
+            1.2,
         );
 
-        builder.bone("upper_arm_f", sh_f, el_f, 0.045, hurt, -0.6);
-        builder.bone("forearm_f", el_f, hd_f, 0.04, hurt, -0.6);
+        builder.bone("upper_arm_f", sh_f, el_f, 0.045, hurt, 1.2);
+        builder.bone("forearm_f", el_f, hd_f, 0.04, hurt, 1.2);
 
         let sh_b = builder.joint(
             "shoulder_b",
@@ -98,7 +99,7 @@ impl App {
             0.,
             0.,
             none,
-            0.6,
+            -1.2,
         );
         let el_b = builder.joint(
             "elbow_b",
@@ -107,7 +108,7 @@ impl App {
             0.,
             0.,
             none,
-            0.6,
+            -1.2,
         );
         let hd_b = builder.joint(
             "hand_b",
@@ -116,11 +117,11 @@ impl App {
             0.045,
             0.,
             hurt,
-            0.6,
+            -1.2,
         );
 
-        builder.bone("upper_arm_b", sh_b, el_b, 0.045, hurt, 0.6);
-        builder.bone("forearm_b", el_b, hd_b, 0.04, hurt, 0.6);
+        builder.bone("upper_arm_b", sh_b, el_b, 0.045, hurt, -1.2);
+        builder.bone("forearm_b", el_b, hd_b, 0.04, hurt, -1.2);
 
         // ----- legs -----
         let kn_f = builder.joint(
@@ -130,7 +131,7 @@ impl App {
             0.,
             0.,
             hurt,
-            -0.6,
+            0.6,
         );
         let ft_f = builder.joint(
             "foot_f",
@@ -139,11 +140,11 @@ impl App {
             0.055,
             0.,
             hurt,
-            -0.6,
+            0.6,
         );
 
-        builder.bone("thigh_f", hips, kn_f, 0.06, hurt, -0.6);
-        builder.bone("shin_f", kn_f, ft_f, 0.05, hurt, -0.6);
+        builder.bone("thigh_f", hips, kn_f, 0.06, hurt, 0.6);
+        builder.bone("shin_f", kn_f, ft_f, 0.05, hurt, 0.6);
 
         let kn_b = builder.joint(
             "knee_b",
@@ -152,7 +153,7 @@ impl App {
             0.,
             0.,
             hurt,
-            0.6,
+            -0.6,
         );
         let ft_b = builder.joint(
             "foot_b",
@@ -161,16 +162,16 @@ impl App {
             0.055,
             0.,
             hurt,
-            0.6,
+            -0.6,
         );
 
-        builder.bone("thigh_b", hips, kn_b, 0.06, hurt, 0.6);
-        builder.bone("shin_b", kn_b, ft_b, 0.05, hurt, 0.6);
+        builder.bone("thigh_b", hips, kn_b, 0.06, hurt, -0.6);
+        builder.bone("shin_b", kn_b, ft_b, 0.05, hurt, -0.6);
 
         let _e1 = builder.extra(
             "blade_front",
             Some(hd_f),
-            al_math::sdf::Sdf2d::capsule(Vec2::new(0.02, 0.), Vec2::new(0.1, 0.), 0.015),
+            Sdf2d::capsule(Vec2::new(0.02, 0.), Vec2::new(0.1, 0.), 0.015),
             ColliderKind::HIT,
         );
 
@@ -369,18 +370,46 @@ impl App {
 
     pub fn update(&mut self) {
         let designer = &mut self.state;
+        let now = Instant::now();
+        let dt = (now - designer.last_update).as_secs_f32().min(0.1);
+        designer.last_update = now;
+
+        {
+            let mut dx: f32 = 0.;
+            let mut dy: f32 = 0.;
+            if designer.keys.cam_up {
+                dy += 1.;
+            }
+            if designer.keys.cam_down {
+                dy -= 1.;
+            }
+            if designer.keys.cam_right {
+                dx += 1.;
+            }
+            if designer.keys.cam_left {
+                dx -= 1.;
+            }
+
+            if (dx != 0. || dy != 0.) && !designer.keys.ctrl_held {
+                designer.following = false;
+                let len = (dx * dx + dy * dy).sqrt();
+                dx /= len;
+                dy /= len;
+                let mut speed = CAM_KEY_SPEED * designer.camera.view_size;
+                if designer.keys.shift_held { speed *= 4.; }
+                designer.camera.pos[0] += dx * speed * dt;
+                designer.camera.pos[1] += dy * speed * dt;
+            }
+        }
+
         if designer.following {
             let world = designer.skeleton.world_transforms(&designer.pose);
             if !world.is_empty() {
                 let root = world[0].transform_point(Vec2::ZERO);
-                let target = [root.x, root.y];
-                designer.camera.update(target, DT);
+                designer.camera.update([root.x, root.y], dt);
             }
         }
         if designer.playing {
-            let now = Instant::now();
-            let dt = (now - designer.last_tick).as_secs_f32().min(0.1);
-            designer.last_tick = now;
             designer.time += dt;
 
             let (looping, dur) = {
@@ -438,13 +467,7 @@ impl ApplicationHandler for App {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {
                 if let Some(render_state) = &mut self.render_state {
-                    if size.width > 0 && size.height > 0 {
-                        render_state.config.width = size.width;
-                        render_state.config.height = size.height;
-                        render_state
-                            .surface
-                            .configure(&render_state.device, &render_state.config);
-                    }
+                    render_state.resize(size.width, size.height);
                 }
             }
             WindowEvent::RedrawRequested => {
@@ -543,10 +566,32 @@ impl ApplicationHandler for App {
             }
 
             WindowEvent::KeyboardInput { event, .. }
+                if event.state == winit::event::ElementState::Pressed =>
+            {
+                use winit::keyboard::KeyCode;
+                if let winit::keyboard::PhysicalKey::Code(code) = event.physical_key {
+                    match code {
+                        KeyCode::KeyW => designer.keys.cam_up = true,
+                        KeyCode::KeyS => designer.keys.cam_down = true,
+                        KeyCode::KeyA => designer.keys.cam_left = true,
+                        KeyCode::KeyD => designer.keys.cam_right = true,
+                        _ => {}
+                    }
+                }
+            }
+
+            WindowEvent::KeyboardInput { event, .. }
                 if event.state == winit::event::ElementState::Released =>
             {
                 use winit::keyboard::KeyCode;
                 if let winit::keyboard::PhysicalKey::Code(code) = event.physical_key {
+                    match code {
+                        KeyCode::KeyW => designer.keys.cam_up = false,
+                        KeyCode::KeyS => designer.keys.cam_down = false,
+                        KeyCode::KeyA => designer.keys.cam_left = false,
+                        KeyCode::KeyD => designer.keys.cam_right = false,
+                        _ => {}
+                    }
                     match code {
                         KeyCode::Escape => event_loop.exit(),
 
@@ -562,9 +607,6 @@ impl ApplicationHandler for App {
 
                         KeyCode::Space => {
                             designer.playing = !designer.playing;
-                            if designer.playing {
-                                designer.last_tick = Instant::now();
-                            }
                             designer.status = if designer.playing {
                                 "Playing".into()
                             } else {
@@ -761,7 +803,7 @@ impl ApplicationHandler for App {
                             );
                         }
 
-                        KeyCode::KeyA if designer.keys.shift_held => {
+                        KeyCode::KeyA if designer.keys.ctrl_held => {
                             if let Some(ColliderRef::Extra(i)) = designer.selected {
                                 designer.extra_active[i] = !designer.extra_active[i];
                             }

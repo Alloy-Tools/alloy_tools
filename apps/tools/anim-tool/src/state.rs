@@ -73,6 +73,10 @@ pub struct InputState {
     pub ctrl_held: bool,
     pub shift_held: bool,
     pub alt_held: bool,
+    pub cam_up: bool,
+    pub cam_down: bool,
+    pub cam_left: bool,
+    pub cam_right: bool,
 }
 
 #[derive(Default, Clone, Copy, Debug)]
@@ -109,7 +113,7 @@ pub struct DesignerState {
     pub current_clip: usize,
     pub time: f32,
     pub playing: bool,
-    pub last_tick: Instant,
+    pub last_update: Instant,
 
     pub camera: crate::Camera,
     pub following: bool,
@@ -150,7 +154,7 @@ impl DesignerState {
             current_clip: 0,
             time: 0.,
             playing: false,
-            last_tick: Instant::now(),
+            last_update: Instant::now(),
             camera: Camera::new([0., 0.], 1.4),
             following: true,
             panning: false,

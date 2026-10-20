@@ -1,3 +1,4 @@
+use crate::app::FPS;
 use al_math::{
     sdf::Sdf2dPrim,
     transform::Transform2d,
@@ -6,8 +7,6 @@ use al_math::{
 use al_skeleton::skeleton::ColliderRef;
 use bytemuck::Zeroable;
 use wgpu::{Surface, SurfaceConfiguration};
-
-use crate::app::FPS;
 
 pub const MAX_SDF_PRIMS: usize = 256;
 
@@ -29,6 +28,85 @@ pub struct SdfData {
     pub prims: [Sdf2dPrim; MAX_SDF_PRIMS],
 }
 
+#[allow(unused)]
+pub struct BooleanTargets {
+    pub color_view: wgpu::TextureView,
+    pub union_view: wgpu::TextureView,
+    pub subtract_view: wgpu::TextureView,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl BooleanTargets {
+    pub fn new(
+        device: &wgpu::Device,
+        width: u32,
+        height: u32,
+        color_format: wgpu::TextureFormat,
+    ) -> Self {
+        let w = width.max(1);
+        let h = height.max(1);
+        let size = wgpu::Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        };
+        let usage = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
+
+        let mk = |label: &'static str, format: wgpu::TextureFormat| {
+            device
+                .create_texture(&wgpu::wgt::TextureDescriptor {
+                    label: Some(label),
+                    size,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage,
+                    view_formats: &[],
+                })
+                .create_view(&Default::default())
+        };
+        Self {
+            color_view: mk("Boolean Color", color_format),
+            union_view: mk("Boolean Union D", wgpu::TextureFormat::R16Float),
+            subtract_view: mk("Boolean Subtract D", wgpu::TextureFormat::R16Float),
+            width: w,
+            height: h,
+        }
+    }
+}
+
+fn make_composite_bg(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    targets: &BooleanTargets,
+    globals_buffer: &wgpu::Buffer,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Composite Bind Group"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&targets.union_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(&targets.subtract_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::TextureView(&targets.color_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: globals_buffer.as_entire_binding(),
+            },
+        ],
+    })
+}
+
 fn depth_tint(color: Vec4, depth: f32) -> Vec4 {
     let f = (1. - depth * 0.22).clamp(0.35, 1.25);
     Vec4::new(color.x * f, color.y * f, color.z * f, color.w)
@@ -39,15 +117,26 @@ pub struct RenderState {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub config: SurfaceConfiguration,
+    pub sdf_pipeline: wgpu::RenderPipeline,
     pub globals_buffer: wgpu::Buffer,
-    pub skeleton_pipeline: wgpu::RenderPipeline,
-    pub skeleton_buffer: wgpu::Buffer,
-    pub skeleton_bind_group: wgpu::BindGroup,
+    pub union_buffer: wgpu::Buffer,
+    pub union_bind_group: wgpu::BindGroup,
+    pub subtract_buffer: wgpu::Buffer,
+    pub subtract_bind_group: wgpu::BindGroup,
+    pub overlay_buffer: wgpu::Buffer,
+    pub overlay_bind_group: wgpu::BindGroup,
     pub bg_pipeline: wgpu::RenderPipeline,
     pub bg_bind_group: wgpu::BindGroup,
     pub vfx_pipeline: wgpu::RenderPipeline,
     pub vfx_buffer: wgpu::Buffer,
     pub vfx_bind_group: wgpu::BindGroup,
+    // Boolean Operations
+    pub boolean_targets: BooleanTargets,
+    pub union_pipeline: wgpu::RenderPipeline,
+    pub subtract_pipeline: wgpu::RenderPipeline,
+    pub composite_pipeline: wgpu::RenderPipeline,
+    pub composite_bgl: wgpu::BindGroupLayout,
+    pub composite_bind_group: wgpu::BindGroup,
     // Glyphon
     pub font_system: glyphon::FontSystem,
     pub swash_cache: glyphon::SwashCache,
@@ -180,15 +269,8 @@ impl RenderState {
             cache: None,
         });
 
-        let skeleton_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("SDF Skeleton Buffer"),
-            size: std::mem::size_of::<SdfData>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        let skeleton_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("SDF Skeleton Bind Group Layout"),
+        let sdf_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("SDF Bind Group Layout"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
@@ -213,31 +295,49 @@ impl RenderState {
             ],
         });
 
-        let skeleton_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("SDF Skeleton Bind Group"),
-            layout: &skeleton_bgl,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: globals_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: skeleton_buffer.as_entire_binding(),
-                },
-            ],
+        let mk_buf = |label: &str| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size: std::mem::size_of::<SdfData>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        };
+
+        let union_buffer = mk_buf("SDF Union Buffer");
+        let subtract_buffer = mk_buf("SDF Subtract Buffer");
+        let overlay_buffer = mk_buf("SDF Overlay Buffer");
+
+        let mk_bgl = |label: &str, buffer: &wgpu::Buffer| {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(label),
+                layout: &sdf_bgl,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: globals_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: buffer.as_entire_binding(),
+                    },
+                ],
+            })
+        };
+
+        let union_bind_group = mk_bgl("SDF Union Bind Group", &union_buffer);
+        let subtract_bind_group = mk_bgl("SDF Subtract Bind Group", &subtract_buffer);
+        let overlay_bind_group = mk_bgl("SDF Overlay Bind Group", &overlay_buffer);
+
+        let sdf_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("SDF Pipeline Layout"),
+            bind_group_layouts: &[Some(&sdf_bgl)],
+            immediate_size: 0,
         });
 
-        let skeleton_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("SDF Skeleton Pipeline Layout"),
-                bind_group_layouts: &[Some(&skeleton_bgl)],
-                immediate_size: 0,
-            });
-
-        let skeleton_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("SDF Skeleton Pipeline"),
-            layout: Some(&skeleton_pipeline_layout),
+        let sdf_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("SDF Pipeline"),
+            layout: Some(&sdf_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &designer_shader,
                 entry_point: Some("vs_main"),
@@ -278,7 +378,7 @@ impl RenderState {
 
         let vfx_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("SDF Vfx Bind Group"),
-            layout: &skeleton_bgl,
+            layout: &sdf_bgl,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -293,7 +393,7 @@ impl RenderState {
 
         let vfx_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("SDF Vfx Pipeline Layout"),
-            bind_group_layouts: &[Some(&skeleton_bgl)],
+            bind_group_layouts: &[Some(&sdf_bgl)],
             immediate_size: 0,
         });
 
@@ -342,6 +442,197 @@ impl RenderState {
             cache: None,
         });
 
+        let union_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Boolean Union Pipeline"),
+            layout: Some(&sdf_pipeline_layout), // reuses globals + prims
+            vertex: wgpu::VertexState {
+                module: &designer_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &designer_shader,
+                entry_point: Some("fs_boolean_union"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[
+                    Some(wgpu::ColorTargetState {
+                        format: config.format,
+                        blend: Some(wgpu::BlendState {
+                            color: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::SrcAlpha,
+                                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                            alpha: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::One,
+                                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                        }),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                    Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::R16Float,
+                        blend: Some(wgpu::BlendState {
+                            color: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::One,
+                                dst_factor: wgpu::BlendFactor::One,
+                                operation: wgpu::BlendOperation::Min,
+                            },
+                            alpha: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::One,
+                                dst_factor: wgpu::BlendFactor::One,
+                                operation: wgpu::BlendOperation::Min,
+                            },
+                        }),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                ],
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            depth_stencil: None,
+            multiview_mask: None,
+            cache: None,
+        });
+
+        let subtract_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Boolean Subtract Pipeline"),
+            layout: Some(&sdf_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &designer_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &designer_shader,
+                entry_point: Some("fs_boolean_subtract"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::R16Float,
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::One,
+                            operation: wgpu::BlendOperation::Max,
+                        },
+                        alpha: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::One,
+                            operation: wgpu::BlendOperation::Max,
+                        },
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            depth_stencil: None,
+            multiview_mask: None,
+            cache: None,
+        });
+
+        let composite_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Composite BGL"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let composite_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Composite Layout"),
+            bind_group_layouts: &[Some(&composite_bgl)],
+            immediate_size: 0,
+        });
+
+        let composite_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Composite Pipeline"),
+            layout: Some(&composite_layout),
+            vertex: wgpu::VertexState {
+                module: &designer_shader,
+                entry_point: Some("vs_composite"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &designer_shader,
+                entry_point: Some("fs_composite"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            depth_stencil: None,
+            multiview_mask: None,
+            cache: None,
+        });
+
+        let boolean_targets = BooleanTargets::new(
+            &device,
+            window.inner_size().width,
+            window.inner_size().height,
+            config.format,
+        );
+        let composite_bind_group =
+            make_composite_bg(&device, &composite_bgl, &boolean_targets, &globals_buffer);
+
         // Glyphon
         let font_system = glyphon::FontSystem::new();
         let swash_cache = glyphon::SwashCache::new();
@@ -360,15 +651,25 @@ impl RenderState {
             device,
             queue,
             config,
+            sdf_pipeline,
             globals_buffer,
-            skeleton_pipeline,
-            skeleton_buffer,
-            skeleton_bind_group,
+            union_buffer,
+            union_bind_group,
+            subtract_buffer,
+            subtract_bind_group,
+            overlay_buffer,
+            overlay_bind_group,
             bg_pipeline,
             bg_bind_group,
             vfx_pipeline,
             vfx_buffer,
             vfx_bind_group,
+            boolean_targets,
+            union_pipeline,
+            subtract_pipeline,
+            composite_pipeline,
+            composite_bgl,
+            composite_bind_group,
             font_system,
             swash_cache,
             _cache: cache,
@@ -376,6 +677,23 @@ impl RenderState {
             text_renderer,
             viewport,
         }
+    }
+
+    pub fn resize(&mut self, width: u32, height: u32) {
+        if width == 0 || height == 0 {
+            return;
+        }
+        self.config.width = width;
+        self.config.height = height;
+        self.surface.configure(&self.device, &self.config);
+
+        self.boolean_targets = BooleanTargets::new(&self.device, width, height, self.config.format);
+        self.composite_bind_group = make_composite_bg(
+            &self.device,
+            &self.composite_bgl,
+            &self.boolean_targets,
+            &self.globals_buffer,
+        );
     }
 
     pub fn render_designer(&mut self, d: &mut crate::state::DesignerState) {
@@ -409,8 +727,11 @@ impl RenderState {
             .write_buffer(&self.globals_buffer, 0, bytemuck::bytes_of(&globals));
 
         // ---- Build the rig primitive list ----
-        let mut prims = Vec::with_capacity(MAX_SDF_PRIMS);
+        let mut union_prims = Vec::with_capacity(MAX_SDF_PRIMS);
+        #[allow(unused)]
+        let mut subtract_prims = Vec::with_capacity(MAX_SDF_PRIMS);
         let mut vfx_prims = Vec::with_capacity(MAX_SDF_PRIMS);
+        let mut overlay_prims = Vec::with_capacity(MAX_SDF_PRIMS);
 
         // Onion skins (always lowest).
         if d.onion_keys > 0 {
@@ -426,7 +747,7 @@ impl RenderState {
                             if let Some(idx) = curr.checked_sub(offset) {
                                 push_body_prims(
                                     d,
-                                    &mut prims,
+                                    &mut overlay_prims,
                                     &d.skeleton.world_transforms(&keys[idx].pose),
                                     Vec4::new(1., 0.35, 0.35, 1.),
                                     alpha,
@@ -436,7 +757,7 @@ impl RenderState {
                             if next_idx < keys.len() {
                                 push_body_prims(
                                     d,
-                                    &mut prims,
+                                    &mut overlay_prims,
                                     &d.skeleton.world_transforms(&keys[next_idx].pose),
                                     Vec4::new(0.35, 0.55, 1., 1.),
                                     alpha,
@@ -457,7 +778,7 @@ impl RenderState {
                                 }
                                 push_body_prims(
                                     d,
-                                    &mut prims,
+                                    &mut overlay_prims,
                                     &d.skeleton.world_transforms(&clip.sample(t)),
                                     color,
                                     alpha,
@@ -471,7 +792,13 @@ impl RenderState {
 
         // Live body (bottom layer).
         let world = d.skeleton.world_transforms(&d.pose);
-        push_body_prims(d, &mut prims, &world, Vec4::new(0.82, 0.85, 0.92, 1.), 1.);
+        push_body_prims(
+            d,
+            &mut union_prims,
+            &world,
+            Vec4::new(0.82, 0.85, 0.92, 1.),
+            1.,
+        );
 
         // Extra colliders above body
         if d.show_extras {
@@ -482,7 +809,7 @@ impl RenderState {
                 } else {
                     Vec4::new(0.3, 0.55, 0.3, 0.35)
                 };
-                prims.push(if let Some(idx) = extra.parent() {
+                overlay_prims.push(if let Some(idx) = extra.parent() {
                     shape.to_prim(world[idx], color)
                 } else {
                     shape.to_prim(Transform2d::IDENTITY, color)
@@ -499,7 +826,7 @@ impl RenderState {
         for (i, _) in d.skeleton.joints().iter().enumerate() {
             let c = world[i].transform_point(Vec2::ZERO);
             let selected = d.selected == Some(ColliderRef::Joint(i));
-            prims.push(Sdf2dPrim::circle(
+            overlay_prims.push(Sdf2dPrim::circle(
                 c,
                 if selected { 0.016 } else { 0.008 },
                 if selected {
@@ -511,18 +838,11 @@ impl RenderState {
         }
 
         // Cursor marker so you can see what you're pointing at.
-        prims.push(Sdf2dPrim::circle(
+        overlay_prims.push(Sdf2dPrim::circle(
             d.cursor_world,
             0.006,
             Vec4::new(0.4, 1., 0.6, 1.),
         ));
-
-        let n = prims.len().min(MAX_SDF_PRIMS);
-        let mut data = SdfData::zeroed();
-        data.count = n as u32;
-        data.prims[..n].copy_from_slice(&prims[..n]);
-        self.queue
-            .write_buffer(&self.skeleton_buffer, 0, bytemuck::bytes_of(&data));
 
         let mut encoder = self.device.create_command_encoder(&Default::default());
         // ----- Background Pass -----
@@ -548,10 +868,91 @@ impl RenderState {
             pass.draw(0..3, 0..1);
         }
 
-        // ---- Skeleton Pass ----
+        // ----- Union Pass -----
+        let n_union = union_prims.len().min(MAX_SDF_PRIMS);
         {
+            let mut data = SdfData::zeroed();
+            data.count = n_union as u32;
+            data.prims[..n_union].copy_from_slice(&union_prims[..n_union]);
+            self.queue
+                .write_buffer(&self.union_buffer, 0, bytemuck::bytes_of(&data));
+
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Skeleton Pass"),
+                label: Some("Boolean Union Pass"),
+                color_attachments: &[
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &self.boolean_targets.color_view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    }),
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &self.boolean_targets.union_view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: 65504.,
+                                g: 0.,
+                                b: 0.,
+                                a: 0.,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    }),
+                ],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&self.union_pipeline);
+            pass.set_bind_group(0, &self.union_bind_group, &[]);
+            pass.draw(0..6, 0..n_union as u32);
+        }
+
+        // ----- Subtract Pass -----
+        let n_subtract = subtract_prims.len().min(MAX_SDF_PRIMS);
+        {
+            let mut data = SdfData::zeroed();
+            data.count = n_subtract as u32;
+            data.prims[..n_subtract].copy_from_slice(&subtract_prims[..n_subtract]);
+            self.queue
+                .write_buffer(&self.subtract_buffer, 0, bytemuck::bytes_of(&data));
+
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Boolean Subtract Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.boolean_targets.subtract_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: -65504.,
+                            g: 0.,
+                            b: 0.,
+                            a: 0.,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&self.subtract_pipeline);
+            pass.set_bind_group(0, &self.subtract_bind_group, &[]);
+            pass.draw(0..6, 0..n_subtract as u32);
+        }
+
+        // ----- Composite Pass -----
+        if n_union > 0 || n_subtract > 0 {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Boolean Composite Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     depth_slice: None,
@@ -566,90 +967,125 @@ impl RenderState {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            pass.set_pipeline(&self.skeleton_pipeline);
-            pass.set_bind_group(0, &self.skeleton_bind_group, &[]);
-            pass.draw(0..6, 0..n as u32);
+            pass.set_pipeline(&self.composite_pipeline);
+            pass.set_bind_group(0, &self.composite_bind_group, &[]);
+            pass.draw(0..3, 0..1);
         }
 
-        // ----- VFX Pass -----
-        let n = vfx_prims.len().min(MAX_SDF_PRIMS);
-        let mut data = SdfData::zeroed();
-        data.count = n as u32;
-        data.prims[..n].copy_from_slice(&vfx_prims[..n]);
-        self.queue
-            .write_buffer(&self.vfx_buffer, 0, bytemuck::bytes_of(&data));
+        // ----- Vfx Pass -----
         {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("VFX Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            pass.set_pipeline(&self.vfx_pipeline);
-            pass.set_bind_group(0, &self.vfx_bind_group, &[]);
-            pass.draw(0..6, 0..n as u32);
+            let n_vfx = vfx_prims.len().min(MAX_SDF_PRIMS);
+            if n_vfx > 0 {
+                let mut data = SdfData::zeroed();
+                data.count = n_vfx as u32;
+                data.prims[..n_vfx].copy_from_slice(&vfx_prims[..n_vfx]);
+                self.queue
+                    .write_buffer(&self.vfx_buffer, 0, bytemuck::bytes_of(&data));
+
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("VFX Pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                pass.set_pipeline(&self.vfx_pipeline);
+                pass.set_bind_group(0, &self.vfx_bind_group, &[]);
+                pass.draw(0..6, 0..n_vfx as u32);
+            }
         }
 
-        // ---- Text HUD ----
-        let mut text_buffer =
-            glyphon::Buffer::new(&mut self.font_system, glyphon::Metrics::new(14., 18.));
-        text_buffer.set_size(
-            Some(self.config.width as f32),
-            Some(self.config.height as f32),
-        );
+        // ----- Overlay Pass -----
+        {
+            let n_overlay = overlay_prims.len().min(MAX_SDF_PRIMS);
+            if n_overlay > 0 {
+                let mut data = SdfData::zeroed();
+                data.count = n_overlay as u32;
+                data.prims[..n_overlay].copy_from_slice(&overlay_prims[..n_overlay]);
+                self.queue
+                    .write_buffer(&self.overlay_buffer, 0, bytemuck::bytes_of(&data));
 
-        text_buffer.set_text(
-            &d.hud_string(),
-            &glyphon::Attrs::new().family(glyphon::Family::Monospace),
-            glyphon::Shaping::Advanced,
-            None,
-        );
-        text_buffer.shape_until_scroll(&mut self.font_system, false);
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("Overlay Pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                pass.set_pipeline(&self.sdf_pipeline);
+                pass.set_bind_group(0, &self.overlay_bind_group, &[]);
+                pass.draw(0..6, 0..n_overlay as u32);
+            }
+        }
 
-        self.viewport.update(
-            &self.queue,
-            glyphon::Resolution {
-                width: self.config.width,
-                height: self.config.height,
-            },
-        );
+        // ----- Text Pass -----
+        {
+            let mut text_buffer =
+                glyphon::Buffer::new(&mut self.font_system, glyphon::Metrics::new(14., 18.));
+            text_buffer.set_size(
+                Some(self.config.width as f32),
+                Some(self.config.height as f32),
+            );
 
-        self.text_renderer
-            .prepare(
-                &self.device,
+            text_buffer.set_text(
+                &d.hud_string(),
+                &glyphon::Attrs::new().family(glyphon::Family::Monospace),
+                glyphon::Shaping::Advanced,
+                None,
+            );
+            text_buffer.shape_until_scroll(&mut self.font_system, false);
+
+            self.viewport.update(
                 &self.queue,
-                &mut self.font_system,
-                &mut self.atlas,
-                &self.viewport,
-                vec![glyphon::TextArea {
-                    buffer: &mut text_buffer,
-                    left: 12.,
-                    top: 12.,
-                    scale: 1.,
-                    bounds: glyphon::TextBounds {
-                        left: 0,
-                        top: 0,
-                        right: 800,
-                        bottom: 200,
-                    },
-                    default_color: glyphon::Color::rgb(230, 230, 240),
-                    custom_glyphs: &[],
-                }],
-                &mut self.swash_cache,
-            )
-            .unwrap();
+                glyphon::Resolution {
+                    width: self.config.width,
+                    height: self.config.height,
+                },
+            );
 
-        {
+            self.text_renderer
+                .prepare(
+                    &self.device,
+                    &self.queue,
+                    &mut self.font_system,
+                    &mut self.atlas,
+                    &self.viewport,
+                    vec![glyphon::TextArea {
+                        buffer: &mut text_buffer,
+                        left: 12.,
+                        top: 12.,
+                        scale: 1.,
+                        bounds: glyphon::TextBounds {
+                            left: 0,
+                            top: 0,
+                            right: 800,
+                            bottom: 200,
+                        },
+                        default_color: glyphon::Color::rgb(230, 230, 240),
+                        custom_glyphs: &[],
+                    }],
+                    &mut self.swash_cache,
+                )
+                .unwrap();
+
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Designer Text"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -684,28 +1120,43 @@ fn push_body_prims(
     base_color: Vec4,
     alpha_mul: f32,
 ) {
-    for (i, joint) in d.skeleton.joints().iter().enumerate() {
+    let joints = d.skeleton.joints();
+    let bones = d.skeleton.bones();
+    let mut batch = Vec::with_capacity(joints.len() + bones.len());
+    for (i, joint) in joints.iter().enumerate() {
         let rad = joint.radius();
         if rad <= 0. {
             continue;
         }
-        let col = depth_tint(base_color, joint.depth());
-        prims.push(Sdf2dPrim::circle(
-            world[i].transform_point(Vec2::ZERO),
-            rad,
-            Vec4::new(col.x, col.y, col.z, col.w * alpha_mul),
+        let depth = joint.depth();
+        let col = depth_tint(base_color, depth);
+        batch.push((
+            depth,
+            Sdf2dPrim::circle(
+                world[i].transform_point(Vec2::ZERO),
+                rad,
+                Vec4::new(col.x, col.y, col.z, col.w * alpha_mul),
+            ),
         ));
     }
 
-    for bone in d.skeleton.bones() {
-        let col = depth_tint(base_color, bone.depth());
+    for bone in bones {
+        let depth = bone.depth();
+        let col = depth_tint(base_color, depth);
         let wo = world[bone.origin_index()].transform_point(Vec2::ZERO);
         let wt = world[bone.tip_index()].transform_point(Vec2::ZERO);
-        prims.push(Sdf2dPrim::capsule(
-            wo,
-            wt - wo,
-            bone.radius(),
-            Vec4::new(col.x, col.y, col.z, col.w * alpha_mul),
+        batch.push((
+            depth,
+            Sdf2dPrim::capsule(
+                wo,
+                wt - wo,
+                bone.radius(),
+                Vec4::new(col.x, col.y, col.z, col.w * alpha_mul),
+            ),
         ));
     }
+
+    batch.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    prims.extend(batch.into_iter().map(|(_, p)| p));
 }

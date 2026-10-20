@@ -10,7 +10,7 @@ pub struct Sdf2dPrim {
     radius: f32,
     rotation: f32,
     kind: u32,
-    op: u32,
+    aux: u32,
     color: Vec4,
 }
 
@@ -19,24 +19,24 @@ impl Sdf2dPrim {
     const CAPSULE: u32 = 1;
     const RECT: u32 = 2;
 
-    fn new(a: Vec2, b: Vec2, radius: f32, rotation: f32, kind: u32, color: Vec4) -> Self {
+    fn new(a: Vec2, b: Vec2, radius: f32, rotation: f32, kind: u32, aux: u32, color: Vec4) -> Self {
         Self {
             a,
             b,
             radius,
             rotation,
             kind,
-            op: 0,
+            aux,
             color,
         }
     }
 
     pub fn circle(center: Vec2, radius: f32, color: Vec4) -> Self {
-        Self::new(center, Vec2::ZERO, radius, 0., Self::CIRCLE, color)
+        Self::new(center, Vec2::ZERO, radius, 0., Self::CIRCLE, 0, color)
     }
 
     pub fn capsule(origin: Vec2, tip: Vec2, radius: f32, color: Vec4) -> Self {
-        Self::new(origin, tip, radius, 0., Self::CAPSULE, color)
+        Self::new(origin, tip, radius, 0., Self::CAPSULE, 0, color)
     }
 
     pub fn rect(
@@ -52,6 +52,7 @@ impl Sdf2dPrim {
             corner_radius,
             rotation,
             Self::RECT,
+            0,
             color,
         )
     }
