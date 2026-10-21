@@ -9,7 +9,7 @@ use al_skeleton::skeleton::ColliderRef;
 use bytemuck::Zeroable;
 use wgpu::{Surface, SurfaceConfiguration};
 
-pub const MAX_SDF_PRIMS: usize = 512;
+pub const MAX_SDF_PRIMS: usize = 1024;
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, Zeroable)]
@@ -166,10 +166,7 @@ impl RenderState {
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("Main Device"),
                 required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits {
-                    max_uniform_buffer_binding_size: 65536,
-                    ..wgpu::Limits::default()
-                },
+                required_limits: wgpu::Limits::downlevel_defaults(),
                 memory_hints: wgpu::MemoryHints::default(),
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
                 trace: wgpu::Trace::Off,
@@ -290,7 +287,7 @@ impl RenderState {
                     binding: 1,
                     visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
@@ -303,13 +300,14 @@ impl RenderState {
             device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(label),
                 size: std::mem::size_of::<SdfData>() as u64,
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             })
         };
 
         let union_buffer = mk_buf("SDF Union Buffer");
         let subtract_buffer = mk_buf("SDF Subtract Buffer");
+        let vfx_buffer = mk_buf("SDF Vfx Buffer");
         let overlay_buffer = mk_buf("SDF Overlay Buffer");
 
         let mk_bgl = |label: &str, buffer: &wgpu::Buffer| {
@@ -371,13 +369,6 @@ impl RenderState {
             depth_stencil: None,
             multiview_mask: None,
             cache: None,
-        });
-
-        let vfx_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("SDF Vfx Buffer"),
-            size: std::mem::size_of::<SdfData>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
         });
 
         let vfx_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -875,6 +866,12 @@ impl RenderState {
         }
 
         // ----- Union Pass -----
+        debug_assert!(
+            union_prims.len() <= MAX_SDF_PRIMS,
+            "union prim overflow: {} > {}",
+            union_prims.len(),
+            MAX_SDF_PRIMS
+        );
         let n_union = union_prims.len().min(MAX_SDF_PRIMS);
         {
             let mut data = SdfData::zeroed();
@@ -921,6 +918,12 @@ impl RenderState {
         }
 
         // ----- Subtract Pass -----
+        debug_assert!(
+            subtract_prims.len() <= MAX_SDF_PRIMS,
+            "subtract prim overflow: {} > {}",
+            subtract_prims.len(),
+            MAX_SDF_PRIMS
+        );
         let n_subtract = subtract_prims.len().min(MAX_SDF_PRIMS);
         {
             let mut data = SdfData::zeroed();
@@ -980,6 +983,12 @@ impl RenderState {
 
         // ----- Vfx Pass -----
         {
+            debug_assert!(
+                vfx_prims.len() <= MAX_SDF_PRIMS,
+                "vfx prim overflow: {} > {}",
+                vfx_prims.len(),
+                MAX_SDF_PRIMS
+            );
             let n_vfx = vfx_prims.len().min(MAX_SDF_PRIMS);
             if n_vfx > 0 {
                 let mut data = SdfData::zeroed();
@@ -1012,6 +1021,12 @@ impl RenderState {
 
         // ----- Overlay Pass -----
         {
+            debug_assert!(
+                overlay_prims.len() <= MAX_SDF_PRIMS,
+                "overlay prim overflow: {} > {}",
+                overlay_prims.len(),
+                MAX_SDF_PRIMS
+            );
             let n_overlay = overlay_prims.len().min(MAX_SDF_PRIMS);
             if n_overlay > 0 {
                 let mut data = SdfData::zeroed();
