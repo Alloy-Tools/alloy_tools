@@ -233,7 +233,7 @@ impl AnimationClip2d {
 
             let u = ((t - st) / dur.max(1e-6)).clamp(0., 1.);
             let e = vfx.easing().apply(u);
-            let scale = lerp(vfx.start_scale(), vfx.end_scale(), e);
+            let scale = vfx.start_scale().lerp(vfx.end_scale(), e);
             let alpha = lerp(vfx.start_alpha(), vfx.end_alpha(), e);
             let rotation = lerp(vfx.start_rotation(), vfx.end_rotation(), e);
             let motion = vfx.motion() * u;
@@ -249,7 +249,7 @@ impl AnimationClip2d {
                 AttachType::World { pos } => (Transform2d::IDENTITY, pos),
             };
 
-            let vfx_local = Transform2d::new(frame_offset, rotation, Vec2::new(scale, scale));
+            let vfx_local = Transform2d::new(frame_offset, rotation, scale);
             let mut trans = frame_tf.compose(&vfx_local);
             trans.translation = trans.translation + motion;
 

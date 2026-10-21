@@ -53,31 +53,35 @@ impl Sdf2d {
     }
 
     pub fn to_prim(self, world: Transform2d, color: Vec4) -> Sdf2dPrim {
-        let (_, rot, scale) = world.to_components();
-        //REVIEW: Only uniform scale is currently implemented
-        let s = scale.x.min(scale.y);
+        let m_inv = world
+            .linear
+            .try_inverse()
+            .unwrap_or(crate::matrix::Mat2::IDENTITY)
+            .to_cols_array();
         match self {
             Self::Circle { center, radius } => {
-                Sdf2dPrim::circle(world.transform_point(center), radius * s, color)
+                Sdf2dPrim::circle(world.transform_point(center), radius, m_inv, color)
             }
             Self::Capsule {
                 origin,
                 tip,
                 radius,
-            } => {
-                let wo = world.transform_point(origin);
-                let wt = world.transform_point(tip);
-                Sdf2dPrim::capsule(wo, wt - wo, radius * s, color)
-            }
+            } => Sdf2dPrim::capsule(
+                world.transform_point(origin),
+                tip - origin,
+                radius,
+                m_inv,
+                color,
+            ),
             Self::Rect {
                 center,
                 half_size,
                 corner_radius,
             } => Sdf2dPrim::rect(
                 world.transform_point(center),
-                half_size * s,
-                corner_radius * s,
-                rot,
+                half_size,
+                corner_radius,
+                m_inv,
                 color,
             ),
         }

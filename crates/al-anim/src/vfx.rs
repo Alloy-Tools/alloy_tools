@@ -1,7 +1,7 @@
 use crate::{anim_clip::AttachType, Easing};
 use al_math::{
     sdf::Sdf2d,
-    vec::{Vec2, Vec3, Vec4},
+    vec::{Vec2, Vec4},
 };
 
 #[derive(Clone, Debug)]
@@ -12,9 +12,12 @@ pub struct Vfx2d {
     duration: f32,
     attach: AttachType,
     shape: Sdf2d,
-    // Scale, Alpha, Rotation
-    start: Vec3,
-    end: Vec3,
+    scale_start: Vec2,
+    scale_end: Vec2,
+    alpha_start: f32,
+    alpha_end: f32,
+    rotation_start: f32,
+    rotation_end: f32,
     motion: Vec2,
     color: Vec4,
     easing: Easing,
@@ -27,7 +30,7 @@ impl Vfx2d {
         duration: f32,
         attach: AttachType,
         shape: Sdf2d,
-        scale: (f32, f32),
+        scale: (Vec2, Vec2),
         alpha: (f32, f32),
         rotation: (f32, f32),
         motion: Vec2,
@@ -40,8 +43,12 @@ impl Vfx2d {
             duration,
             attach,
             shape,
-            start: Vec3::new(scale.0, alpha.0, rotation.0),
-            end: Vec3::new(scale.1, alpha.1, rotation.1),
+            scale_start: scale.0,
+            scale_end: scale.1,
+            alpha_start: alpha.0,
+            alpha_end: alpha.1,
+            rotation_start: rotation.0,
+            rotation_end: rotation.1,
             motion,
             color,
             easing,
@@ -87,52 +94,52 @@ impl Vfx2d {
         self.shape = shape;
     }
 
-    pub fn start_scale(&self) -> f32 {
-        self.start.x
+    pub fn start_scale(&self) -> Vec2 {
+        self.scale_start
     }
 
-    pub fn set_start_scale(&mut self, scale: f32) {
-        self.start.x = scale;
+    pub fn set_start_scale(&mut self, scale: Vec2) {
+        self.scale_start = scale;
     }
 
     pub fn start_alpha(&self) -> f32 {
-        self.start.y
+        self.alpha_start
     }
 
     pub fn set_start_alpha(&mut self, alpha: f32) {
-        self.start.y = alpha;
+        self.alpha_start = alpha;
     }
 
     pub fn start_rotation(&self) -> f32 {
-        self.start.z
+        self.rotation_start
     }
 
     pub fn set_start_rotation(&mut self, rotation: f32) {
-        self.start.z = rotation;
+        self.rotation_start = rotation;
     }
 
-    pub fn end_scale(&self) -> f32 {
-        self.end.x
+    pub fn end_scale(&self) -> Vec2 {
+        self.scale_end
     }
 
-    pub fn set_end_scale(&mut self, scale: f32) {
-        self.end.x = scale;
+    pub fn set_end_scale(&mut self, scale: Vec2) {
+        self.scale_end = scale;
     }
 
     pub fn end_alpha(&self) -> f32 {
-        self.end.y
+        self.alpha_end
     }
 
     pub fn set_end_alpha(&mut self, alpha: f32) {
-        self.end.y = alpha;
+        self.alpha_end = alpha;
     }
 
     pub fn end_rotation(&self) -> f32 {
-        self.end.z
+        self.rotation_end
     }
 
     pub fn set_end_rotation(&mut self, rotation: f32) {
-        self.end.z = rotation;
+        self.rotation_end = rotation;
     }
 
     pub fn motion(&self) -> Vec2 {

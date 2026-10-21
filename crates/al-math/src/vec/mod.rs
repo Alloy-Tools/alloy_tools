@@ -153,6 +153,13 @@ macro_rules! define_vec_impls {
             }
         }
 
+        impl From<f32> for $struct_name {
+            #[inline]
+            fn from(value: f32) -> Self {
+                Self::from_array([value; $dim])
+            }
+        }
+
         impl From<[f32; $dim]> for $struct_name {
             #[inline]
             fn from(arr: [f32; $dim]) -> Self {

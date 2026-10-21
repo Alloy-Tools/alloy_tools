@@ -5,13 +5,14 @@ use crate::vec::{Vec2, Vec4};
 #[cfg_attr(feature = "gpu", derive(bytemuck::Pod, bytemuck::Zeroable,))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Sdf2dPrim {
-    a: Vec2,
-    b: Vec2,
-    radius: f32,
-    rotation: f32,
-    kind: u32,
-    aux: u32,
-    color: Vec4,
+    a: Vec2,         // 8:  0 -7
+    b: Vec2,         // 8:  8 -15
+    radius: f32,     // 4:  16-19
+    aux: f32,        // 4:  20-23
+    aux_2: u32,      // 4:  24-27
+    kind: u32,       // 4:  28-31
+    m_inv: [f32; 4], // 16: 32-47
+    color: Vec4,     // 16: 48-63
 }
 
 impl Sdf2dPrim {
@@ -19,40 +20,60 @@ impl Sdf2dPrim {
     const CAPSULE: u32 = 1;
     const RECT: u32 = 2;
 
-    fn new(a: Vec2, b: Vec2, radius: f32, rotation: f32, kind: u32, aux: u32, color: Vec4) -> Self {
+    fn new(
+        a: Vec2,
+        b: Vec2,
+        radius: f32,
+        aux: f32,
+        aux_2: u32,
+        kind: u32,
+        m_inv: [f32; 4],
+        color: Vec4,
+    ) -> Self {
         Self {
             a,
             b,
             radius,
-            rotation,
-            kind,
             aux,
+            aux_2,
+            kind,
+            m_inv,
             color,
         }
     }
 
-    pub fn circle(center: Vec2, radius: f32, color: Vec4) -> Self {
-        Self::new(center, Vec2::ZERO, radius, 0., Self::CIRCLE, 0, color)
+    pub fn circle(center: Vec2, radius: f32, m_inv: [f32; 4], color: Vec4) -> Self {
+        Self::new(
+            center,
+            Vec2::ZERO,
+            radius,
+            0.,
+            0,
+            Self::CIRCLE,
+            m_inv,
+            color,
+        )
     }
 
-    pub fn capsule(origin: Vec2, tip: Vec2, radius: f32, color: Vec4) -> Self {
-        Self::new(origin, tip, radius, 0., Self::CAPSULE, 0, color)
+    pub fn capsule(origin: Vec2, tip: Vec2, radius: f32, m_inv: [f32; 4], color: Vec4) -> Self {
+        Self::new(origin, tip, radius, 0., 0,  Self::CAPSULE, m_inv, color)
     }
 
     pub fn rect(
         center: Vec2,
         half_size: Vec2,
         corner_radius: f32,
-        rotation: f32,
+        m_inv: [f32; 4],
         color: Vec4,
     ) -> Self {
         Self::new(
             center,
             half_size,
             corner_radius,
-            rotation,
-            Self::RECT,
+            0.,
             0,
+            Self::RECT,
+            m_inv,
             color,
         )
     }

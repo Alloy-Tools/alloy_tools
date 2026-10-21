@@ -1,5 +1,6 @@
 use crate::app::FPS;
 use al_math::{
+    matrix::Mat2,
     sdf::Sdf2dPrim,
     transform::Transform2d,
     vec::{Vec2, Vec4},
@@ -8,7 +9,7 @@ use al_skeleton::skeleton::ColliderRef;
 use bytemuck::Zeroable;
 use wgpu::{Surface, SurfaceConfiguration};
 
-pub const MAX_SDF_PRIMS: usize = 256;
+pub const MAX_SDF_PRIMS: usize = 512;
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, Zeroable)]
@@ -165,7 +166,10 @@ impl RenderState {
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("Main Device"),
                 required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::downlevel_defaults(),
+                required_limits: wgpu::Limits {
+                    max_uniform_buffer_binding_size: 65536,
+                    ..wgpu::Limits::default()
+                },
                 memory_hints: wgpu::MemoryHints::default(),
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
                 trace: wgpu::Trace::Off,
@@ -829,6 +833,7 @@ impl RenderState {
             overlay_prims.push(Sdf2dPrim::circle(
                 c,
                 if selected { 0.016 } else { 0.008 },
+                Mat2::IDENTITY.to_cols_array(),
                 if selected {
                     Vec4::new(1., 0.75, 0.15, 1.)
                 } else {
@@ -841,6 +846,7 @@ impl RenderState {
         overlay_prims.push(Sdf2dPrim::circle(
             d.cursor_world,
             0.006,
+            Mat2::IDENTITY.to_cols_array(),
             Vec4::new(0.4, 1., 0.6, 1.),
         ));
 
@@ -1135,6 +1141,11 @@ fn push_body_prims(
             Sdf2dPrim::circle(
                 world[i].transform_point(Vec2::ZERO),
                 rad,
+                world[i]
+                    .linear
+                    .try_inverse()
+                    .unwrap_or(Mat2::IDENTITY)
+                    .to_cols_array(),
                 Vec4::new(col.x, col.y, col.z, col.w * alpha_mul),
             ),
         ));
@@ -1151,6 +1162,11 @@ fn push_body_prims(
                 wo,
                 wt - wo,
                 bone.radius(),
+                world[bone.origin_index()]
+                    .linear
+                    .try_inverse()
+                    .unwrap_or(Mat2::IDENTITY)
+                    .to_cols_array(),
                 Vec4::new(col.x, col.y, col.z, col.w * alpha_mul),
             ),
         ));

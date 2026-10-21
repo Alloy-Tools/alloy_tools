@@ -178,6 +178,7 @@ impl App {
         let mut vfx = Vec::new();
         // Explosion
         let explosion_start = 0.2;
+        let explosion_offset = Vec2::new(1., 0.);
         // White flash
         vfx.push(Vfx2d::new(
             "explosion.flash",
@@ -185,10 +186,10 @@ impl App {
             0.08,
             AttachType::From {
                 joint: hd_f,
-                offset: Vec2::ZERO,
+                offset: explosion_offset,
             },
             Sdf2d::circle(Vec2::ZERO, 0.07),
-            (0.4, 1.6),
+            (0.4.into(), 1.6.into()),
             (1., 0.),
             (0., 0.),
             Vec2::ZERO,
@@ -202,10 +203,10 @@ impl App {
             0.25,
             AttachType::From {
                 joint: hd_f,
-                offset: Vec2::ZERO,
+                offset: explosion_offset,
             },
             Sdf2d::circle(Vec2::ZERO, 0.1),
-            (0.5, 2.2),
+            (0.5.into(), 2.2.into()),
             (0.95, 0.),
             (0., 0.),
             Vec2::new(0., 0.01),
@@ -219,10 +220,10 @@ impl App {
             0.55,
             AttachType::From {
                 joint: hd_f,
-                offset: Vec2::ZERO,
+                offset: explosion_offset,
             },
             Sdf2d::circle(Vec2::ZERO, 0.13),
-            (0.8, 3.2),
+            (0.8.into(), 3.2.into()),
             (0.55, 0.),
             (0., 0.),
             Vec2::new(-0.1, 0.04),
@@ -236,10 +237,10 @@ impl App {
             0.15,
             AttachType::From {
                 joint: hd_f,
-                offset: Vec2::ZERO,
+                offset: explosion_offset,
             },
             Sdf2d::capsule(Vec2::new(-0.02, 0.), Vec2::new(0.02, 0.), 0.004),
-            (0.5, 14.0),
+            ([0.5, 0.5].into(), [14., 1.].into()),
             (1., 0.),
             (0., 0.),
             Vec2::ZERO,
@@ -260,10 +261,10 @@ impl App {
                 offset: Vec2::ZERO,
             },
             Sdf2d::circle(
-                Transform2d::from_translation(Vec2::ZERO),
+                Vec2::ZERO,
                 0.03,
             ),
-            (0.2, 1.4),
+            (0.2.into(), 1.4.into()),
             (0.3, 1.),
             (0., 0.),
             Vec2::ZERO,
@@ -280,11 +281,11 @@ impl App {
                 offset: Vec2::ZERO,
             },
             Sdf2d::capsule(
-                Transform2d::from_translation(Vec2::ZERO),
-                Transform2d::from_translation(Vec2::new(laser_len, 0.)),
+                Vec2::ZERO,
+                Vec2::new(laser_len, 0.),
                 0.005,
             ),
-            (0.05, 1.),
+            (0.05.into(), 1.0.into()),
             (1., 0.4),
             (0., 0.),
             Vec2::ZERO,
@@ -301,11 +302,11 @@ impl App {
                 offset: Vec2::ZERO,
             },
             Sdf2d::capsule(
-                Transform2d::from_translation(Vec2::ZERO),
-                Transform2d::from_translation(Vec2::new(laser_len, 0.)),
+                Vec2::ZERO,
+                Vec2::new(laser_len, 0.),
                 0.015,
             ),
-            (0.05, 1.),
+            ([0.05, 1.].into(), [1., 1.].into()),
             (0.7, 0.2),
             (0., 0.),
             Vec2::ZERO,
@@ -322,10 +323,10 @@ impl App {
                 offset: Vec2::ZERO,
             },
             Sdf2d::circle(
-                Transform2d::from_translation(Vec2::ZERO),
+                Vec2::ZERO,
                 0.045,
             ),
-            (0.3, 1.5),
+            (0.3.into(), 1.5.into()),
             (1., 0.),
             (0., 0.),
             Vec2::ZERO,
@@ -342,10 +343,10 @@ impl App {
                 offset: Vec2::new(laser_len, 0.),
             },
             Sdf2d::circle(
-                Transform2d::from_translation(Vec2::ZERO),
+                Vec2::ZERO,
                 0.05,
             ),
-            (0.4, 1.8),
+            (0.4.into(), 1.8.into()),
             (1., 0.),
             (0., 0.),
             Vec2::ZERO,
@@ -396,7 +397,9 @@ impl App {
                 dx /= len;
                 dy /= len;
                 let mut speed = CAM_KEY_SPEED * designer.camera.view_size;
-                if designer.keys.shift_held { speed *= 4.; }
+                if designer.keys.shift_held {
+                    speed *= 4.;
+                }
                 designer.camera.pos[0] += dx * speed * dt;
                 designer.camera.pos[1] += dy * speed * dt;
             }

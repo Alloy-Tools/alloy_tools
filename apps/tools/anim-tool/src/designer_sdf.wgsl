@@ -10,9 +10,10 @@ struct SdfPrim {
     a: vec2<f32>,
     b: vec2<f32>,
     radius: f32,
-    rotation: f32,
+    aux: f32,
+    aux_2: u32,
     kind: u32,
-    aux: u32,
+    m_inv: vec4<f32>,
     color: vec4<f32>,
 }
 
@@ -21,7 +22,7 @@ struct SdfData {
     _pad0: u32,
     _pad1: u32,
     _pad2: u32,
-    prims: array<SdfPrim, 256>,
+    prims: array<SdfPrim, 512>,
 }
 
 @group(0) @binding(0)
@@ -61,6 +62,15 @@ fn grid_line(world: vec2<f32>, cell: f32, thickness: f32) -> f32 {
     return 1. - smoothstep(0., px * thickness, min(d.x, d.y));
 }
 
+fn mat2_from_inv(mi0: vec2<f32>, mi1: vec2<f32>) -> mat2x2<f32> {
+    let det = mi0.x * mi1.y - mi1.x * mi0.y;
+    let s = select(0., 1. / det, abs(det) > 1e-8);
+    return mat2x2<f32>(
+            vec2<f32>(mi1.y, -mi0.y),
+            vec2<f32>(-mi1.x, mi0.x),
+        ) * s;
+}
+
 @fragment
 fn fs_bg(in: BgVsOut) -> @location(0) vec4<f32> {
     let fine = grid_line(in.world, 0.05, 1.);
@@ -86,6 +96,39 @@ fn fs_bg(in: BgVsOut) -> @location(0) vec4<f32> {
 @vertex
 fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VsOut {
     let prim = sdf.prims[ii];
+    let m = mat2_from_inv(
+            vec2<f32>(prim.m_inv[0], prim.m_inv[1]),
+            vec2<f32>(prim.m_inv[2], prim.m_inv[3]),
+        );
+
+    var local_half: vec2<f32>;
+    var center_local: vec2<f32>;
+    switch prim.kind {
+        case 1u {
+            local_half = abs(prim.b) * 0.5 + vec2<f32>(prim.radius);
+            center_local = prim.b * 0.5;
+        }
+        case 2u {
+            local_half = prim.b + vec2<f32>(prim.radius);
+            center_local = vec2<f32>(0.);
+        }
+        default {
+            local_half = vec2<f32>(prim.radius);
+            center_local = vec2<f32>(0.);
+        }
+    }
+
+    let world_center = prim.a + m * center_local;
+    let abs_m = mat2x2<f32>(
+            abs(m[0]),
+            abs(m[1]),
+        );
+    let world_half = abs_m * local_half;
+
+    let px_world = globals.view_size / globals.resolution.y;
+    let pad = px_world * 6.;
+    let mn = world_center - world_half - pad;
+    let mx = world_center + world_half + pad;
 
     // Two triangles spanning [0,1]^2.
     var corners = array<vec2<f32>, 6>(
@@ -98,7 +141,7 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
         );
     let c = corners[vi];
 
-    var mn: vec2<f32>;
+    /*var mn: vec2<f32>;
     var mx: vec2<f32>;
 
     switch prim.kind {
@@ -121,13 +164,13 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
             mn = prim.a;
             mx = prim.a;
         }
-    }
+    }*/
 
     // One pixel worth of world-space padding for AA.
-    let px_world = globals.view_size / globals.resolution.y;
-    let pad = vec2<f32>(prim.radius + px_world * 6.);
-    mn = mn - pad;
-    mx = mx + pad;
+    //let px_world = globals.view_size / globals.resolution.y;
+    //let pad = vec2<f32>(prim.radius + px_world * 6.);
+    //mn = mn - pad;
+    //mx = mx + pad;
     let world = mix(mn, mx, c);
 
     // World -> clip. view_size is the total visible height in world units.
@@ -164,7 +207,11 @@ fn rotate(p: vec2<f32>, a: f32) -> vec2<f32> {
 }
 
 fn eval_sdf(p: vec2<f32>, prim: SdfPrim) -> f32 {
-    let local = rotate(p - prim.a, -prim.rotation);
+    let c = p - prim.a;
+    let local = vec2<f32>(
+            prim.m_inv[0] * c.x + prim.m_inv[2] * c.y,
+            prim.m_inv[1] * c.x + prim.m_inv[3] * c.y,
+        );
     switch prim.kind {
         case 0u { return sdf_circle(local, prim.radius); }
         case 1u { return sdf_capsule(local, prim.b, prim.radius); }
@@ -267,7 +314,9 @@ fn fs_composite(in: CompositeOut) -> @location(0) vec4<f32> {
     let d = max(d_union, neg_d_sub);
     let stroke_w = aa * 3.5;
 
-    if d > stroke_w + aa { discard; }
+    if d > stroke_w + aa {
+        discard;
+    }
 
     let saa = smoothstep(-aa, aa, d);
     let fill = 1. - saa;
