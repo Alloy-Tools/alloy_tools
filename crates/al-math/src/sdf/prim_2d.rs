@@ -1,5 +1,7 @@
 use crate::vec::{Vec2, Vec4};
 
+pub const SDF_PRIM_SIZE: usize = std::mem::size_of::<Sdf2dPrim>();
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 #[cfg_attr(feature = "gpu", derive(bytemuck::Pod, bytemuck::Zeroable,))]

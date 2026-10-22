@@ -1,7 +1,7 @@
 use crate::app::FPS;
 use al_math::{
     matrix::Mat2,
-    sdf::Sdf2dPrim,
+    sdf::{Sdf2dPrim, SDF_PRIM_SIZE},
     transform::Transform2d,
     vec::{Vec2, Vec4},
 };
@@ -22,12 +22,22 @@ pub struct Globals {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, bytemuck::Pod, Zeroable)]
-pub struct SdfData {
+#[derive(Copy, Clone, Debug, bytemuck::Pod, Zeroable)]
+pub struct SdfHeader {
     pub count: u32,
     pub _pad: [u32; 3],
-    pub prims: [Sdf2dPrim; MAX_SDF_PRIMS],
 }
+
+impl SdfHeader {
+    pub fn new(count: u32) -> Self {
+        Self {
+            count,
+            _pad: [0; 3],
+        }
+    }
+}
+
+pub const SDF_HEADER_SIZE: usize = std::mem::size_of::<SdfHeader>();
 
 #[allow(unused)]
 pub struct BooleanTargets {
@@ -296,10 +306,11 @@ impl RenderState {
             ],
         });
 
+        let sdf_buffer_size = (SDF_HEADER_SIZE + MAX_SDF_PRIMS * SDF_PRIM_SIZE) as u64;
         let mk_buf = |label: &str| {
             device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(label),
-                size: std::mem::size_of::<SdfData>() as u64,
+                size: sdf_buffer_size,
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             })
@@ -874,11 +885,7 @@ impl RenderState {
         );
         let n_union = union_prims.len().min(MAX_SDF_PRIMS);
         {
-            let mut data = SdfData::zeroed();
-            data.count = n_union as u32;
-            data.prims[..n_union].copy_from_slice(&union_prims[..n_union]);
-            self.queue
-                .write_buffer(&self.union_buffer, 0, bytemuck::bytes_of(&data));
+            write_sdf(&self.queue, &self.union_buffer, &union_prims);
 
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Boolean Union Pass"),
@@ -926,11 +933,7 @@ impl RenderState {
         );
         let n_subtract = subtract_prims.len().min(MAX_SDF_PRIMS);
         {
-            let mut data = SdfData::zeroed();
-            data.count = n_subtract as u32;
-            data.prims[..n_subtract].copy_from_slice(&subtract_prims[..n_subtract]);
-            self.queue
-                .write_buffer(&self.subtract_buffer, 0, bytemuck::bytes_of(&data));
+            write_sdf(&self.queue, &self.subtract_buffer, &subtract_prims);
 
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Boolean Subtract Pass"),
@@ -991,11 +994,7 @@ impl RenderState {
             );
             let n_vfx = vfx_prims.len().min(MAX_SDF_PRIMS);
             if n_vfx > 0 {
-                let mut data = SdfData::zeroed();
-                data.count = n_vfx as u32;
-                data.prims[..n_vfx].copy_from_slice(&vfx_prims[..n_vfx]);
-                self.queue
-                    .write_buffer(&self.vfx_buffer, 0, bytemuck::bytes_of(&data));
+                write_sdf(&self.queue, &self.vfx_buffer, &vfx_prims);
 
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("VFX Pass"),
@@ -1029,11 +1028,7 @@ impl RenderState {
             );
             let n_overlay = overlay_prims.len().min(MAX_SDF_PRIMS);
             if n_overlay > 0 {
-                let mut data = SdfData::zeroed();
-                data.count = n_overlay as u32;
-                data.prims[..n_overlay].copy_from_slice(&overlay_prims[..n_overlay]);
-                self.queue
-                    .write_buffer(&self.overlay_buffer, 0, bytemuck::bytes_of(&data));
+                write_sdf(&self.queue, &self.overlay_buffer, &overlay_prims);
 
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("Overlay Pass"),
@@ -1134,6 +1129,24 @@ impl RenderState {
     }
 }
 
+fn write_sdf(queue: &wgpu::Queue, buffer: &wgpu::Buffer, prims: &[Sdf2dPrim]) {
+    debug_assert!(
+        prims.len() <= MAX_SDF_PRIMS,
+        "prim overflow: {} > {}",
+        prims.len(),
+        MAX_SDF_PRIMS,
+    );
+    let n = prims.len().min(MAX_SDF_PRIMS);
+    queue.write_buffer(buffer, 0, bytemuck::bytes_of(&SdfHeader::new(n as u32)));
+    if n > 0 {
+        queue.write_buffer(
+            buffer,
+            SDF_HEADER_SIZE as u64,
+            bytemuck::cast_slice(&prims[..n]),
+        );
+    }
+}
+
 fn push_body_prims(
     d: &crate::state::DesignerState,
     prims: &mut Vec<Sdf2dPrim>,
@@ -1169,19 +1182,18 @@ fn push_body_prims(
     for bone in bones {
         let depth = bone.depth();
         let col = depth_tint(base_color, depth);
-        let wo = world[bone.origin_index()].transform_point(Vec2::ZERO);
+        let o_world = world[bone.origin_index()];
+        let m_inv = o_world.linear.try_inverse().unwrap_or(Mat2::IDENTITY);
+        let wo = o_world.transform_point(Vec2::ZERO);
         let wt = world[bone.tip_index()].transform_point(Vec2::ZERO);
+        let b_local = m_inv * (wt - wo);
         batch.push((
             depth,
             Sdf2dPrim::capsule(
                 wo,
-                wt - wo,
+                b_local,
                 bone.radius(),
-                world[bone.origin_index()]
-                    .linear
-                    .try_inverse()
-                    .unwrap_or(Mat2::IDENTITY)
-                    .to_cols_array(),
+                m_inv.to_cols_array(),
                 Vec4::new(col.x, col.y, col.z, col.w * alpha_mul),
             ),
         ));

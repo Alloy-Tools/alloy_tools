@@ -136,7 +136,6 @@ impl DesignerState {
     pub fn new(skeleton: Skeleton2d, vfx: &[Vfx2d]) -> Self {
         let extra_len = skeleton.extras().len();
         let pose = Pose2d::rest(skeleton.joints().len());
-        //TODO Fix: pose.root_scale = al_math::vec::Vec2::new(2., 0.5);
         let mut default_clip = AnimationClip2d::new("default");
         default_clip.vfx_mut().extend_from_slice(vfx);
         Self {
