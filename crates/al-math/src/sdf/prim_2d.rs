@@ -18,6 +18,7 @@ pub struct Sdf2dPrim {
 }
 
 impl Sdf2dPrim {
+    //REVIEW: Use variant "id" directly
     const CIRCLE: u32 = 0;
     const CAPSULE: u32 = 1;
     const RECT: u32 = 2;

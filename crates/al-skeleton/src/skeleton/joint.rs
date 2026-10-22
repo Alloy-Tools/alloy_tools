@@ -38,14 +38,14 @@ impl Joint2d {
     }
 
     pub fn center(&self) -> Vec2 {
-        let Sdf2d::Circle { center, .. } = self.collider.shape() else {
+        let Sdf2d::Circle { origin: center, .. } = self.collider.shape() else {
             panic!("Joint has shape `{}` instead of `Circle`", self.collider.shape().name())
         };
         center
     }
 
     pub fn set_center(&mut self, center: Vec2) {
-        let Sdf2d::Circle { center: cen, .. } = self.collider.shape_mut() else {
+        let Sdf2d::Circle { origin: cen, .. } = self.collider.shape_mut() else {
             panic!("Joint has shape `{}` instead of `Circle`", self.collider.shape().name())
         };
         *cen = center;

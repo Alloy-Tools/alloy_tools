@@ -224,7 +224,10 @@ impl Skeleton2d {
 
 pub fn active_extra(extra: &Collider2d, world: &[Transform2d], p: Vec2) -> f32 {
     match extra.shape() {
-        Sdf2d::Circle { center, radius } => {
+        Sdf2d::Circle {
+            origin: center,
+            radius,
+        } => {
             let c = if let Some(idx) = extra.parent() {
                 world[idx].transform_point(center)
             } else {
@@ -248,7 +251,7 @@ pub fn active_extra(extra: &Collider2d, world: &[Transform2d], p: Vec2) -> f32 {
             capsule_sdf_2d(p, radius, o, t)
         }
         Sdf2d::Rect {
-            center,
+            origin: center,
             half_size,
             corner_radius,
         } => {
