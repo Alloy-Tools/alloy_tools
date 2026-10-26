@@ -1,3 +1,4 @@
+#[derive(Clone, Copy, Debug)]
 pub struct Camera {
     pub pos: [f32; 2],
     pub view_size: f32,

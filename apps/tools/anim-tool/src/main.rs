@@ -1,9 +1,9 @@
 mod app;
 mod camera;
 mod render;
-mod state;
-
-pub use camera::Camera;
+mod designer_state;
+mod showcase_state;
+mod common_state;
 
 fn block_on<F: std::future::Future>(future: F) -> F::Output {
     pollster::block_on(future)

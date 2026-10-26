@@ -702,7 +702,7 @@ impl RenderState {
         );
     }
 
-    pub fn render_designer(&mut self, d: &mut crate::state::DesignerState) {
+    pub fn render_designer(&mut self, d: &mut crate::designer_state::DesignerState) {
         let surface_texture = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t)
             | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
@@ -747,7 +747,7 @@ impl RenderState {
                 let curr = keys.partition_point(|kf| kf.time <= d.time);
 
                 match d.onion_mode {
-                    crate::state::OnionMode::Keys => {
+                    crate::designer_state::OnionMode::Keys => {
                         for offset in 1..=d.onion_keys {
                             let alpha = 0.22 / offset as f32;
                             if let Some(idx) = curr.checked_sub(offset) {
@@ -771,7 +771,7 @@ impl RenderState {
                             }
                         }
                     }
-                    crate::state::OnionMode::Time => {
+                    crate::designer_state::OnionMode::Time => {
                         for k in 1..=d.onion_keys {
                             let dt = k as f32 / FPS;
                             let alpha = 0.22 / k as f32;
@@ -1148,7 +1148,7 @@ fn write_sdf(queue: &wgpu::Queue, buffer: &wgpu::Buffer, prims: &[Sdf2dPrim]) {
 }
 
 fn push_body_prims(
-    d: &crate::state::DesignerState,
+    d: &crate::designer_state::DesignerState,
     prims: &mut Vec<Sdf2dPrim>,
     world: &[Transform2d],
     base_color: Vec4,
