@@ -4,7 +4,7 @@ use crate::{
     skeleton::{Bone2d, Joint2d},
 };
 use al_math::{
-    sdf::{capsule_sdf_2d, circle_sdf_2d, rect_sdf_2d, Sdf2d},
+    sdf::{capsule_tip_sdf_2d, circle_sdf_2d, rect_sdf_2d, Sdf2d},
     transform::Transform2d,
     vec::Vec2,
 };
@@ -159,9 +159,11 @@ impl Skeleton2d {
         }
 
         for bone in &self.bones {
-            let a = world[bone.origin_index()].transform_point(Vec2::ZERO);
+            let w = world[bone.origin_index()];
+            let a = w.transform_point(Vec2::ZERO);
             let b = world[bone.tip_index()].transform_point(Vec2::ZERO);
-            d = d.min(capsule_sdf_2d(p, bone.radius(), a, b));
+            let world_r = world_bone_radius(w.linear, bone.radius(), a, b);
+            d = d.min(capsule_tip_sdf_2d(p, world_r, a, b));
         }
 
         d
@@ -185,9 +187,11 @@ impl Skeleton2d {
             if !bone.kind().intersects(mask) {
                 continue;
             }
-            let a = world[bone.origin_index()].transform_point(Vec2::ZERO);
-            let e = world[bone.tip_index()].transform_point(Vec2::ZERO);
-            d = d.min(capsule_sdf_2d(p, bone.radius(), a, e));
+            let w = world[bone.origin_index()];
+            let a = w.transform_point(Vec2::ZERO);
+            let b = world[bone.tip_index()].transform_point(Vec2::ZERO);
+            let world_r = world_bone_radius(w.linear, bone.radius(), a, b);
+            d = d.min(capsule_tip_sdf_2d(p, world_r, a, b));
         }
 
         d
@@ -222,45 +226,63 @@ impl Skeleton2d {
     }
 }
 
+pub fn world_bone_radius(
+    linear: al_math::matrix::Mat2,
+    local_radius: f32,
+    wo: Vec2,
+    wt: Vec2,
+) -> f32 {
+    let dir = wt - wo;
+    let length = dir.length();
+    if length < 1e-6 {
+        return local_radius * linear.determinant().abs().sqrt();
+    }
+    let inv = linear
+        .try_inverse()
+        .unwrap_or(al_math::matrix::Mat2::IDENTITY);
+    let u_local = (inv * (dir / length)).normalize();
+    let perp_local = Vec2::new(-u_local.y, u_local.x);
+    (linear * perp_local).length() * local_radius
+}
+
+pub fn local_point_and_scale(p: Vec2, parent: Option<usize>, world: &[Transform2d]) -> (Vec2, f32) {
+    match parent {
+        Some(idx) => {
+            let w = &world[idx];
+            (
+                w.inverse_transform_point(p).unwrap_or(p),
+                w.linear.determinant().abs().sqrt(),
+            )
+        }
+        None => (p, 1.0),
+    }
+}
+
 pub fn active_extra(extra: &Collider2d, world: &[Transform2d], p: Vec2) -> f32 {
+    let parent = extra.parent();
     match extra.shape() {
-        Sdf2d::Circle {
-            origin: center,
-            radius,
-        } => {
-            let c = if let Some(idx) = extra.parent() {
-                world[idx].transform_point(center)
-            } else {
-                center
-            };
-            circle_sdf_2d(p, radius, c)
+        Sdf2d::Circle { origin, radius } => {
+            let (local_p, scale) = local_point_and_scale(p, parent, world);
+            circle_sdf_2d(local_p, radius, origin) * scale
         }
         Sdf2d::Capsule {
             origin,
-            tip,
+            length,
             radius,
-        } => {
-            let (o, t) = if let Some(idx) = extra.parent() {
-                (
-                    world[idx].transform_point(origin),
-                    world[idx].transform_point(tip),
-                )
-            } else {
-                (origin, tip)
-            };
-            capsule_sdf_2d(p, radius, o, t)
+        } => match parent {
+            Some(idx) => {
+                let w = &world[idx];
+                let wo = w.transform_point(origin);
+                let wt = w.transform_point(origin + Vec2::new(length, 0.));
+                let world_r = world_bone_radius(w.linear, radius, wo, wt);
+                capsule_tip_sdf_2d(p, world_r, wo, wt)
+            }
+            None => capsule_tip_sdf_2d(p, radius, origin, origin + Vec2::new(length, 0.)),
+        },
+        Sdf2d::Rect { origin, half_size } => {
+            let (local_p, scale) = local_point_and_scale(p, parent, world);
+            rect_sdf_2d(local_p, origin, half_size) * scale
         }
-        Sdf2d::Rect {
-            origin: center,
-            half_size,
-            corner_radius,
-        } => {
-            let c = if let Some(idx) = extra.parent() {
-                world[idx].transform_point(center)
-            } else {
-                center
-            };
-            rect_sdf_2d(p, c, half_size, corner_radius)
-        }
+        _ => todo!(),
     }
 }

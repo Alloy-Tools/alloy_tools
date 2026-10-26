@@ -58,21 +58,20 @@ impl Sdf2dPrim {
         )
     }
 
-    pub fn capsule(origin: Vec2, tip: Vec2, radius: f32, m_inv: [f32; 4], color: Vec4) -> Self {
-        Self::new(origin, tip, radius, 0., 0,  Self::CAPSULE, m_inv, color)
+    pub fn capsule(origin: Vec2, length: f32, radius: f32, m_inv: [f32; 4], color: Vec4) -> Self {
+        Self::new(origin, Vec2::new(length, 0.), radius, 0., 0,  Self::CAPSULE, m_inv, color)
     }
 
     pub fn rect(
         center: Vec2,
         half_size: Vec2,
-        corner_radius: f32,
         m_inv: [f32; 4],
         color: Vec4,
     ) -> Self {
         Self::new(
             center,
             half_size,
-            corner_radius,
+            0.,
             0.,
             0,
             Self::RECT,

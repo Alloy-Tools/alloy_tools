@@ -1182,18 +1182,21 @@ fn push_body_prims(
     for bone in bones {
         let depth = bone.depth();
         let col = depth_tint(base_color, depth);
-        let o_world = world[bone.origin_index()];
-        let m_inv = o_world.linear.try_inverse().unwrap_or(Mat2::IDENTITY);
-        let wo = o_world.transform_point(Vec2::ZERO);
+        let w = world[bone.origin_index()];
+        let wo = w.transform_point(Vec2::ZERO);
         let wt = world[bone.tip_index()].transform_point(Vec2::ZERO);
-        let b_local = m_inv * (wt - wo);
+        let dir = wt - wo;
+        let length = dir.length();
+        let angle = dir.y.atan2(dir.x);
+        let world_radius = al_skeleton::skeleton::world_bone_radius(w.linear, bone.radius(), wo, wt);
+        let m_inv = Mat2::from_angle(-angle).to_cols_array();
         batch.push((
             depth,
             Sdf2dPrim::capsule(
                 wo,
-                b_local,
-                bone.radius(),
-                m_inv.to_cols_array(),
+                length,
+                world_radius,//bone.radius(),
+                m_inv,
                 Vec4::new(col.x, col.y, col.z, col.w * alpha_mul),
             ),
         ));

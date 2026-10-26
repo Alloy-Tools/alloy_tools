@@ -171,7 +171,7 @@ impl App {
         let _e1 = builder.extra(
             "blade_front",
             Some(hd_f),
-            Sdf2d::capsule(Vec2::new(0.02, 0.), Vec2::new(0.1, 0.), 0.015),
+            Sdf2d::capsule(Vec2::new(0.02, 0.), 0.1, 0.015),
             ColliderKind::HIT,
         );
 
@@ -239,7 +239,7 @@ impl App {
                 joint: hd_f,
                 offset: explosion_offset,
             },
-            Sdf2d::capsule(Vec2::new(-0.02, 0.), Vec2::new(0.02, 0.), 0.004),
+            Sdf2d::capsule(Vec2::new(-0.02, 0.), 0.02, 0.004),
             ([0.5, 0.5].into(), [14., 1.].into()),
             (1., 0.),
             (0., 0.),

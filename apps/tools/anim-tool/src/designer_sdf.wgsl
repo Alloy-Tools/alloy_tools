@@ -70,9 +70,9 @@ fn sdf_capsule(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
     return length(p - b * h) - r;
 }
 
-fn sdf_rect(p: vec2<f32>, h: vec2<f32>, r: f32) -> f32 {
-    let q = abs(p) - h + r;
-    return length(max(q, vec2<f32>(0.))) + min(max(q.x, q.y), 0.) - r;
+fn sdf_rect(p: vec2<f32>, h: vec2<f32>) -> f32 {
+    let q = abs(p) - h;
+    return length(max(q, vec2<f32>(0.))) + min(max(q.x, q.y), 0.);
 }
 
 fn rotate(p: vec2<f32>, a: f32) -> vec2<f32> {
@@ -91,7 +91,7 @@ fn eval_sdf(p: vec2<f32>, prim: SdfPrim) -> f32 {
     switch prim.kind {
         case 0u { return sdf_circle(local, prim.radius); }
         case 1u { return sdf_capsule(local, prim.b, prim.radius); }
-        case 2u { return sdf_rect(local, prim.b, prim.radius); }
+        case 2u { return sdf_rect(local, prim.b); }
         default { return 1e10; }
     }
     // Apply distance modifiers to switch return (eg rounding, onion)
