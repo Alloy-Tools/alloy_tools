@@ -1,12 +1,21 @@
 use crate::{
-    app::{DT, SCRUB_TOL},
+    app::{FIXED_DT, SCRUB_TOL},
     camera::Camera,
     common_state::InputState,
 };
-use al_anim::{Easing, anim_clip::{AnimationClip2d, AttachType}, vfx::Vfx2d};
-use al_math::{sdf::Sdf2d, vec::{Vec2, Vec4}};
+use al_anim::{
+    anim_clip::{AnimationClip2d, AttachType},
+    vfx::Vfx2d,
+    Easing,
+};
+use al_math::{
+    sdf::Sdf2d,
+    vec::{Vec2, Vec4},
+};
 use al_skeleton::{
-    collider_kind::ColliderKind, pose::Pose2d, skeleton::{ColliderRef, Skeleton2DBuilder, Skeleton2d},
+    collider_kind::ColliderKind,
+    pose::Pose2d,
+    skeleton::{ColliderRef, Skeleton2DBuilder, Skeleton2d},
 };
 use std::time::Instant;
 
@@ -927,7 +936,11 @@ impl DesignerState {
                         }
 
                         KeyCode::ArrowLeft => {
-                            let step = if self.keys.alt_held { DT } else { 5. * DT };
+                            let step = if self.keys.alt_held {
+                                FIXED_DT
+                            } else {
+                                5. * FIXED_DT
+                            };
                             //REIVEW: Cycle to clip duration instead of clamping?
                             self.time = (self.time - step).max(0.);
                             if !self.clip().keyframes().is_empty() {
@@ -936,7 +949,11 @@ impl DesignerState {
                         }
 
                         KeyCode::ArrowRight => {
-                            let step = if self.keys.alt_held { DT } else { 5. * DT };
+                            let step = if self.keys.alt_held {
+                                FIXED_DT
+                            } else {
+                                5. * FIXED_DT
+                            };
                             self.time = self.time + step;
                             if !self.clip().keyframes().is_empty() {
                                 self.pose = self.clip().sample(self.time);

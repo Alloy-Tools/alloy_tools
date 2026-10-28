@@ -8,8 +8,8 @@ use winit::{application::ApplicationHandler, event::WindowEvent, window::Window}
 const TITLE: &str = "Skeleton2D Designer Tool";
 const START_SIZE: winit::dpi::LogicalSize<i32> = winit::dpi::LogicalSize::new(800, 600);
 pub const SCRUB_TOL: f32 = 1. / 30.;
-pub const FPS: f32 = 60.;
-pub const DT: f32 = 1. / FPS;
+pub const FIXED_FPS: f32 = 60.;
+pub const FIXED_DT: f32 = 1. / FIXED_FPS;
 pub const CAM_KEY_SPEED: f32 = 0.5;
 
 pub enum State {

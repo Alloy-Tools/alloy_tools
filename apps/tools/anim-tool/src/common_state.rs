@@ -94,16 +94,36 @@ impl Timeline {
         self.time
     }
 
+    pub fn set_time(&mut self, time: f32) {
+        self.time = time;
+    }
+
+    pub fn scrub(&mut self, dt: f32) {
+        self.time = (self.time + dt).max(0.);
+    }
+
     pub fn duration(&self) -> f32 {
         self.duration
+    }
+
+    pub fn set_duration(&mut self, duration: f32) {
+        self.duration = duration;
     }
 
     pub fn looping(&self) -> bool {
         self.looping
     }
 
+    pub fn set_looping(&mut self, looping: bool) {
+        self.looping = looping;
+    }
+
     pub fn playing(&self) -> bool {
         self.playing
+    }
+
+    pub fn set_playing(&mut self, playing: bool) {
+        self.playing = playing;
     }
 
     pub fn last_tick(&self) -> Instant {

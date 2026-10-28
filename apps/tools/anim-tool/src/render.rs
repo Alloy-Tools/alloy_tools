@@ -1,5 +1,5 @@
 use crate::{
-    app::FPS,
+    app::FIXED_FPS,
     common_state::{Globals, RenderData, SDF_HEADER_SIZE},
 };
 use al_math::{
@@ -748,7 +748,7 @@ impl RenderState {
                     }
                     crate::designer_state::OnionMode::Time => {
                         for k in 1..=d.onion_keys {
-                            let dt = k as f32 / FPS;
+                            let dt = k as f32 / FIXED_FPS;
                             let alpha = 0.22 / k as f32;
                             for (t, color) in [
                                 (d.time - dt, Vec4::new(1., 0.35, 0.35, 1.)),
