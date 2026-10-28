@@ -76,30 +76,55 @@ impl ApplicationHandler for App {
         _window_id: winit::window::WindowId,
         event: winit::event::WindowEvent,
     ) {
-        match event {
+        match &event {
             WindowEvent::CloseRequested => {
                 event_loop.exit();
                 return;
             }
             WindowEvent::KeyboardInput { event, .. }
-                if let winit::keyboard::PhysicalKey::Code(code) = event.physical_key
-                    && code == winit::keyboard::KeyCode::Escape =>
+                if event.state == winit::event::ElementState::Released
+                    && let winit::keyboard::PhysicalKey::Code(code) = event.physical_key =>
             {
-                event_loop.exit();
-                return;
+                use winit::keyboard::KeyCode;
+                match code {
+                    KeyCode::Escape => {
+                        event_loop.exit();
+                        return;
+                    }
+                    KeyCode::F1 => {
+                        match self.state {
+                            State::Designer(_) => {
+                                self.state = State::Showcase(ShowcaseState::new())
+                            }
+                            State::Showcase(_) => {
+                                self.state = State::Designer(DesignerState::default())
+                            }
+                        }
+                        return;
+                    }
+                    _ => {}
+                }
             }
             WindowEvent::Resized(size) => {
                 if let Some(render_state) = &mut self.render_state {
                     render_state.resize(size.width, size.height);
                 }
             }
-            WindowEvent::RedrawRequested => {
-                if let Some(render_state) = &mut self.render_state {
-                    if let State::Designer(designer_state) = &mut self.state {
+            WindowEvent::RedrawRequested => match &mut self.state {
+                State::Designer(designer_state) => {
+                    if let Some(render_state) = &mut self.render_state {
                         render_state.render_designer(designer_state);
                     }
                 }
-            }
+                State::Showcase(showcase_state) => {
+                    if let Some(render_state) = &mut self.render_state {
+                        render_state.render_showcase(showcase_state.to_render([
+                            render_state.config.width as f32,
+                            render_state.config.height as f32,
+                        ]));
+                    }
+                }
+            },
             WindowEvent::Focused(focused) => {
                 if let Some(window) = &self.window {
                     window.set_cursor_visible(!focused);

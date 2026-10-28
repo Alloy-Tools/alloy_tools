@@ -223,27 +223,27 @@ pub enum Sdf2d {
 }
 
 impl Sdf2d {
-    pub fn circle(origin: Vec2, radius: f32) -> Self {
-        Self::Circle { origin, radius }
+    pub fn circle(origin: impl Into<Vec2>, radius: f32) -> Self {
+        Self::Circle { origin: origin.into(), radius }
     }
 
-    pub fn capsule(origin: Vec2, length: f32, radius: f32) -> Self {
+    pub fn capsule(origin: impl Into<Vec2>, length: f32, radius: f32) -> Self {
         Self::Capsule {
-            origin,
+            origin: origin.into(),
             length,
             radius,
         }
     }
 
-    pub fn rect(origin: Vec2, half_size: Vec2) -> Self {
-        Self::Rect { origin, half_size }
+    pub fn rect(origin: impl Into<Vec2>, half_size: impl Into<Vec2>) -> Self {
+        Self::Rect { origin: origin.into(), half_size: half_size.into() }
     }
 
-    pub fn rounded_rect(origin: Vec2, half_size: Vec2, corner_radii: Vec4) -> Self {
+    pub fn rounded_rect(origin: impl Into<Vec2>, half_size: impl Into<Vec2>, corner_radii: impl Into<Vec4>) -> Self {
         Self::RoundedRect {
-            origin,
-            half_size,
-            corner_radii,
+            origin: origin.into(),
+            half_size: half_size.into(),
+            corner_radii: corner_radii.into(),
         }
     }
 

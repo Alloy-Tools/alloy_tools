@@ -153,6 +153,21 @@ macro_rules! define_vec_impls {
             }
         }
 
+        impl std::ops::Index<usize> for $struct_name {
+            type Output = f32;
+            #[inline]
+            fn index(&self, i: usize) -> &f32 {
+                &self.as_ref()[i]
+            }
+        }
+
+        impl std::ops::IndexMut<usize> for $struct_name {
+            #[inline]
+            fn index_mut(&mut self, i: usize) -> &mut f32 {
+                &mut self.as_mut()[i]
+            }
+        }
+
         impl From<f32> for $struct_name {
             #[inline]
             fn from(value: f32) -> Self {
@@ -197,6 +212,20 @@ macro_rules! define_vec_impls {
         }
         impl Eq for $struct_name {}
 
+        impl PartialEq<[f32; $dim]> for $struct_name {
+            #[inline]
+            fn eq(&self, other: &[f32; $dim]) -> bool {
+                [$(self.$field),+] == *other
+            }
+        }
+
+        impl PartialEq<$struct_name> for [f32; $dim] {
+            #[inline]
+            fn eq(&self, other: &$struct_name) -> bool {
+                *self == [$(other.$field),+]
+            }
+        }
+
         impl std::hash::Hash for $struct_name {
             fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
                 fn normalize(val: f32) -> f32 {
@@ -237,7 +266,7 @@ macro_rules! define_vec_impls {
 
         impl std::ops::Neg for $struct_name {
             type Output = Self;
-
+            #[inline]
             fn neg(mut self) -> Self::Output {
                 $(self.$field = -self.$field;)+
                 self
@@ -341,6 +370,99 @@ macro_rules! define_vec_impls {
             #[inline]
             fn div_assign(&mut self, other: Self) {
                 *self = *self / other
+            }
+        }
+
+        impl std::ops::Add<[f32; $dim]> for $struct_name {
+            type Output = Self;
+            #[inline]
+            fn add(self, other: [f32; $dim]) -> Self::Output {
+                self + Self::from(other)
+            }
+        }
+
+        impl std::ops::AddAssign<[f32; $dim]> for $struct_name {
+            #[inline]
+            fn add_assign(&mut self, other: [f32; $dim]) {
+                *self = *self + other
+            }
+        }
+
+        impl std::ops::Add<$struct_name> for [f32; $dim] {
+            type Output = $struct_name;
+            #[inline]
+            fn add(self, vec: $struct_name) -> Self::Output {
+                vec + self
+            }
+        }
+
+        impl std::ops::Sub<[f32; $dim]> for $struct_name {
+            type Output = Self;
+
+            #[inline]
+            fn sub(self, other: [f32; $dim]) -> Self::Output {
+                self - Self::from(other)
+            }
+        }
+
+        impl std::ops::SubAssign<[f32; $dim]> for $struct_name {
+            #[inline]
+            fn sub_assign(&mut self, other: [f32; $dim]) {
+                *self = *self - other
+            }
+        }
+
+        impl std::ops::Sub<$struct_name> for [f32; $dim] {
+            type Output = $struct_name;
+            #[inline]
+            fn sub(self, vec: $struct_name) -> Self::Output {
+                $struct_name::from(self) - vec
+            }
+        }
+
+        impl std::ops::Mul<[f32; $dim]> for $struct_name {
+            type Output = Self;
+            #[inline]
+            fn mul(self, other: [f32; $dim]) -> Self::Output {
+                self * Self::from(other)
+            }
+        }
+
+        impl std::ops::MulAssign<[f32; $dim]> for $struct_name {
+            #[inline]
+            fn mul_assign(&mut self, other: [f32; $dim]) {
+                *self = *self * other
+            }
+        }
+
+        impl std::ops::Mul<$struct_name> for [f32; $dim] {
+            type Output = $struct_name;
+            #[inline]
+            fn mul(self, vec: $struct_name) -> Self::Output {
+                vec * self
+            }
+        }
+
+       impl std::ops::Div<[f32; $dim]> for $struct_name {
+            type Output = Self;
+            #[inline]
+            fn div(self, other: [f32; $dim]) -> Self::Output {
+                self / Self::from(other)
+            }
+        }
+
+        impl std::ops::DivAssign<[f32; $dim]> for $struct_name {
+            #[inline]
+            fn div_assign(&mut self, other: [f32; $dim]) {
+                *self = *self / other
+            }
+        }
+
+       impl std::ops::Div<$struct_name> for [f32; $dim] {
+            type Output = $struct_name;
+            #[inline]
+            fn div(self, vec: $struct_name) -> Self::Output {
+                $struct_name::from(self) / vec
             }
         }
     };

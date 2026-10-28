@@ -24,28 +24,33 @@ impl Sdf2dPrim {
     const RECT: u32 = 2;
 
     fn new(
-        a: Vec2,
-        b: Vec2,
+        a: impl Into<Vec2>,
+        b: impl Into<Vec2>,
         radius: f32,
         aux: f32,
         aux_2: u32,
         kind: u32,
         m_inv: [f32; 4],
-        color: Vec4,
+        color: impl Into<Vec4>,
     ) -> Self {
         Self {
-            a,
-            b,
+            a: a.into(),
+            b: b.into(),
             radius,
             aux,
             aux_2,
             kind,
             m_inv,
-            color,
+            color: color.into(),
         }
     }
 
-    pub fn circle(center: Vec2, radius: f32, m_inv: [f32; 4], color: Vec4) -> Self {
+    pub fn circle(
+        center: impl Into<Vec2>,
+        radius: f32,
+        m_inv: [f32; 4],
+        color: impl Into<Vec4>,
+    ) -> Self {
         Self::new(
             center,
             Vec2::ZERO,
@@ -58,25 +63,31 @@ impl Sdf2dPrim {
         )
     }
 
-    pub fn capsule(origin: Vec2, length: f32, radius: f32, m_inv: [f32; 4], color: Vec4) -> Self {
-        Self::new(origin, Vec2::new(length, 0.), radius, 0., 0,  Self::CAPSULE, m_inv, color)
-    }
-
-    pub fn rect(
-        center: Vec2,
-        half_size: Vec2,
+    pub fn capsule(
+        origin: impl Into<Vec2>,
+        length: f32,
+        radius: f32,
         m_inv: [f32; 4],
-        color: Vec4,
+        color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
-            center,
-            half_size,
-            0.,
+            origin,
+            Vec2::new(length, 0.),
+            radius,
             0.,
             0,
-            Self::RECT,
+            Self::CAPSULE,
             m_inv,
             color,
         )
+    }
+
+    pub fn rect(
+        center: impl Into<Vec2>,
+        half_size: impl Into<Vec2>,
+        m_inv: [f32; 4],
+        color: impl Into<Vec4>,
+    ) -> Self {
+        Self::new(center, half_size, 0., 0., 0, Self::RECT, m_inv, color)
     }
 }

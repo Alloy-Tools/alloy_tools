@@ -1,4 +1,7 @@
-use crate::app::FPS;
+use crate::{
+    app::FPS,
+    common_state::{Globals, RenderData, SDF_HEADER_SIZE},
+};
 use al_math::{
     matrix::Mat2,
     sdf::{Sdf2dPrim, SDF_PRIM_SIZE},
@@ -6,38 +9,9 @@ use al_math::{
     vec::{Vec2, Vec4},
 };
 use al_skeleton::skeleton::ColliderRef;
-use bytemuck::Zeroable;
 use wgpu::{Surface, SurfaceConfiguration};
 
 pub const MAX_SDF_PRIMS: usize = 1024;
-
-#[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, Zeroable)]
-pub struct Globals {
-    pub resolution: [f32; 2],
-    pub camera_pos: [f32; 2],
-    pub cursor_world: [f32; 2],
-    pub view_size: f32,
-    pub _pad: f32,
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, Zeroable)]
-pub struct SdfHeader {
-    pub count: u32,
-    pub _pad: [u32; 3],
-}
-
-impl SdfHeader {
-    pub fn new(count: u32) -> Self {
-        Self {
-            count,
-            _pad: [0; 3],
-        }
-    }
-}
-
-pub const SDF_HEADER_SIZE: usize = std::mem::size_of::<SdfHeader>();
 
 #[allow(unused)]
 pub struct BooleanTargets {
@@ -722,15 +696,16 @@ impl RenderState {
         );
 
         // Globals
-        let globals = Globals {
-            resolution,
-            camera_pos: d.camera.pos,
-            cursor_world: [d.cursor_world.x, d.cursor_world.y],
-            view_size: d.camera.view_size,
-            _pad: 0.,
-        };
-        self.queue
-            .write_buffer(&self.globals_buffer, 0, bytemuck::bytes_of(&globals));
+        self.queue.write_buffer(
+            &self.globals_buffer,
+            0,
+            bytemuck::bytes_of(&Globals::new(
+                resolution,
+                d.camera.pos,
+                d.cursor_world,
+                d.camera.view_size,
+            )),
+        );
 
         // ---- Build the rig primitive list ----
         let mut union_prims = Vec::with_capacity(MAX_SDF_PRIMS);
@@ -1127,6 +1102,155 @@ impl RenderState {
         self.atlas.trim();
         self.queue.present(surface_texture);
     }
+
+    pub fn render_showcase(&mut self, to_render: RenderData) {
+        let surface_texture = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(t)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
+            _ => return,
+        };
+        let view = surface_texture.texture.create_view(&Default::default());
+
+        self.queue.write_buffer(
+            &self.globals_buffer,
+            0,
+            bytemuck::bytes_of(&to_render.globals),
+        );
+
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        // ----- Background Pass -----
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("BG Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&self.bg_pipeline);
+            pass.set_bind_group(0, &self.bg_bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+
+        // ----- Showcase Pass -----
+        {
+            let sdf_len = to_render.sdfs.len();
+            debug_assert!(
+                sdf_len <= MAX_SDF_PRIMS,
+                "overlay prim overflow: {} > {}",
+                sdf_len,
+                MAX_SDF_PRIMS
+            );
+            let n_showcase = sdf_len.min(MAX_SDF_PRIMS);
+            if n_showcase > 0 {
+                write_sdf(&self.queue, &self.overlay_buffer, &to_render.sdfs);
+
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("Showcase Pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                pass.set_pipeline(&self.sdf_pipeline);
+                pass.set_bind_group(0, &self.overlay_bind_group, &[]);
+                pass.draw(0..6, 0..n_showcase as u32);
+            }
+        }
+
+        // ----- Text Pass -----
+        {
+            let mut text_buffer =
+                glyphon::Buffer::new(&mut self.font_system, glyphon::Metrics::new(14., 18.));
+            text_buffer.set_size(
+                Some(self.config.width as f32),
+                Some(self.config.height as f32),
+            );
+
+            text_buffer.set_text(
+                &to_render.hud_string,
+                &glyphon::Attrs::new().family(glyphon::Family::Monospace),
+                glyphon::Shaping::Advanced,
+                None,
+            );
+            text_buffer.shape_until_scroll(&mut self.font_system, false);
+
+            self.viewport.update(
+                &self.queue,
+                glyphon::Resolution {
+                    width: self.config.width,
+                    height: self.config.height,
+                },
+            );
+
+            self.text_renderer
+                .prepare(
+                    &self.device,
+                    &self.queue,
+                    &mut self.font_system,
+                    &mut self.atlas,
+                    &self.viewport,
+                    vec![glyphon::TextArea {
+                        buffer: &mut text_buffer,
+                        left: 12.,
+                        top: 12.,
+                        scale: 1.,
+                        bounds: glyphon::TextBounds {
+                            left: 0,
+                            top: 0,
+                            right: 800,
+                            bottom: 200,
+                        },
+                        default_color: glyphon::Color::rgb(230, 230, 240),
+                        custom_glyphs: &[],
+                    }],
+                    &mut self.swash_cache,
+                )
+                .unwrap();
+
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Designer Text"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            self.text_renderer
+                .render(&self.atlas, &self.viewport, &mut pass)
+                .unwrap();
+        }
+
+        self.queue.submit(Some(encoder.finish()));
+        self.atlas.trim();
+        self.queue.present(surface_texture);
+    }
 }
 
 fn write_sdf(queue: &wgpu::Queue, buffer: &wgpu::Buffer, prims: &[Sdf2dPrim]) {
@@ -1137,7 +1261,11 @@ fn write_sdf(queue: &wgpu::Queue, buffer: &wgpu::Buffer, prims: &[Sdf2dPrim]) {
         MAX_SDF_PRIMS,
     );
     let n = prims.len().min(MAX_SDF_PRIMS);
-    queue.write_buffer(buffer, 0, bytemuck::bytes_of(&SdfHeader::new(n as u32)));
+    queue.write_buffer(
+        buffer,
+        0,
+        bytemuck::bytes_of(&crate::common_state::SdfHeader::new(n as u32)),
+    );
     if n > 0 {
         queue.write_buffer(
             buffer,
@@ -1188,14 +1316,15 @@ fn push_body_prims(
         let dir = wt - wo;
         let length = dir.length();
         let angle = dir.y.atan2(dir.x);
-        let world_radius = al_skeleton::skeleton::world_bone_radius(w.linear, bone.radius(), wo, wt);
+        let world_radius =
+            al_skeleton::skeleton::world_bone_radius(w.linear, bone.radius(), wo, wt);
         let m_inv = Mat2::from_angle(-angle).to_cols_array();
         batch.push((
             depth,
             Sdf2dPrim::capsule(
                 wo,
                 length,
-                world_radius,//bone.radius(),
+                world_radius, //bone.radius(),
                 m_inv,
                 Vec4::new(col.x, col.y, col.z, col.w * alpha_mul),
             ),
