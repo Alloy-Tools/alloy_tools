@@ -3,17 +3,21 @@ use crate::{
     camera::Camera,
     common_state::{CameraState, Globals, InputState, RenderData, Timeline},
 };
-use al_math::{sdf::Sdf2dPrim, vec::Vec2};
+use al_math::{matrix::Mat2, sdf::Sdf2dPrim, vec::Vec2};
 
-pub const SHOWCASE_SDF_COUNT: usize = 1;
-pub const SHOWCASE_SDF_COLUMNS: usize = 1;
+pub const SHOWCASE_SDF_COUNT: usize = 3;
+pub const SHOWCASE_SDF_COLUMNS: usize = 2;
 pub const SHOWCASE_SPACING: Vec2 = Vec2 { x: 2., y: 2. };
+pub const SHOWCASE_OFFSET: Vec2 = Vec2 { x: -1., y: 1. };
 
 pub struct ShowcaseState {
     timeline: Timeline,
     camera_state: CameraState,
     keys: InputState,
     following: usize,
+    debug_bg: bool,
+    scale: Vec2,
+    rotation: f32,
 }
 
 impl ShowcaseState {
@@ -23,6 +27,9 @@ impl ShowcaseState {
             camera_state: CameraState::new([800., 600.], Camera::new([0., 0.], 1.4)),
             keys: InputState::default(),
             following: 0,
+            debug_bg: false,
+            scale: Vec2::ONE,
+            rotation: 0.,
         }
     }
 
@@ -131,23 +138,54 @@ impl ShowcaseState {
                                     .set_target(Some(showcase_pos(self.following)));
                             }
 
-                            KeyCode::ArrowLeft => self.timeline.scrub(-if self.keys.alt_held {
-                                FIXED_DT
-                            } else {
-                                5. * FIXED_DT
-                            }),
+                            KeyCode::ArrowLeft => {
+                                if self.keys.ctrl_held {
+                                    self.rotation -= 0.1
+                                } else {
+                                    self.timeline.scrub(-if self.keys.alt_held {
+                                        FIXED_DT
+                                    } else {
+                                        5. * FIXED_DT
+                                    })
+                                }
+                            }
 
-                            KeyCode::ArrowRight => self.timeline.scrub(if self.keys.alt_held {
-                                FIXED_DT
-                            } else {
-                                5. * FIXED_DT
-                            }),
+                            KeyCode::ArrowRight =>{
+                                if self.keys.ctrl_held {
+                                    self.rotation += 0.1
+                                } else {
+                                    self.timeline.scrub(if self.keys.alt_held {
+                                        FIXED_DT
+                                    } else {
+                                        5. * FIXED_DT
+                                    })
+                                }
+                            }
+
+                            KeyCode::ArrowUp => self.scale += Vec2::from(0.1),
+
+                            KeyCode::ArrowDown => self.scale -= Vec2::from(0.1),
 
                             KeyCode::Home => self.timeline.set_time(0.),
 
                             KeyCode::KeyL => self.timeline.set_looping(!self.timeline.looping()),
 
                             KeyCode::KeyF => self.following = !self.following,
+
+                            KeyCode::KeyB => self.debug_bg = !self.debug_bg,
+
+                            KeyCode::KeyQ => {
+                                self.scale = Vec2::new(
+                                    (self.scale.x - 0.05).max(0.2),
+                                    (self.scale.y + 0.05).min(3.0),
+                                );
+                            }
+                            KeyCode::KeyE => {
+                                self.scale = Vec2::new(
+                                    (self.scale.x + 0.05).min(3.0),
+                                    (self.scale.y - 0.05).max(0.2),
+                                );
+                            }
 
                             _ => {}
                         }
@@ -174,31 +212,51 @@ impl ShowcaseState {
             ];
         self.camera_state.set_cursor_world(c_world);
 
-        let offset = Vec2::ZERO;
         let radius = 0.5;
-        let m_inv = al_math::matrix::Mat2::IDENTITY.to_cols_array();
+        let m_inv = (Mat2::from_angle(self.rotation) * Mat2::from_scale(self.scale))
+            .try_inverse()
+            .unwrap_or(Mat2::IDENTITY)
+            .to_cols_array();
         let color = [0.9, 0.9, 0.9, 1.];
         let mut sdfs = Vec::new();
 
         let mut pos = 0;
-        sdfs.push(Sdf2dPrim::circle(showcase_pos(pos) + offset, radius, m_inv, color));
+        sdfs.push(Sdf2dPrim::circle(
+            showcase_pos(pos) + SHOWCASE_OFFSET,
+            radius,
+            m_inv,
+            color,
+        ));
         pos += 1;
-        sdfs.push(Sdf2dPrim::circle(showcase_pos(pos) + offset, radius, m_inv, color));
+        sdfs.push(Sdf2dPrim::capsule(
+            showcase_pos(pos) + SHOWCASE_OFFSET,
+            radius,
+            radius,
+            m_inv,
+            color,
+        ));
+        pos += 1;
+        sdfs.push(Sdf2dPrim::rect(
+            showcase_pos(pos) + SHOWCASE_OFFSET,
+            radius,
+            m_inv,
+            color,
+        ));
 
         // Cursor
         sdfs.push(Sdf2dPrim::circle(c_world, 0.006, m_inv, [0.4, 1., 0.6, 1.]));
 
-        RenderData::new(
-            Globals::new(resolution, cam.pos, c_world, cam.view_size),
-            sdfs,
-            self.hud_string(),
-        )
+        let mut globals = Globals::new(resolution, cam.pos, c_world, cam.view_size);
+        if self.debug_bg {
+            globals.aux = 20.;
+        }
+        RenderData::new(globals, sdfs, self.hud_string())
     }
 }
 
 fn showcase_pos(following: usize) -> Vec2 {
     [
-        (following / SHOWCASE_SDF_COLUMNS) as f32,
         (following % SHOWCASE_SDF_COLUMNS) as f32,
+        -((following / SHOWCASE_SDF_COLUMNS) as f32),
     ] * SHOWCASE_SPACING
 }

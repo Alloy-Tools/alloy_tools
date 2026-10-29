@@ -3,7 +3,7 @@ struct Globals {
     camera_pos: vec2<f32>,
     cursor_world: vec2<f32>,
     view_size: f32,
-    _pad: f32,
+    aux: f32,
 }
 
 struct Aabb {
@@ -82,19 +82,26 @@ fn rotate(p: vec2<f32>, a: f32) -> vec2<f32> {
 }
 
 fn eval_sdf(p: vec2<f32>, prim: SdfPrim) -> f32 {
-    let c = p - prim.a;
-    let local = vec2<f32>(
-            prim.m_inv[0] * c.x + prim.m_inv[2] * c.y,
-            prim.m_inv[1] * c.x + prim.m_inv[3] * c.y,
+    let mi = mat2x2(
+            vec2<f32>(prim.m_inv[0], prim.m_inv[1]),
+            vec2<f32>(prim.m_inv[2], prim.m_inv[3]),
         );
+    let c = p - prim.a;
+    let local = mi * c;
     // Apply distortions to local (eg elongation)
+    var d_local: f32;
     switch prim.kind {
-        case 0u { return sdf_circle(local, prim.radius); }
-        case 1u { return sdf_capsule(local, prim.b, prim.radius); }
-        case 2u { return sdf_rect(local, prim.b); }
-        default { return 1e10; }
+        case 0u { d_local = sdf_circle(local, prim.radius); }
+        case 1u { d_local = sdf_capsule(local, prim.b, prim.radius); }
+        case 2u { d_local = sdf_rect(local, prim.b); }
+        default { d_local = 1e10; }
     }
     // Apply distance modifiers to switch return (eg rounding, onion)
+
+    let abs_det_inv = abs(mi[0].x * mi[1].y - mi[1].x * mi[0].y);
+
+    let scale = select(1., 1. / sqrt(abs_det_inv), abs_det_inv > 1e-8);
+    return d_local * scale;
 }
 
 fn eval_aabb(prim: SdfPrim) -> Aabb {
@@ -189,6 +196,36 @@ fn fs_bg(in: BgVsOut) -> @location(0) vec4<f32> {
     return vec4<f32>(col, 1.);
 }
 
+@fragment
+fn fs_debug_bg(in: BgVsOut) -> @location(0) vec4<f32> {
+    if sdf.count == 0 {
+        return vec4<f32>(0.05, 0.05, 0.08, 1.);
+    }
+
+    var d = 1e10;
+    var prim_col = vec3<f32>(1.);
+    for(var i = 0u; i < sdf.count; i++) {
+        let prim = sdf.prims[i];
+        let dist = eval_sdf(in.world, prim);
+        if dist < d {
+            prim_col = prim.color.rgb * 0.4;
+            d = dist;
+        }
+    }
+
+    let bands = fract(d * globals.aux);
+    var c = select(vec3<f32>(0.85, 0.8, 0.7), vec3<f32>(0.55, 0.45, 0.3), bands > 0.5);
+    c = select(c, prim_col, d < 0);
+
+    let px = fwidth(in.world);
+    let ax = 1. - smoothstep(0., px.x * 1.5, abs(in.world.x));
+    let ay = 1. - smoothstep(0., px.y * 1.5, abs(in.world.y));
+    let axis = max(ax, ay);
+    c = mix(c, vec3<f32>(0.55, 0.25, 0.35), axis);
+
+    return vec4<f32>(c, 1.);
+}
+
 @vertex
 fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VsOut {
     let prim = sdf.prims[ii];
@@ -222,7 +259,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let d = eval_sdf(in.world, prim);
 
     let aa = max(fwidth(d), 1e-5);
-    let stroke_w = aa * 1.5;
+    let stroke_w = aa * 3.5;
     let saa = smoothstep(-aa, aa, d);
     let fill = 1. - saa;
     let stroke = saa * (1. - smoothstep(stroke_w - aa, stroke_w + aa, d));
@@ -230,7 +267,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     if alpha <= 0. {
         discard;
     }
-    let col = mix(prim.color.rgb, prim.color.rgb * 0.3, stroke / max(alpha, 1e-5));
+    let stroke_color = vec3<f32>(0.16, 0.4, 0.24);
+    let col = mix(prim.color.rgb, stroke_color, stroke / max(alpha, 1e-5));
 
     return vec4<f32>(col, prim.color.a * alpha);
 }

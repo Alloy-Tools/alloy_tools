@@ -111,6 +111,7 @@ pub struct RenderState {
     pub overlay_buffer: wgpu::Buffer,
     pub overlay_bind_group: wgpu::BindGroup,
     pub bg_pipeline: wgpu::RenderPipeline,
+    pub debug_bg_pipeline: wgpu::RenderPipeline,
     pub bg_bind_group: wgpu::BindGroup,
     pub vfx_pipeline: wgpu::RenderPipeline,
     pub vfx_buffer: wgpu::Buffer,
@@ -347,6 +348,40 @@ impl RenderState {
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            depth_stencil: None,
+            multiview_mask: None,
+            cache: None,
+        });
+
+        let debug_bg_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Debug BG Pipeline"),
+            layout: Some(&sdf_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &designer_shader,
+                entry_point: Some("vs_bg"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &designer_shader,
+                entry_point: Some("fs_debug_bg"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::REPLACE),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
@@ -640,6 +675,7 @@ impl RenderState {
             overlay_buffer,
             overlay_bind_group,
             bg_pipeline,
+            debug_bg_pipeline,
             bg_bind_group,
             vfx_pipeline,
             vfx_buffer,
@@ -1120,6 +1156,11 @@ impl RenderState {
         let mut encoder = self.device.create_command_encoder(&Default::default());
         // ----- Background Pass -----
         {
+            let (pipeline, bind_group) = if to_render.globals.aux > 0.5 {
+                (&self.debug_bg_pipeline, &self.overlay_bind_group)
+            } else {
+                (&self.bg_pipeline, &self.bg_bind_group)
+            };
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("BG Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1136,8 +1177,8 @@ impl RenderState {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            pass.set_pipeline(&self.bg_pipeline);
-            pass.set_bind_group(0, &self.bg_bind_group, &[]);
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, bind_group, &[]);
             pass.draw(0..3, 0..1);
         }
 

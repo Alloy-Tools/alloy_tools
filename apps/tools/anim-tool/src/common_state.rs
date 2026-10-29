@@ -26,7 +26,7 @@ pub struct Globals {
     pub camera_pos: Vec2,
     pub cursor_world: Vec2,
     pub view_size: f32,
-    pub _pad: f32,
+    pub aux: f32,
 }
 
 impl Globals {
@@ -41,7 +41,7 @@ impl Globals {
             camera_pos: camera_pos.into(),
             cursor_world: cursor_world.into(),
             view_size,
-            _pad: 0.,
+            aux: 0.,
         }
     }
 }
