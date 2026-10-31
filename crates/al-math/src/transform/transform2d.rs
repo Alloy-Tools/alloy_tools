@@ -13,12 +13,6 @@ pub struct Transform2d {
 }
 super::impl_transform!(Transform2d, Vec2, Mat2);
 
-impl Default for Transform2d {
-    fn default() -> Self {
-        Self::IDENTITY
-    }
-}
-
 impl Transform2d {
     pub const IDENTITY: Self = Self {
         translation: Vec2::ZERO,

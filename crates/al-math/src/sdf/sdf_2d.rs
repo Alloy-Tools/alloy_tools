@@ -5,7 +5,7 @@ use crate::{
     vec::{Vec2, Vec4},
 };
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Sdf2dOp {
     round: f32,
@@ -13,448 +13,76 @@ pub struct Sdf2dOp {
     elongate: Vec2,
 }
 
-#[derive(Clone, Copy, Debug)]
+impl Sdf2dOp {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn round(&self) -> f32 {
+        self.round
+    }
+
+    pub fn with_round(&mut self, round: f32) {
+        self.round = round
+    }
+
+    pub fn onion(&self) -> f32 {
+        self.onion
+    }
+
+    pub fn with_onion(&mut self, onion: f32) {
+        self.onion = onion
+    }
+
+    pub fn elongate(&self) -> Vec2 {
+        self.elongate
+    }
+
+    pub fn with_elongate(&mut self, elongate: Vec2) {
+        self.elongate = elongate
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Sdf2dBoolean {
+    #[default]
     Union,
     Subtraction,
     SmoothUnion(f32),
     SmoothSubtraction(f32),
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum Sdf2d {
-    Circle {
-        origin: Vec2,
-        radius: f32,
-    },
-    Ellipse {
-        origin: Vec2,
-        ab: Vec2,
-    },
-    Capsule {
-        origin: Vec2,
-        length: f32,
-        radius: f32,
-    },
-    UnevenCapsule {
-        origin: Vec2,
-        length: f32,
-        origin_radius: f32,
-        tip_radius: f32,
-    },
-    Rect {
-        origin: Vec2,
-        half_size: Vec2,
-    },
-    RoundedRect {
-        origin: Vec2,
-        half_size: Vec2,
-        corner_radii: Vec4,
-    },
-    ChamferRect {
-        origin: Vec2,
-        half_size: Vec2,
-        chamfers: Vec4,
-    },
-    Rhombus {
-        origin: Vec2,
-        half_size: Vec2,
-    },
-    Trapezoid {
-        origin: Vec2,
-        bottom_radius: f32,
-        top_radius: f32,
-        half_height: f32,
-    },
-    Parallelogram {
-        origin: Vec2,
-        width: f32,
-        height: f32,
-        skew: f32,
-    },
-    Triangle {
-        origin: Vec2,
-        p0: Vec2,
-        p1: Vec2,
-        p2: Vec2,
-    },
-    EquTriangle {
-        origin: Vec2,
-        radius: f32,
-    },
-    IsoTriangle {
-        origin: Vec2,
-        height: f32,
-        half_base: f32,
-    },
-    Pentagon {
-        origin: Vec2,
-        radius: f32,
-    },
-    Hexagon {
-        origin: Vec2,
-        radius: f32,
-    },
-    Octogon {
-        origin: Vec2,
-        radius: f32,
-    },
-    Pentragram {
-        origin: Vec2,
-        radius: f32,
-    },
-    Hexagram {
-        origin: Vec2,
-        radius: f32,
-    },
-    Star {
-        origin: Vec2,
-        outer_radius: f32,
-        /// Must be between 2 and `point_count`
-        inner_radius_factor: f32,
-        point_count: u32,
-    },
-    Pie {
-        origin: Vec2,
-        open_angle: Vec2,
-        radius: f32,
-    },
-    CutDisk {
-        origin: Vec2,
-        radius: f32,
-        cut_height: f32,
-    },
-    Arc {
-        origin: Vec2,
-        open_angle: Vec2,
-        radius: f32,
-        thickness: f32,
-    },
-    Ring {
-        origin: Vec2,
-        normal: Vec2,
-        radius: f32,
-        thickness: f32,
-    },
-    Horseshoe {
-        origin: Vec2,
-        open_angle: Vec2,
-        radius: f32,
-        thickness: Vec2,
-    },
-    Vesica {
-        origin: Vec2,
-        width: f32,
-        height: f32,
-    },
-    Moon {
-        origin: Vec2,
-        center_distance: f32,
-        outer_radius: f32,
-        inner_radius: f32,
-    },
-    Egg {
-        origin: Vec2,
-        half_height: f32,
-        top_radius: f32,
-        bottom_radius: f32,
-        bulge: f32,
-    },
-    Heart {
-        origin: Vec2,
-    },
-    RoundedX {
-        origin: Vec2,
-        thickness: f32,
-        corner_radius: f32,
-    },
-    Cross {
-        origin: Vec2,
-        arm_half_extent: Vec2,
-        corner_radius: f32,
-    },
-    CircleCross {
-        origin: Vec2,
-        arm_extent: f32,
-    },
-    BlobbyCross {
-        origin: Vec2,
-        half_extent: f32,
-    },
-    Parabola {
-        origin: Vec2,
-        curvature: f32,
-    },
-    ParabolaSegment {
-        origin: Vec2,
-        half_width: f32,
-        height: f32,
-    },
-    Hyperbola {
-        origin: Vec2,
-        curvature: f32,
-        half_length: f32,
-    },
-    QuadraticBezier {
-        origin: Vec2,
-        point_a: Vec2,
-        point_b: Vec2,
-        point_c: Vec2,
-    },
-    QuadraticCircle {
-        origin: Vec2,
-    },
-    Tunnel {
-        origin: Vec2,
-        half_extents: Vec2,
-    },
-    Stairs {
-        origin: Vec2,
-        step_size: Vec2,
-        count: f32,
-    },
-    CircleWave {
-        origin: Vec2,
-        wave_angle: f32,
-        radius: f32,
-    },
+pub struct Sdf2d {
+    transform: Transform2d,
+    shape: Sdf2dKind,
 }
 
 impl Sdf2d {
-    pub fn circle(origin: impl Into<Vec2>, radius: f32) -> Self {
-        Self::Circle { origin: origin.into(), radius }
+    pub fn new(transform: Transform2d, shape: Sdf2dKind) -> Self {
+        Self { transform, shape }
     }
 
-    pub fn capsule(origin: impl Into<Vec2>, length: f32, radius: f32) -> Self {
-        Self::Capsule {
-            origin: origin.into(),
-            length,
-            radius,
-        }
+    pub fn identity(shape: Sdf2dKind) -> Self {
+        Self::new(Transform2d::IDENTITY, shape)
     }
 
-    pub fn rect(origin: impl Into<Vec2>, half_size: impl Into<Vec2>) -> Self {
-        Self::Rect { origin: origin.into(), half_size: half_size.into() }
+    pub fn transform(&self) -> Transform2d {
+        self.transform
     }
 
-    pub fn rounded_rect(origin: impl Into<Vec2>, half_size: impl Into<Vec2>, corner_radii: impl Into<Vec4>) -> Self {
-        Self::RoundedRect {
-            origin: origin.into(),
-            half_size: half_size.into(),
-            corner_radii: corner_radii.into(),
-        }
+    pub fn transform_mut(&mut self) -> &mut Transform2d {
+        &mut self.transform
     }
 
-    pub fn name(&self) -> &str {
-        match self {
-            Sdf2d::Circle { .. } => "Circle",
-            Sdf2d::Ellipse { .. } => "Ellipse",
-            Sdf2d::Capsule { .. } => "Capsule",
-            Sdf2d::UnevenCapsule { .. } => "UnevenCapsule",
-            Sdf2d::Rect { .. } => "Rect",
-            Sdf2d::RoundedRect { .. } => "RoundedRect",
-            Sdf2d::ChamferRect { .. } => "ChamferRect",
-            Sdf2d::Rhombus { .. } => "Rhombus",
-            Sdf2d::Trapezoid { .. } => "Trapezoid",
-            Sdf2d::Parallelogram { .. } => "Parallelogram",
-            Sdf2d::Triangle { .. } => "Triangle",
-            Sdf2d::EquTriangle { .. } => "EquTriangle",
-            Sdf2d::IsoTriangle { .. } => "IsoTriangle",
-            Sdf2d::Pentagon { .. } => "Pentagon",
-            Sdf2d::Hexagon { .. } => "Hexagon",
-            Sdf2d::Octogon { .. } => "Octogon",
-            Sdf2d::Pentragram { .. } => "Pentragram",
-            Sdf2d::Hexagram { .. } => "Hexagram",
-            Sdf2d::Star { .. } => "Star",
-            Sdf2d::Pie { .. } => "Pie",
-            Sdf2d::CutDisk { .. } => "CutDisk",
-            Sdf2d::Arc { .. } => "Arc",
-            Sdf2d::Ring { .. } => "Ring",
-            Sdf2d::Horseshoe { .. } => "Horseshoe",
-            Sdf2d::Vesica { .. } => "Vesica",
-            Sdf2d::Moon { .. } => "Moon",
-            Sdf2d::Egg { .. } => "Egg",
-            Sdf2d::Heart { .. } => "Heart",
-            Sdf2d::RoundedX { .. } => "RoundedX",
-            Sdf2d::Cross { .. } => "Cross",
-            Sdf2d::CircleCross { .. } => "CircleCross",
-            Sdf2d::BlobbyCross { .. } => "BobblyCross",
-            Sdf2d::Parabola { .. } => "Parabola",
-            Sdf2d::ParabolaSegment { .. } => "ParabolaSegment",
-            Sdf2d::Hyperbola { .. } => "Hyperbola",
-            Sdf2d::QuadraticBezier { .. } => "QuadraticBezier",
-            Sdf2d::QuadraticCircle { .. } => "QuadraticCircle",
-            Sdf2d::Tunnel { .. } => "Tunnel",
-            Sdf2d::Stairs { .. } => "Stairs",
-            Sdf2d::CircleWave { .. } => "CircleWave",
-        }
+    pub fn shape(&self) -> Sdf2dKind {
+        self.shape
     }
 
-    pub fn to_prim(self, world: Transform2d, color: Vec4) -> Sdf2dPrim {
-        let m_inv = world
-            .linear
-            .try_inverse()
-            .unwrap_or(crate::matrix::Mat2::IDENTITY)
-            .to_cols_array();
-        match self {
-            Self::Circle {
-                origin: center,
-                radius,
-            } => Sdf2dPrim::circle(world.transform_point(center), radius, m_inv, color),
-            Self::Ellipse { origin, ab } => todo!(),
-            Self::Capsule {
-                origin,
-                length,
-                radius,
-            } => Sdf2dPrim::capsule(world.transform_point(origin), length, radius, m_inv, color),
-            Sdf2d::UnevenCapsule {
-                origin,
-                length,
-                origin_radius,
-                tip_radius,
-            } => todo!(),
-            Self::Rect {
-                origin: center,
-                half_size,
-            } => Sdf2dPrim::rect(world.transform_point(center), half_size, m_inv, color),
-            Self::RoundedRect {
-                origin: center,
-                half_size,
-                corner_radii,
-            } => todo!(),
-            Self::ChamferRect {
-                origin,
-                half_size,
-                chamfers,
-            } => todo!(),
-            Sdf2d::Rhombus { origin, half_size } => todo!(),
-            Sdf2d::Trapezoid {
-                origin,
-                bottom_radius,
-                top_radius,
-                half_height,
-            } => todo!(),
-            Sdf2d::Parallelogram {
-                origin,
-                width,
-                height,
-                skew,
-            } => todo!(),
-            Sdf2d::Triangle { origin, p0, p1, p2 } => todo!(),
-            Sdf2d::EquTriangle { origin, radius } => todo!(),
-            Sdf2d::IsoTriangle {
-                origin,
-                height,
-                half_base,
-            } => todo!(),
-            Sdf2d::Pentagon { origin, radius } => todo!(),
-            Sdf2d::Hexagon { origin, radius } => todo!(),
-            Sdf2d::Octogon { origin, radius } => todo!(),
-            Sdf2d::Pentragram { origin, radius } => todo!(),
-            Sdf2d::Hexagram { origin, radius } => todo!(),
-            Sdf2d::Star {
-                origin,
-                outer_radius,
-                inner_radius_factor,
-                point_count,
-            } => todo!(),
-            Sdf2d::Pie {
-                origin,
-                open_angle,
-                radius,
-            } => todo!(),
-            Sdf2d::CutDisk {
-                origin,
-                radius,
-                cut_height,
-            } => todo!(),
-            Sdf2d::Arc {
-                origin,
-                open_angle,
-                radius,
-                thickness,
-            } => todo!(),
-            Sdf2d::Ring {
-                origin,
-                normal,
-                radius,
-                thickness,
-            } => todo!(),
-            Sdf2d::Horseshoe {
-                origin,
-                open_angle,
-                radius,
-                thickness,
-            } => todo!(),
-            Sdf2d::Vesica {
-                origin,
-                width,
-                height,
-            } => todo!(),
-            Sdf2d::Moon {
-                origin,
-                center_distance,
-                outer_radius,
-                inner_radius,
-            } => todo!(),
-            Sdf2d::Egg {
-                origin,
-                half_height,
-                top_radius,
-                bottom_radius,
-                bulge,
-            } => todo!(),
-            Sdf2d::Heart { origin } => todo!(),
-            Sdf2d::RoundedX {
-                origin,
-                thickness,
-                corner_radius,
-            } => todo!(),
-            Sdf2d::Cross {
-                origin,
-                arm_half_extent,
-                corner_radius,
-            } => todo!(),
-            Sdf2d::CircleCross { origin, arm_extent } => todo!(),
-            Sdf2d::BlobbyCross {
-                origin,
-                half_extent,
-            } => todo!(),
-            Sdf2d::Parabola { origin, curvature } => todo!(),
-            Sdf2d::ParabolaSegment {
-                origin,
-                half_width,
-                height,
-            } => todo!(),
-            Sdf2d::Hyperbola {
-                origin,
-                curvature,
-                half_length,
-            } => todo!(),
-            Sdf2d::QuadraticBezier {
-                origin,
-                point_a,
-                point_b,
-                point_c,
-            } => todo!(),
-            Sdf2d::QuadraticCircle { origin } => todo!(),
-            Sdf2d::Tunnel {
-                origin,
-                half_extents,
-            } => todo!(),
-            Sdf2d::Stairs {
-                origin,
-                step_size,
-                count,
-            } => todo!(),
-            Sdf2d::CircleWave {
-                origin,
-                wave_angle,
-                radius,
-            } => todo!(),
-        }
+    pub fn shape_mut(&mut self) -> &mut Sdf2dKind {
+        &mut self.shape
     }
 
     pub fn accumulate(
@@ -475,200 +103,524 @@ impl Sdf2d {
     }
 
     pub fn eval(self, point: Vec2, ops: Sdf2dOp) -> f32 {
-        // elongate
-        let q = point - point.clamp(-ops.elongate, ops.elongate);
-        let mut d = self.dist(q);
+        self.eval_composed(self.transform, point, ops)
+    }
 
-        // onion
+    pub fn eval_in_parent(self, parent: Option<&Transform2d>, point: Vec2, ops: Sdf2dOp) -> f32 {
+        self.eval_composed(
+            match parent {
+                Some(p) => p.compose(&self.transform),
+                None => self.transform,
+            },
+            point,
+            ops,
+        )
+    }
+
+    fn eval_composed(self, transform: Transform2d, point: Vec2, ops: Sdf2dOp) -> f32 {
+        let (local, scale) = match transform.try_inverse() {
+            Some(inv) => (inv.transform_point(point), inv.linear.cols[0].length()),
+            None => (point, 1.),
+        };
+        // elongate
+        let q = local - local.clamp(-ops.elongate, ops.elongate);
+        let mut d = self.shape.dist(q);
+
         if ops.onion > 0. {
             d = d.abs() - ops.onion;
         }
+        d = d - ops.round;
 
-        // round
-        d - ops.round
+        d * scale
     }
 
-    pub fn dist(self, point: Vec2) -> f32 {
-        match self {
-            Sdf2d::Circle { origin, radius } => circle_sdf_2d(point, radius, origin),
-            Sdf2d::Ellipse { origin, ab } => todo!(),
-            Sdf2d::Capsule {
-                origin,
-                length,
-                radius,
-            } => capsule_sdf_2d(point, radius, origin, length),
-            Sdf2d::UnevenCapsule {
-                origin,
+    pub fn to_prim(self, world: Transform2d, color: Vec4) -> Sdf2dPrim {
+        let composed = world.compose(&self.transform);
+        let m_inv = composed
+            .linear
+            .try_inverse()
+            .unwrap_or(crate::matrix::Mat2::IDENTITY)
+            .to_cols_array();
+        match self.shape {
+            Sdf2dKind::Circle { radius } => {
+                Sdf2dPrim::circle(composed.translation, radius, m_inv, color)
+            }
+            Sdf2dKind::Ellipse { ab } => todo!(),
+            Sdf2dKind::Capsule { length, radius } => {
+                Sdf2dPrim::capsule(composed.translation, length, radius, m_inv, color)
+            }
+            Sdf2dKind::UnevenCapsule {
                 length,
                 origin_radius,
                 tip_radius,
             } => todo!(),
-            Sdf2d::Rect { origin, half_size } => rect_sdf_2d(point, origin, half_size),
-            Sdf2d::RoundedRect {
-                origin,
+            Sdf2dKind::Rect { half_size } => {
+                Sdf2dPrim::rect(composed.translation, half_size, m_inv, color)
+            }
+            Sdf2dKind::RoundedRect {
                 half_size,
                 corner_radii,
-            } => rounded_rect_sdf_2d(point, origin, half_size, corner_radii),
-            Sdf2d::ChamferRect {
-                origin,
+            } => todo!(),
+            Sdf2dKind::ChamferRect {
                 half_size,
                 chamfers,
             } => todo!(),
-            Sdf2d::Rhombus { origin, half_size } => todo!(),
-            Sdf2d::Trapezoid {
-                origin,
+            Sdf2dKind::Rhombus { half_size } => todo!(),
+            Sdf2dKind::Trapezoid {
                 bottom_radius,
                 top_radius,
                 half_height,
             } => todo!(),
-            Sdf2d::Parallelogram {
-                origin,
+            Sdf2dKind::Parallelogram {
                 width,
                 height,
                 skew,
             } => todo!(),
-            Sdf2d::Triangle { origin, p0, p1, p2 } => todo!(),
-            Sdf2d::EquTriangle { origin, radius } => todo!(),
-            Sdf2d::IsoTriangle {
-                origin,
-                height,
-                half_base,
-            } => todo!(),
-            Sdf2d::Pentagon { origin, radius } => todo!(),
-            Sdf2d::Hexagon { origin, radius } => todo!(),
-            Sdf2d::Octogon { origin, radius } => todo!(),
-            Sdf2d::Pentragram { origin, radius } => todo!(),
-            Sdf2d::Hexagram { origin, radius } => todo!(),
-            Sdf2d::Star {
-                origin,
+            Sdf2dKind::Triangle { p0, p1, p2 } => todo!(),
+            Sdf2dKind::EquTriangle { radius } => todo!(),
+            Sdf2dKind::IsoTriangle { height, half_base } => todo!(),
+            Sdf2dKind::Pentagon { radius } => todo!(),
+            Sdf2dKind::Hexagon { radius } => todo!(),
+            Sdf2dKind::Octogon { radius } => todo!(),
+            Sdf2dKind::Pentragram { radius } => todo!(),
+            Sdf2dKind::Hexagram { radius } => todo!(),
+            Sdf2dKind::Star {
                 outer_radius,
                 inner_radius_factor,
                 point_count,
             } => todo!(),
-            Sdf2d::Pie {
-                origin,
-                open_angle,
-                radius,
-            } => todo!(),
-            Sdf2d::CutDisk {
-                origin,
-                radius,
-                cut_height,
-            } => todo!(),
-            Sdf2d::Arc {
-                origin,
+            Sdf2dKind::Pie { open_angle, radius } => todo!(),
+            Sdf2dKind::CutDisk { radius, cut_height } => todo!(),
+            Sdf2dKind::Arc {
                 open_angle,
                 radius,
                 thickness,
             } => todo!(),
-            Sdf2d::Ring {
-                origin,
+            Sdf2dKind::Ring {
                 normal,
                 radius,
                 thickness,
             } => todo!(),
-            Sdf2d::Horseshoe {
-                origin,
+            Sdf2dKind::Horseshoe {
                 open_angle,
                 radius,
                 thickness,
             } => todo!(),
-            Sdf2d::Vesica {
-                origin,
-                width,
-                height,
-            } => todo!(),
-            Sdf2d::Moon {
-                origin,
+            Sdf2dKind::Vesica { width, height } => todo!(),
+            Sdf2dKind::Moon {
                 center_distance,
                 outer_radius,
                 inner_radius,
             } => todo!(),
-            Sdf2d::Egg {
-                origin,
+            Sdf2dKind::Egg {
                 half_height,
                 top_radius,
                 bottom_radius,
                 bulge,
             } => todo!(),
-            Sdf2d::Heart { origin } => todo!(),
-            Sdf2d::RoundedX {
-                origin,
+            Sdf2dKind::Heart => todo!(),
+            Sdf2dKind::RoundedX {
                 thickness,
                 corner_radius,
             } => todo!(),
-            Sdf2d::Cross {
-                origin,
+            Sdf2dKind::Cross {
                 arm_half_extent,
                 corner_radius,
             } => todo!(),
-            Sdf2d::CircleCross { origin, arm_extent } => todo!(),
-            Sdf2d::BlobbyCross {
-                origin,
-                half_extent,
-            } => todo!(),
-            Sdf2d::Parabola { origin, curvature } => todo!(),
-            Sdf2d::ParabolaSegment {
-                origin,
-                half_width,
-                height,
-            } => todo!(),
-            Sdf2d::Hyperbola {
-                origin,
+            Sdf2dKind::CircleCross { arm_extent } => todo!(),
+            Sdf2dKind::BlobbyCross { half_extent } => todo!(),
+            Sdf2dKind::Parabola { curvature } => todo!(),
+            Sdf2dKind::ParabolaSegment { half_width, height } => todo!(),
+            Sdf2dKind::Hyperbola {
                 curvature,
                 half_length,
             } => todo!(),
-            Sdf2d::QuadraticBezier {
-                origin,
+            Sdf2dKind::QuadraticBezier {
                 point_a,
                 point_b,
                 point_c,
             } => todo!(),
-            Sdf2d::QuadraticCircle { origin } => todo!(),
-            Sdf2d::Tunnel {
-                origin,
-                half_extents,
+            Sdf2dKind::QuadraticCircle => todo!(),
+            Sdf2dKind::Tunnel { half_extents } => todo!(),
+            Sdf2dKind::Stairs { step_size, count } => todo!(),
+            Sdf2dKind::CircleWave { wave_angle, radius } => todo!(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum Sdf2dKind {
+    Circle {
+        radius: f32,
+    },
+    Ellipse {
+        ab: Vec2,
+    },
+    Capsule {
+        length: f32,
+        radius: f32,
+    },
+    UnevenCapsule {
+        length: f32,
+        origin_radius: f32,
+        tip_radius: f32,
+    },
+    Rect {
+        half_size: Vec2,
+    },
+    RoundedRect {
+        half_size: Vec2,
+        corner_radii: Vec4,
+    },
+    ChamferRect {
+        half_size: Vec2,
+        chamfers: Vec4,
+    },
+    Rhombus {
+        half_size: Vec2,
+    },
+    Trapezoid {
+        bottom_radius: f32,
+        top_radius: f32,
+        half_height: f32,
+    },
+    Parallelogram {
+        width: f32,
+        height: f32,
+        skew: f32,
+    },
+    Triangle {
+        p0: Vec2,
+        p1: Vec2,
+        p2: Vec2,
+    },
+    EquTriangle {
+        radius: f32,
+    },
+    IsoTriangle {
+        height: f32,
+        half_base: f32,
+    },
+    Pentagon {
+        radius: f32,
+    },
+    Hexagon {
+        radius: f32,
+    },
+    Octogon {
+        radius: f32,
+    },
+    Pentragram {
+        radius: f32,
+    },
+    Hexagram {
+        radius: f32,
+    },
+    Star {
+        outer_radius: f32,
+        /// Must be between 2 and `point_count`
+        inner_radius_factor: f32,
+        point_count: u32,
+    },
+    Pie {
+        open_angle: Vec2,
+        radius: f32,
+    },
+    CutDisk {
+        radius: f32,
+        cut_height: f32,
+    },
+    Arc {
+        open_angle: Vec2,
+        radius: f32,
+        thickness: f32,
+    },
+    Ring {
+        normal: Vec2,
+        radius: f32,
+        thickness: f32,
+    },
+    Horseshoe {
+        open_angle: Vec2,
+        radius: f32,
+        thickness: Vec2,
+    },
+    Vesica {
+        width: f32,
+        height: f32,
+    },
+    Moon {
+        center_distance: f32,
+        outer_radius: f32,
+        inner_radius: f32,
+    },
+    Egg {
+        half_height: f32,
+        top_radius: f32,
+        bottom_radius: f32,
+        bulge: f32,
+    },
+    Heart,
+    RoundedX {
+        thickness: f32,
+        corner_radius: f32,
+    },
+    Cross {
+        arm_half_extent: Vec2,
+        corner_radius: f32,
+    },
+    CircleCross {
+        arm_extent: f32,
+    },
+    BlobbyCross {
+        half_extent: f32,
+    },
+    Parabola {
+        curvature: f32,
+    },
+    ParabolaSegment {
+        half_width: f32,
+        height: f32,
+    },
+    Hyperbola {
+        curvature: f32,
+        half_length: f32,
+    },
+    QuadraticBezier {
+        point_a: Vec2,
+        point_b: Vec2,
+        point_c: Vec2,
+    },
+    QuadraticCircle,
+    Tunnel {
+        half_extents: Vec2,
+    },
+    Stairs {
+        step_size: Vec2,
+        count: f32,
+    },
+    CircleWave {
+        wave_angle: f32,
+        radius: f32,
+    },
+}
+
+impl Sdf2dKind {
+    pub fn circle(radius: f32) -> Self {
+        Self::Circle { radius }
+    }
+
+    pub fn capsule(length: f32, radius: f32) -> Self {
+        Self::Capsule { length, radius }
+    }
+
+    pub fn rect(half_size: impl Into<Vec2>) -> Self {
+        Self::Rect {
+            half_size: half_size.into(),
+        }
+    }
+
+    pub fn rounded_rect(half_size: impl Into<Vec2>, corner_radii: impl Into<Vec4>) -> Self {
+        Self::RoundedRect {
+            half_size: half_size.into(),
+            corner_radii: corner_radii.into(),
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Circle { .. } => "Circle",
+            Self::Ellipse { .. } => "Ellipse",
+            Self::Capsule { .. } => "Capsule",
+            Self::UnevenCapsule { .. } => "UnevenCapsule",
+            Self::Rect { .. } => "Rect",
+            Self::RoundedRect { .. } => "RoundedRect",
+            Self::ChamferRect { .. } => "ChamferRect",
+            Self::Rhombus { .. } => "Rhombus",
+            Self::Trapezoid { .. } => "Trapezoid",
+            Self::Parallelogram { .. } => "Parallelogram",
+            Self::Triangle { .. } => "Triangle",
+            Self::EquTriangle { .. } => "EquTriangle",
+            Self::IsoTriangle { .. } => "IsoTriangle",
+            Self::Pentagon { .. } => "Pentagon",
+            Self::Hexagon { .. } => "Hexagon",
+            Self::Octogon { .. } => "Octogon",
+            Self::Pentragram { .. } => "Pentragram",
+            Self::Hexagram { .. } => "Hexagram",
+            Self::Star { .. } => "Star",
+            Self::Pie { .. } => "Pie",
+            Self::CutDisk { .. } => "CutDisk",
+            Self::Arc { .. } => "Arc",
+            Self::Ring { .. } => "Ring",
+            Self::Horseshoe { .. } => "Horseshoe",
+            Self::Vesica { .. } => "Vesica",
+            Self::Moon { .. } => "Moon",
+            Self::Egg { .. } => "Egg",
+            Self::Heart { .. } => "Heart",
+            Self::RoundedX { .. } => "RoundedX",
+            Self::Cross { .. } => "Cross",
+            Self::CircleCross { .. } => "CircleCross",
+            Self::BlobbyCross { .. } => "BobblyCross",
+            Self::Parabola { .. } => "Parabola",
+            Self::ParabolaSegment { .. } => "ParabolaSegment",
+            Self::Hyperbola { .. } => "Hyperbola",
+            Self::QuadraticBezier { .. } => "QuadraticBezier",
+            Self::QuadraticCircle { .. } => "QuadraticCircle",
+            Self::Tunnel { .. } => "Tunnel",
+            Self::Stairs { .. } => "Stairs",
+            Self::CircleWave { .. } => "CircleWave",
+        }
+    }
+
+    /// Distance from shape, point mut be in local space
+    pub fn dist(self, point: Vec2) -> f32 {
+        match self {
+            Self::Circle { radius } => circle_sdf_2d(point, radius),
+            Self::Ellipse { ab } => todo!(),
+            Self::Capsule { length, radius } => capsule_sdf_2d(point, radius, length),
+            Self::UnevenCapsule {
+                length,
+                origin_radius,
+                tip_radius,
             } => todo!(),
-            Sdf2d::Stairs {
-                origin,
-                step_size,
-                count,
+            Self::Rect { half_size, .. } => rect_sdf_2d(point, half_size),
+            Self::RoundedRect {
+                half_size,
+                corner_radii,
+            } => rounded_rect_sdf_2d(point, half_size, corner_radii),
+            Self::ChamferRect {
+                half_size,
+                chamfers,
             } => todo!(),
-            Sdf2d::CircleWave {
-                origin,
-                wave_angle,
+            Self::Rhombus { half_size, .. } => todo!(),
+            Self::Trapezoid {
+                bottom_radius,
+                top_radius,
+                half_height,
+            } => todo!(),
+            Self::Parallelogram {
+                width,
+                height,
+                skew,
+            } => todo!(),
+            Self::Triangle { p0, p1, p2, .. } => todo!(),
+            Self::EquTriangle { radius, .. } => todo!(),
+            Self::IsoTriangle {
+                height, half_base, ..
+            } => todo!(),
+            Self::Pentagon { radius, .. } => todo!(),
+            Self::Hexagon { radius, .. } => todo!(),
+            Self::Octogon { radius, .. } => todo!(),
+            Self::Pentragram { radius, .. } => todo!(),
+            Self::Hexagram { radius, .. } => todo!(),
+            Self::Star {
+                outer_radius,
+                inner_radius_factor,
+                point_count,
+            } => todo!(),
+            Self::Pie {
+                open_angle, radius, ..
+            } => todo!(),
+            Self::CutDisk {
+                radius, cut_height, ..
+            } => todo!(),
+            Self::Arc {
+                open_angle,
                 radius,
+                thickness,
+            } => todo!(),
+            Self::Ring {
+                normal,
+                radius,
+                thickness,
+            } => todo!(),
+            Self::Horseshoe {
+                open_angle,
+                radius,
+                thickness,
+            } => todo!(),
+            Self::Vesica { width, height, .. } => todo!(),
+            Self::Moon {
+                center_distance,
+                outer_radius,
+                inner_radius,
+            } => todo!(),
+            Self::Egg {
+                half_height,
+                top_radius,
+                bottom_radius,
+                bulge,
+            } => todo!(),
+            Self::Heart => todo!(),
+            Self::RoundedX {
+                thickness,
+                corner_radius,
+            } => todo!(),
+            Self::Cross {
+                arm_half_extent,
+                corner_radius,
+            } => todo!(),
+            Self::CircleCross { arm_extent, .. } => todo!(),
+            Self::BlobbyCross { half_extent, .. } => todo!(),
+            Self::Parabola { curvature, .. } => todo!(),
+            Self::ParabolaSegment {
+                half_width, height, ..
+            } => todo!(),
+            Self::Hyperbola {
+                curvature,
+                half_length,
+            } => todo!(),
+            Self::QuadraticBezier {
+                point_a,
+                point_b,
+                point_c,
+            } => todo!(),
+            Self::QuadraticCircle => todo!(),
+            Self::Tunnel { half_extents, .. } => todo!(),
+            Self::Stairs {
+                step_size, count, ..
+            } => todo!(),
+            Self::CircleWave {
+                wave_angle, radius, ..
             } => todo!(),
         }
     }
 }
 
-#[inline]
-pub fn circle_sdf_2d(point: Vec2, radius: f32, origin: Vec2) -> f32 {
-    (point - origin).length() - radius
+impl Default for Sdf2dKind {
+    fn default() -> Self {
+        Self::circle(1.)
+    }
 }
 
 #[inline]
-pub fn capsule_sdf_2d(point: Vec2, radius: f32, origin: Vec2, length: f32) -> f32 {
+pub fn circle_sdf_2d(point: Vec2, radius: f32) -> f32 {
+    point.length() - radius
+}
+
+#[inline]
+pub fn capsule_sdf_2d(point: Vec2, radius: f32, length: f32) -> f32 {
     let h = point.x.clamp(0., length);
     (point - Vec2::new(h, 0.)).length() - radius
 }
 
 #[inline]
-pub fn capsule_tip_sdf_2d(point: Vec2, radius: f32, a: Vec2, b: Vec2) -> f32 {
+//REVIEW: See if this still will work if point is in local space now
+pub fn capsule_endpoints_sdf_2d(point: Vec2, a: Vec2, b: Vec2, radius: f32) -> f32 {
     let ab = b - a;
     let h = ((point - a).dot(ab) / ab.dot(ab).max(1e-8)).clamp(0., 1.);
     (point - (a + ab * h)).length() - radius
 }
 
 #[inline]
-pub fn rect_sdf_2d(point: Vec2, origin: Vec2, half_size: Vec2) -> f32 {
-    let q = (point - origin).abs() - half_size;
+pub fn rect_sdf_2d(point: Vec2, half_size: Vec2) -> f32 {
+    let q = point.abs() - half_size;
     q.max(Vec2::ZERO).length() + q.x.max(q.y).min(0.)
 }
 
 #[inline]
-pub fn rounded_rect_sdf_2d(point: Vec2, origin: Vec2, half_size: Vec2, corner_radii: Vec4) -> f32 {
+pub fn rounded_rect_sdf_2d(point: Vec2, half_size: Vec2, corner_radii: Vec4) -> f32 {
     let mut r = if point.x > 0. {
         Vec2::new(corner_radii.x, corner_radii.y)
     } else {
@@ -677,7 +629,7 @@ pub fn rounded_rect_sdf_2d(point: Vec2, origin: Vec2, half_size: Vec2, corner_ra
     if point.y <= 0. {
         r.x = r.y;
     }
-    let q = (point - origin).abs() - half_size + Vec2::from(r.x);
+    let q = point.abs() - half_size + Vec2::from(r.x);
     return q.x.max(q.y).min(0.) + q.max(Vec2::ZERO).length() - r.x;
 }
 

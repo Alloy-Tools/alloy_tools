@@ -82,6 +82,12 @@ macro_rules! impl_transform {
                 self.translation.is_finite() && self.linear.is_finite()
             }
         }
+
+        impl Default for $transform {
+            fn default() -> Self {
+                Self::IDENTITY
+            }
+        }
     };
 }
 

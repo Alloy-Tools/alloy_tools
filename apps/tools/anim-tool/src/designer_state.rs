@@ -9,7 +9,8 @@ use al_anim::{
     Easing,
 };
 use al_math::{
-    sdf::Sdf2d,
+    sdf::{Sdf2d, Sdf2dKind},
+    transform::Transform2d,
     vec::{Vec2, Vec4},
 };
 use al_skeleton::{
@@ -276,7 +277,10 @@ impl Default for DesignerState {
         let _e1 = builder.extra(
             "blade_front",
             Some(hd_f),
-            Sdf2d::capsule(Vec2::new(0.02, 0.), 0.1, 0.015),
+            Sdf2d::new(
+                Transform2d::from_translation(Vec2::new(0.02, 0.)),
+                Sdf2dKind::capsule(0.1, 0.015),
+            ),
             ColliderKind::HIT,
         );
 
@@ -293,7 +297,7 @@ impl Default for DesignerState {
                 joint: hd_f,
                 offset: explosion_offset,
             },
-            Sdf2d::circle(Vec2::ZERO, 0.07),
+            Sdf2d::identity(Sdf2dKind::circle(0.07)),
             (0.4.into(), 1.6.into()),
             (1., 0.),
             (0., 0.),
@@ -310,7 +314,7 @@ impl Default for DesignerState {
                 joint: hd_f,
                 offset: explosion_offset,
             },
-            Sdf2d::circle(Vec2::ZERO, 0.1),
+            Sdf2d::identity(Sdf2dKind::circle(0.1)),
             (0.5.into(), 2.2.into()),
             (0.95, 0.),
             (0., 0.),
@@ -327,7 +331,7 @@ impl Default for DesignerState {
                 joint: hd_f,
                 offset: explosion_offset,
             },
-            Sdf2d::circle(Vec2::ZERO, 0.13),
+            Sdf2d::identity(Sdf2dKind::circle(0.13)),
             (0.8.into(), 3.2.into()),
             (0.55, 0.),
             (0., 0.),
@@ -344,7 +348,10 @@ impl Default for DesignerState {
                 joint: hd_f,
                 offset: explosion_offset,
             },
-            Sdf2d::capsule(Vec2::new(-0.02, 0.), 0.02, 0.004),
+            Sdf2d::new(
+                Transform2d::from_translation(Vec2::new(-0.02, 0.)),
+                Sdf2dKind::capsule(0.02, 0.004),
+            ),
             ([0.5, 0.5].into(), [14., 1.].into()),
             (1., 0.),
             (0., 0.),

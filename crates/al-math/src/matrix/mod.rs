@@ -117,6 +117,12 @@ macro_rules! define_mat_impls {
             }
         }
 
+        impl Default for $mat_name {
+            fn default() -> Self {
+                Self::IDENTITY
+            }
+        }
+
         impl From<[[f32; $dim]; $dim]> for $mat_name {
             #[inline(always)]
             fn from(arr: [[f32; $dim]; $dim]) -> Self {

@@ -13,12 +13,6 @@ pub struct Transform3d {
 }
 super::impl_transform!(Transform3d, Vec3, Mat3);
 
-impl Default for Transform3d {
-    fn default() -> Self {
-        Self::IDENTITY
-    }
-}
-
 impl Transform3d {
     pub const IDENTITY: Self = Self {
         translation: Vec3::ZERO,
