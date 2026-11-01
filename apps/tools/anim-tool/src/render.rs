@@ -192,7 +192,7 @@ impl RenderState {
 
         let designer_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("SDF Designer Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("designer_sdf.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(designer_sdf_source().into()),
         });
 
         let bg_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -1395,6 +1395,25 @@ impl RenderState {
         self.atlas.trim();
         self.queue.present(surface_texture);
     }
+}
+
+fn strip_editor_header(source: &str) -> &str {
+    const MARKER: &str = "// ----- Header End -----";
+    match source.find(MARKER) {
+        Some(pos) => {
+            let rest = &source[pos + MARKER.len()..];
+            rest.strip_prefix("\r\n")
+                .or_else(|| rest.strip_prefix('\n'))
+                .unwrap_or(rest)
+        }
+        None => source,
+    }
+}
+
+fn designer_sdf_source() -> String {
+    let functions = include_str!("sdf_functions.wgsl");
+    let body = strip_editor_header(include_str!("designer_sdf.wgsl"));
+    format!("{functions}\n{body}")
 }
 
 fn write_sdf(queue: &wgpu::Queue, buffer: &wgpu::Buffer, prims: &[Sdf2dPrim]) {

@@ -1,8 +1,19 @@
-#[test]
-fn designer_sdf_wgsl_is_valid() {
-    let source = include_str!("../src/designer_sdf.wgsl");
-    let module =
-        naga::front::wgsl::parse_str(source).unwrap_or_else(|e| panic!("WGSL parse failed: {e:?}"));
+fn strip_editor_header(source: &str) -> &str {
+    const MARKER: &str = "// ----- Header End -----";
+    match source.find(MARKER) {
+        Some(pos) => {
+            let rest = &source[pos + MARKER.len()..];
+            rest.strip_prefix("\r\n")
+                .or_else(|| rest.strip_prefix('\n'))
+                .unwrap_or(rest)
+        }
+        None => source,
+    }
+}
+
+fn parse_and_validate(source: &str, label: &str) -> naga::Module {
+    let module = naga::front::wgsl::parse_str(source)
+        .unwrap_or_else(|e| panic!("{label} WGSL parse failed: {e:?}"));
 
     let mut validator = naga::valid::Validator::new(
         naga::valid::ValidationFlags::all(),
@@ -10,7 +21,22 @@ fn designer_sdf_wgsl_is_valid() {
     );
     validator
         .validate(&module)
-        .unwrap_or_else(|e| panic!("WGSL validation failed: {e:?}"));
+        .unwrap_or_else(|e| panic!("{label} WGSL validation failed: {e:?}"));
+    module
+}
+
+#[test]
+fn designer_sdf_wgsl_is_valid() {
+    let functions = include_str!("../src/sdf_functions.wgsl");
+    let editor = include_str!("../src/designer_sdf.wgsl");
+
+    // The file as opened in an editor: stub header + body. This must also
+    // validate so VS Code does not show undefined-symbol errors.
+    let _ = parse_and_validate(editor, "editor designer_sdf.wgsl");
+
+    let body = strip_editor_header(editor);
+    let source = format!("{functions}\n{body}");
+    let module = parse_and_validate(&source, "runtime designer_sdf source");
 
     let sdf_prim = module
         .types
