@@ -228,6 +228,7 @@ dependencies = [
  "al-skeleton",
  "bytemuck",
  "glyphon",
+ "naga",
  "pollster",
  "serde_json",
  "wgpu",

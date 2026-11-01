@@ -5,16 +5,20 @@ use crate::{
 };
 use al_math::{matrix::Mat2, sdf::Sdf2dPrim, vec::Vec2};
 
-pub const SHOWCASE_SDF_COUNT: usize = 3;
-pub const SHOWCASE_SDF_COLUMNS: usize = 2;
+pub const SHOWCASE_SET_COUNT: usize = 2;
+pub const SHOWCASE_SET_NORMAL: usize = 0;
+pub const SHOWCASE_SET_INFINITE: usize = 1;
+
+pub const SHOWCASE_SDF_COUNTS: [usize; SHOWCASE_SET_COUNT] = [36, 4];
+pub const SHOWCASE_SDF_COLUMNS: [usize; SHOWCASE_SET_COUNT] = [7, 4];
 pub const SHOWCASE_SPACING: Vec2 = Vec2 { x: 2., y: 2. };
-pub const SHOWCASE_OFFSET: Vec2 = Vec2 { x: -1., y: 1. };
 
 pub struct ShowcaseState {
     timeline: Timeline,
     camera_state: CameraState,
     keys: InputState,
     following: usize,
+    curr_set: usize,
     debug_bg: bool,
     scale: Vec2,
     rotation: f32,
@@ -27,6 +31,7 @@ impl ShowcaseState {
             camera_state: CameraState::new([800., 600.], Camera::new([0., 0.], 1.4)),
             keys: InputState::default(),
             following: 0,
+            curr_set: 0,
             debug_bg: false,
             scale: Vec2::ONE,
             rotation: 0.,
@@ -129,13 +134,22 @@ impl ShowcaseState {
                             KeyCode::Space => self.timeline.set_playing(!self.timeline.playing()),
 
                             KeyCode::Tab => {
-                                if SHOWCASE_SDF_COUNT > 0 {
+                                let count = SHOWCASE_SDF_COUNTS[self.curr_set];
+                                if count > 0 {
+                                    self.following %= count;
                                     if self.camera_state.following() {
-                                        self.following = (self.following + 1) % SHOWCASE_SDF_COUNT;
+                                        self.following = (self.following + 1) % count;
                                     }
                                 }
                                 self.camera_state
-                                    .set_target(Some(showcase_pos(self.following)));
+                                    .set_target(Some(showcase_pos(self.curr_set, self.following)));
+                            }
+
+                            KeyCode::KeyT => {
+                                self.curr_set = (self.curr_set + 1) % SHOWCASE_SET_COUNT;
+                                self.following = 0;
+                                self.camera_state
+                                    .set_target(Some(showcase_pos(self.curr_set, 0)));
                             }
 
                             KeyCode::ArrowLeft => {
@@ -150,7 +164,7 @@ impl ShowcaseState {
                                 }
                             }
 
-                            KeyCode::ArrowRight =>{
+                            KeyCode::ArrowRight => {
                                 if self.keys.ctrl_held {
                                     self.rotation += 0.1
                                 } else {
@@ -220,28 +234,329 @@ impl ShowcaseState {
         let color = [0.9, 0.9, 0.9, 1.];
         let mut sdfs = Vec::new();
 
-        let mut pos = 0;
-        sdfs.push(Sdf2dPrim::circle(
-            showcase_pos(pos) + SHOWCASE_OFFSET,
-            radius,
-            m_inv,
-            color,
-        ));
-        pos += 1;
-        sdfs.push(Sdf2dPrim::capsule(
-            showcase_pos(pos) + SHOWCASE_OFFSET,
-            radius,
-            radius,
-            m_inv,
-            color,
-        ));
-        pos += 1;
-        sdfs.push(Sdf2dPrim::rect(
-            showcase_pos(pos) + SHOWCASE_OFFSET,
-            radius,
-            m_inv,
-            color,
-        ));
+        if self.curr_set == SHOWCASE_SET_NORMAL {
+            let mut pos = 0;
+            sdfs.push(Sdf2dPrim::circle(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                radius,
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::capsule(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                radius,
+                radius,
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::rect(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                radius,
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::ellipse(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                [0.5, 0.3],
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::uneven_capsule(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                0.7,
+                0.28,
+                0.1,
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::rounded_rect(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                [0.42, 0.3],
+                [0.18, 0.06, 0.12, 0.24].into(),
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::chamfer_rect(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                [0.42, 0.3],
+                [0.1, 0.16, 0.2, 0.08].into(),
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::rhombus(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                [0.5, 0.3],
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::trapezoid(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                0.5,
+                0.25,
+                0.4,
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::parallelogram(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                0.45,
+                0.3,
+                0.22,
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::triangle(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                [-0.25, -0.15],
+                [0.65, -0.55],
+                [0.0, 0.45],
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::equ_triangle(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                0.5,
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::iso_triangle(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                0.65,
+                0.42,
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::pentagon(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                0.48,
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::hexagon(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                0.48,
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::octogon(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                0.48,
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::pentagram(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                0.45,
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::hexagram(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                0.4,
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::star(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                0.45,
+                3.0,
+                4,
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::pie(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                [0.5, 0.8660254],
+                0.5,
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::cut_disk(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                0.5,
+                0.18,
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::arc(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                [0.5, 0.8660254],
+                0.38,
+                0.08,
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::ring(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                [0.70710677, 0.70710677],
+                0.42,
+                0.12,
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::horseshoe(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                [0.5, 0.8660254],
+                0.38,
+                [0.12, 0.08],
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::vesica(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                0.5,
+                0.4,
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::moon(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                0.25,
+                0.45,
+                0.38,
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::egg(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                0.5,
+                0.2,
+                0.3,
+                0.8,
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::heart(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::rounded_x(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                0.5,
+                0.08,
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::cross(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                [0.45, 0.18],
+                0.08,
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::circle_cross(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                0.5,
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::blobby_cross(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                0.4,
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::quadratic_bezier(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                [-0.45, -0.3],
+                [0.0, 0.5],
+                [0.45, -0.3],
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::quadratic_circle(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::tunnel(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                [0.4, 0.3],
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::stairs(
+                showcase_pos(SHOWCASE_SET_NORMAL, pos),
+                [0.18, 0.18],
+                3.0,
+                m_inv,
+                color,
+            ));
+        } else if self.curr_set == SHOWCASE_SET_INFINITE {
+            let mut pos = 0;
+            sdfs.push(Sdf2dPrim::parabola(
+                showcase_pos(SHOWCASE_SET_INFINITE, pos),
+                1.5,
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::parabola_segment(
+                showcase_pos(SHOWCASE_SET_INFINITE, pos),
+                0.5,
+                0.4,
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::hyperbola(
+                showcase_pos(SHOWCASE_SET_INFINITE, pos),
+                0.4,
+                0.5,
+                m_inv,
+                color,
+            ));
+            pos += 1;
+            sdfs.push(Sdf2dPrim::circle_wave(
+                showcase_pos(SHOWCASE_SET_INFINITE, pos),
+                0.5,
+                0.35,
+                m_inv,
+                color,
+            ));
+        }
+
+        debug_assert_eq!(
+            sdfs.len(),
+            SHOWCASE_SDF_COUNTS[self.curr_set],
+            "showcase shape list and SHOWCASE_SDF_COUNTS disagree"
+        );
 
         // Cursor
         sdfs.push(Sdf2dPrim::circle(c_world, 0.006, m_inv, [0.4, 1., 0.6, 1.]));
@@ -254,9 +569,29 @@ impl ShowcaseState {
     }
 }
 
-fn showcase_pos(following: usize) -> Vec2 {
+fn set_count(set: usize) -> usize {
+    SHOWCASE_SDF_COUNTS[set]
+}
+
+fn set_columns(set: usize) -> usize {
+    SHOWCASE_SDF_COLUMNS[set]
+}
+
+fn set_offset(set: usize) -> Vec2 {
+    let count = set_count(set).max(1);
+    let columns = set_columns(set).min(count).max(1);
+    let rows = (count + columns - 1) / columns;
+    Vec2 {
+        x: -0.5 * (columns as f32 - 1.) * SHOWCASE_SPACING.x,
+        y: 0.5 * (rows as f32 - 1.) * SHOWCASE_SPACING.y,
+    }
+}
+
+fn showcase_pos(set: usize, following: usize) -> Vec2 {
+    let columns = set_columns(set);
     [
-        (following % SHOWCASE_SDF_COLUMNS) as f32,
-        -((following / SHOWCASE_SDF_COLUMNS) as f32),
+        (following % columns) as f32,
+        -((following / columns) as f32),
     ] * SHOWCASE_SPACING
+        + set_offset(set)
 }
