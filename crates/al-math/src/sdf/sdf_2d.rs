@@ -33,13 +33,17 @@ fn v2(x: f32, y: f32) -> Vec2 {
     Vec2::new(x, y)
 }
 
+#[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
+#[cfg_attr(feature = "gpu", derive(bytemuck::Pod, bytemuck::Zeroable))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Sdf2dOp {
     round: f32,
     onion: f32,
     elongate: Vec2,
 }
+
+pub const SDF_OP_SIZE: usize = std::mem::size_of::<Sdf2dOp>();
 
 impl Sdf2dOp {
     pub fn new() -> Self {

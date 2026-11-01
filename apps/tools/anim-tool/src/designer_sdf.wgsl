@@ -24,6 +24,12 @@ struct SdfPrim {
     m_inv: vec4<f32>,
 }
 
+struct SdfOp {
+    round: f32,
+    onion: f32,
+    elongate: vec2<f32>,
+}
+
 struct SdfData {
     count: u32,
     _pad0: u32,
@@ -707,14 +713,7 @@ fn rotate(p: vec2<f32>, a: f32) -> vec2<f32> {
     return vec2<f32>(p.x * c - p.y * s, p.x * s + p.y * c);
 }
 
-fn eval_sdf(p: vec2<f32>, prim: SdfPrim) -> f32 {
-    let mi = mat2x2(
-            vec2<f32>(prim.m_inv[0], prim.m_inv[1]),
-            vec2<f32>(prim.m_inv[2], prim.m_inv[3]),
-        );
-    let c = p - prim.a;
-    let local = mi * c;
-    // Apply distortions to local (eg elongation)
+fn eval_shape(local: vec2<f32>, prim: SdfPrim) -> f32 {
     var d_local: f32;
     switch prim.kind {
         case 0u { d_local = sdf_circle(local, prim.radius); }
@@ -775,12 +774,37 @@ fn eval_sdf(p: vec2<f32>, prim: SdfPrim) -> f32 {
         case 39u { d_local = sdf_circle_wave(local, prim.aux, prim.radius); }
         default { d_local = 1e10; }
     }
-    // Apply distance modifiers to switch return (eg rounding, onion)
+    return d_local;
+}
 
+fn inverse_mat(prim: SdfPrim) -> mat2x2<f32> {
+    return mat2x2(
+            vec2<f32>(prim.m_inv[0], prim.m_inv[1]),
+            vec2<f32>(prim.m_inv[2], prim.m_inv[3]),
+        );
+}
+
+fn inv_scale(mi: mat2x2<f32>) -> f32 {
     let abs_det_inv = abs(mi[0].x * mi[1].y - mi[1].x * mi[0].y);
+    return select(1., 1. / sqrt(abs_det_inv), abs_det_inv > 1e-8);
+}
 
-    let scale = select(1., 1. / sqrt(abs_det_inv), abs_det_inv > 1e-8);
-    return d_local * scale;
+fn eval_sdf(p: vec2<f32>, prim: SdfPrim) -> f32 {
+    let mi = inverse_mat(prim);
+    let local = mi * (p - prim.a);
+    return eval_shape(local, prim) * inv_scale(mi);
+}
+
+fn eval_sdf_ops(p: vec2<f32>, prim: SdfPrim, op: SdfOp) -> f32 {
+    let mi = inverse_mat(prim);
+    let local = mi * (p - prim.a);
+    let q = local - clamp(local, -op.elongate, op.elongate);
+    var d = eval_shape(q, prim);
+    if (op.onion > 0.0) {
+        d = abs(d) - op.onion;
+    }
+    d = d - op.round;
+    return d * inv_scale(mi);
 }
 
 fn eval_aabb(prim: SdfPrim) -> Aabb {
@@ -985,10 +1009,28 @@ fn eval_aabb(prim: SdfPrim) -> Aabb {
     return out;
 }
 
+fn eval_aabb_ops(prim: SdfPrim, op: SdfOp) -> Aabb {
+    var out = eval_aabb(prim);
+
+    let m = mat2_from_inv(
+            vec2<f32>(prim.m_inv[0], prim.m_inv[1]),
+            vec2<f32>(prim.m_inv[2], prim.m_inv[3]),
+        );
+    let abs_m = mat2x2<f32>(abs(m[0]), abs(m[1]));
+    let grow_local = abs(op.elongate)
+        + vec2<f32>(max(op.onion, 0.0) + abs(op.round));
+    let grow_world = abs_m * grow_local;
+    out.min -= grow_world;
+    out.max += grow_world;
+    return out;
+}
+
 @group(0) @binding(0)
 var<uniform> globals: Globals;
 @group(0) @binding(1)
 var<storage, read> sdf: SdfData;
+@group(0) @binding(2)
+var<storage, read> ops: array<SdfOp>;
 
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
@@ -1094,10 +1136,60 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
     return out;
 }
 
+@vertex
+fn vs_main_ops(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VsOut {
+    let prim = sdf.prims[ii];
+    let op = ops[ii];
+    let aabb = eval_aabb_ops(prim, op);
+
+    // Two triangles spanning [0,1]^2.
+    var corners = array<vec2<f32>, 6>(
+            vec2<f32>(0.0, 0.0),
+            vec2<f32>(1.0, 0.0),
+            vec2<f32>(0.0, 1.0),
+            vec2<f32>(1.0, 0.0),
+            vec2<f32>(1.0, 1.0),
+            vec2<f32>(0.0, 1.0),
+        );
+    let c = corners[vi];
+    let world = mix(aabb.min, aabb.max, c);
+    let aspect = globals.resolution.x / globals.resolution.y;
+    let ndc = 2. * (world - globals.camera_pos) / (globals.view_size * vec2<f32>(aspect, 1.));
+
+    var out: VsOut;
+    out.clip = vec4<f32>(ndc, 0., 1.);
+    out.world = world;
+    out.color = sdf_color(prim);
+    out.prim_idx = ii;
+    return out;
+}
+
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let prim = sdf.prims[in.prim_idx];
     let d = eval_sdf(in.world, prim);
+
+    let aa = max(fwidth(d), 1e-5);
+    let stroke_w = aa * 3.5;
+    let saa = smoothstep(-aa, aa, d);
+    let fill = 1. - saa;
+    let stroke = saa * (1. - smoothstep(stroke_w - aa, stroke_w + aa, d));
+    let alpha = fill + stroke;
+    if alpha <= 0. {
+        discard;
+    }
+    let stroke_color = vec3<f32>(0.16, 0.4, 0.24);
+    let color = sdf_color(prim);
+    let col = mix(color.rgb, stroke_color, stroke / max(alpha, 1e-5));
+
+    return vec4<f32>(col, color.a * alpha);
+}
+
+@fragment
+fn fs_main_ops(in: VsOut) -> @location(0) vec4<f32> {
+    let prim = sdf.prims[in.prim_idx];
+    let op = ops[in.prim_idx];
+    let d = eval_sdf_ops(in.world, prim, op);
 
     let aa = max(fwidth(d), 1e-5);
     let stroke_w = aa * 3.5;

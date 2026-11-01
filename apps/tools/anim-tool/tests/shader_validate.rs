@@ -36,4 +36,29 @@ fn designer_sdf_wgsl_is_valid() {
         al_math::sdf::SDF_PRIM_SIZE,
         "SdfPrim WGSL layout does not match Sdf2dPrim",
     );
+
+    let sdf_op = module
+        .types
+        .iter()
+        .find_map(|(_, ty)| {
+            if ty.name.as_deref() != Some("SdfOp") {
+                return None;
+            }
+            match &ty.inner {
+                naga::TypeInner::Struct { span, .. } => Some(*span),
+                _ => None,
+            }
+        })
+        .expect("SdfOp struct not found in designer_sdf.wgsl");
+
+    assert_eq!(
+        al_math::sdf::SDF_OP_SIZE,
+        16,
+        "Sdf2dOp should stay at the compressed 16-byte layout",
+    );
+    assert_eq!(
+        sdf_op as usize,
+        al_math::sdf::SDF_OP_SIZE,
+        "SdfOp WGSL layout does not match Sdf2dOp",
+    );
 }

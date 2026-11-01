@@ -1,19 +1,30 @@
 use crate::camera::Camera;
-use al_math::{sdf::Sdf2dPrim, vec::Vec2};
+use al_math::{
+    sdf::{Sdf2dOp, Sdf2dPrim},
+    vec::Vec2,
+};
 use std::time::Instant;
 
 #[derive(Clone, Debug)]
 pub struct RenderData {
     pub globals: Globals,
     pub sdfs: Vec<Sdf2dPrim>,
+    pub ops: Vec<Sdf2dOp>,
     pub hud_string: String,
 }
 
 impl RenderData {
-    pub fn new(globals: Globals, sdfs: Vec<Sdf2dPrim>, hud_string: impl Into<String>) -> Self {
+    pub fn new(
+        globals: Globals,
+        sdfs: Vec<Sdf2dPrim>,
+        mut ops: Vec<Sdf2dOp>,
+        hud_string: impl Into<String>,
+    ) -> Self {
+        ops.resize(sdfs.len(), Sdf2dOp::default());
         Self {
             globals,
             sdfs,
+            ops,
             hud_string: hud_string.into(),
         }
     }

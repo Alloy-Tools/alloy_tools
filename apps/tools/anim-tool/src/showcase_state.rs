@@ -3,7 +3,11 @@ use crate::{
     camera::Camera,
     common_state::{CameraState, Globals, InputState, RenderData, Timeline},
 };
-use al_math::{matrix::Mat2, sdf::Sdf2dPrim, vec::Vec2};
+use al_math::{
+    matrix::Mat2,
+    sdf::{Sdf2dOp, Sdf2dPrim},
+    vec::Vec2,
+};
 
 pub const SHOWCASE_SET_COUNT: usize = 2;
 pub const SHOWCASE_SET_NORMAL: usize = 0;
@@ -561,11 +565,20 @@ impl ShowcaseState {
         // Cursor
         sdfs.push(Sdf2dPrim::circle(c_world, 0.006, m_inv, [0.4, 1., 0.6, 1.]));
 
+        // Ops are a parallel array, one entry per primitive. The first three
+        // normal-set prims demonstrate rounding, elongation and onion.
+        let mut ops = vec![Sdf2dOp::default(); sdfs.len()];
+        if self.curr_set == SHOWCASE_SET_NORMAL {
+            ops[0].with_onion(0.04);
+            ops[2].with_elongate(Vec2::new(0.12, 0.04));
+            ops[7].with_round(0.1);
+        }
+
         let mut globals = Globals::new(resolution, cam.pos, c_world, cam.view_size);
         if self.debug_bg {
             globals.aux = 20.;
         }
-        RenderData::new(globals, sdfs, self.hud_string())
+        RenderData::new(globals, sdfs, ops, self.hud_string())
     }
 }
 
