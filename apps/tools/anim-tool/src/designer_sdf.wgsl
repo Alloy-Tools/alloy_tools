@@ -1080,6 +1080,11 @@ fn fs_bg(in: BgVsOut) -> @location(0) vec4<f32> {
 }
 
 @fragment
+fn fs_bg_solid() -> @location(0) vec4<f32> {
+    return vec4<f32>(0.10, 0.11, 0.14, 1.);
+}
+
+@fragment
 fn fs_debug_bg(in: BgVsOut) -> @location(0) vec4<f32> {
     if sdf.count == 0 {
         return vec4<f32>(0.05, 0.05, 0.08, 1.);
@@ -1087,18 +1092,26 @@ fn fs_debug_bg(in: BgVsOut) -> @location(0) vec4<f32> {
 
     var d = 1e10;
     var prim_col = vec3<f32>(1.);
+    var inner = false;
     for(var i = 0u; i < sdf.count; i++) {
         let prim = sdf.prims[i];
-        let dist = eval_sdf(in.world, prim);
+        let op = ops[i];
+        let dist = eval_sdf_ops(in.world, prim, op);
         if dist < d {
             prim_col = sdf_color(prim).rgb * 0.4;
             d = dist;
+            let local = inverse_mat(prim) * (in.world - prim.a);
+            let q = local - clamp(local, -op.elongate, op.elongate);
+            let base = eval_shape(q, prim);
+            inner = op.onion > 0.0 && base < 0.0 && dist > 0.0;
         }
     }
 
     let bands = fract(d * globals.aux);
     var c = select(vec3<f32>(0.85, 0.8, 0.7), vec3<f32>(0.55, 0.45, 0.3), bands > 0.5);
     c = select(c, prim_col, d < 0);
+    let inner_c = select(vec3<f32>(0.35, 0.55, 0.95), vec3<f32>(0.10, 0.22, 0.55), bands > 0.5);
+    c = select(c, inner_c, inner);
 
     let px = fwidth(in.world);
     let ax = 1. - smoothstep(0., px.x * 1.5, abs(in.world.x));

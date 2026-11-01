@@ -17,13 +17,64 @@ pub const SHOWCASE_SDF_COUNTS: [usize; SHOWCASE_SET_COUNT] = [36, 4];
 pub const SHOWCASE_SDF_COLUMNS: [usize; SHOWCASE_SET_COUNT] = [7, 4];
 pub const SHOWCASE_SPACING: Vec2 = Vec2 { x: 2., y: 2. };
 
+const OP_STEP: f32 = 0.02;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum BackgroundMode {
+    #[default]
+    Grid,
+    Solid,
+    Bands,
+}
+
+impl BackgroundMode {
+    fn next(self) -> Self {
+        match self {
+            Self::Grid => Self::Solid,
+            Self::Solid => Self::Bands,
+            Self::Bands => Self::Grid,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Grid => "grid",
+            Self::Solid => "solid",
+            Self::Bands => "bands",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum OpMode {
+    Onion,
+    #[default]
+    Round,
+    Elongate,
+}
+
+impl OpMode {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Onion => "onion",
+            Self::Round => "round",
+            Self::Elongate => "elongate",
+        }
+    }
+}
+
 pub struct ShowcaseState {
     timeline: Timeline,
     camera_state: CameraState,
     keys: InputState,
     following: usize,
     curr_set: usize,
-    debug_bg: bool,
+    bg_mode: BackgroundMode,
+    op_mode: OpMode,
+    op_onion_delta: f32,
+    op_round_delta: f32,
+    op_elongate_x_delta: f32,
+    op_elongate_y_delta: f32,
     scale: Vec2,
     rotation: f32,
 }
@@ -36,7 +87,12 @@ impl ShowcaseState {
             keys: InputState::default(),
             following: 0,
             curr_set: 0,
-            debug_bg: false,
+            bg_mode: BackgroundMode::default(),
+            op_mode: OpMode::default(),
+            op_onion_delta: 0.,
+            op_round_delta: 0.,
+            op_elongate_x_delta: 0.,
+            op_elongate_y_delta: 0.,
             scale: Vec2::ONE,
             rotation: 0.,
         }
@@ -44,7 +100,7 @@ impl ShowcaseState {
 
     pub fn hud_string(&self) -> String {
         format!(
-            "{} {:.3}/{:.3} loop {}",
+            "{} {:.3}/{:.3} loop {} | bg {} | op {} on {:.2} ro {:.2} el x {:.2} y {:.2}",
             if self.timeline.playing() {
                 "▶"
             } else {
@@ -52,7 +108,13 @@ impl ShowcaseState {
             },
             self.timeline.time(),
             self.timeline.duration(),
-            if self.timeline.looping() { "on" } else { "off" }
+            if self.timeline.looping() { "on" } else { "off" },
+            self.bg_mode.label(),
+            self.op_mode.label(),
+            self.op_onion_delta,
+            self.op_round_delta,
+            self.op_elongate_x_delta,
+            self.op_elongate_y_delta,
         )
     }
 
@@ -157,8 +219,10 @@ impl ShowcaseState {
                             }
 
                             KeyCode::ArrowLeft => {
-                                if self.keys.ctrl_held {
-                                    self.rotation -= 0.1
+                                if self.keys.ctrl_held && self.keys.shift_held {
+                                    self.rotation += 0.1;
+                                } else if self.keys.ctrl_held {
+                                    self.nudge_elongate_x(-OP_STEP);
                                 } else {
                                     self.timeline.scrub(-if self.keys.alt_held {
                                         FIXED_DT
@@ -169,8 +233,10 @@ impl ShowcaseState {
                             }
 
                             KeyCode::ArrowRight => {
-                                if self.keys.ctrl_held {
-                                    self.rotation += 0.1
+                                if self.keys.ctrl_held && self.keys.shift_held {
+                                    self.rotation -= 0.1;
+                                } else if self.keys.ctrl_held {
+                                    self.nudge_elongate_x(OP_STEP);
                                 } else {
                                     self.timeline.scrub(if self.keys.alt_held {
                                         FIXED_DT
@@ -180,17 +246,33 @@ impl ShowcaseState {
                                 }
                             }
 
-                            KeyCode::ArrowUp => self.scale += Vec2::from(0.1),
+                            KeyCode::ArrowUp => {
+                                if self.keys.ctrl_held {
+                                    self.nudge_op(OP_STEP);
+                                } else {
+                                    self.scale += Vec2::from(0.1);
+                                }
+                            }
 
-                            KeyCode::ArrowDown => self.scale -= Vec2::from(0.1),
+                            KeyCode::ArrowDown => {
+                                if self.keys.ctrl_held {
+                                    self.nudge_op(-OP_STEP);
+                                } else {
+                                    self.scale -= Vec2::from(0.1);
+                                }
+                            }
 
                             KeyCode::Home => self.timeline.set_time(0.),
 
-                            KeyCode::KeyL => self.timeline.set_looping(!self.timeline.looping()),
+                            KeyCode::KeyP => self.timeline.set_looping(!self.timeline.looping()),
 
                             KeyCode::KeyF => self.following = !self.following,
 
-                            KeyCode::KeyB => self.debug_bg = !self.debug_bg,
+                            KeyCode::KeyB => self.bg_mode = self.bg_mode.next(),
+
+                            KeyCode::KeyO => self.op_mode = OpMode::Onion,
+                            KeyCode::KeyR => self.op_mode = OpMode::Round,
+                            KeyCode::KeyL => self.op_mode = OpMode::Elongate,
 
                             KeyCode::KeyQ => {
                                 self.scale = Vec2::new(
@@ -212,6 +294,26 @@ impl ShowcaseState {
             }
 
             _ => {}
+        }
+    }
+
+    fn nudge_op(&mut self, delta: f32) {
+        match self.op_mode {
+            OpMode::Onion => {
+                self.op_onion_delta = (self.op_onion_delta + delta).clamp(0.0, 0.5);
+            }
+            OpMode::Round => {
+                self.op_round_delta = (self.op_round_delta + delta).clamp(-0.5, 0.5);
+            }
+            OpMode::Elongate => {
+                self.op_elongate_y_delta = (self.op_elongate_y_delta + delta).clamp(0.0, 0.5);
+            }
+        }
+    }
+
+    fn nudge_elongate_x(&mut self, delta: f32) {
+        if self.op_mode == OpMode::Elongate {
+            self.op_elongate_x_delta = (self.op_elongate_x_delta + delta).clamp(0.0, 0.5);
         }
     }
 
@@ -565,19 +667,25 @@ impl ShowcaseState {
         // Cursor
         sdfs.push(Sdf2dPrim::circle(c_world, 0.006, m_inv, [0.4, 1., 0.6, 1.]));
 
-        // Ops are a parallel array, one entry per primitive. The first three
-        // normal-set prims demonstrate rounding, elongation and onion.
         let mut ops = vec![Sdf2dOp::default(); sdfs.len()];
-        if self.curr_set == SHOWCASE_SET_NORMAL {
-            ops[0].with_onion(0.04);
-            ops[2].with_elongate(Vec2::new(0.12, 0.04));
-            ops[7].with_round(0.1);
+
+        // Ctrl+Up/Down nudges the selected field on every shape (the cursor
+        // keeps identity ops).
+        let shape_count = ops.len().saturating_sub(1);
+        for op in &mut ops[..shape_count] {
+            op.with_onion((op.onion() + self.op_onion_delta).max(0.0));
+            op.with_round(op.round() + self.op_round_delta);
+            let elongate =
+                op.elongate() + Vec2::new(self.op_elongate_x_delta, self.op_elongate_y_delta);
+            op.with_elongate(Vec2::new(elongate.x.max(0.0), elongate.y.max(0.0)));
         }
 
         let mut globals = Globals::new(resolution, cam.pos, c_world, cam.view_size);
-        if self.debug_bg {
-            globals.aux = 20.;
-        }
+        globals.aux = match self.bg_mode {
+            BackgroundMode::Grid => 0.,
+            BackgroundMode::Solid => 1.,
+            BackgroundMode::Bands => 20.,
+        };
         RenderData::new(globals, sdfs, ops, self.hud_string())
     }
 }

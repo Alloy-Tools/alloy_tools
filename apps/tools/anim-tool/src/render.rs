@@ -113,6 +113,7 @@ pub struct RenderState {
     pub overlay_bind_group: wgpu::BindGroup,
     pub ops_buffer: wgpu::Buffer,
     pub bg_pipeline: wgpu::RenderPipeline,
+    pub solid_bg_pipeline: wgpu::RenderPipeline,
     pub debug_bg_pipeline: wgpu::RenderPipeline,
     pub bg_bind_group: wgpu::BindGroup,
     pub vfx_pipeline: wgpu::RenderPipeline,
@@ -248,6 +249,40 @@ impl RenderState {
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            depth_stencil: None,
+            multiview_mask: None,
+            cache: None,
+        });
+
+        let solid_bg_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Solid BG Pipeline"),
+            layout: Some(&bg_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &designer_shader,
+                entry_point: Some("vs_bg"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &designer_shader,
+                entry_point: Some("fs_bg_solid"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::REPLACE),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
@@ -738,6 +773,7 @@ impl RenderState {
             overlay_bind_group,
             ops_buffer,
             bg_pipeline,
+            solid_bg_pipeline,
             debug_bg_pipeline,
             bg_bind_group,
             vfx_pipeline,
@@ -1216,11 +1252,17 @@ impl RenderState {
             bytemuck::bytes_of(&to_render.globals),
         );
 
+        write_sdf(&self.queue, &self.overlay_buffer, &to_render.sdfs);
+        write_ops(&self.queue, &self.ops_buffer, &to_render.ops);
+
         let mut encoder = self.device.create_command_encoder(&Default::default());
         // ----- Background Pass -----
         {
-            let (pipeline, bind_group) = if to_render.globals.aux > 0.5 {
+            let aux = to_render.globals.aux;
+            let (pipeline, bind_group) = if aux >= 10. {
                 (&self.debug_bg_pipeline, &self.overlay_bind_group)
+            } else if aux > 0.5 {
+                (&self.solid_bg_pipeline, &self.bg_bind_group)
             } else {
                 (&self.bg_pipeline, &self.bg_bind_group)
             };
@@ -1256,9 +1298,6 @@ impl RenderState {
             );
             let n_showcase = sdf_len.min(MAX_SDF_PRIMS);
             if n_showcase > 0 {
-                write_sdf(&self.queue, &self.overlay_buffer, &to_render.sdfs);
-                write_ops(&self.queue, &self.ops_buffer, &to_render.ops);
-
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("Showcase Pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
