@@ -14,14 +14,14 @@ struct Aabb {
 struct SdfPrim {
     a: vec2<f32>,
     b: vec2<f32>,
+    c: vec2<f32>,
     radius: f32,
     aux: f32,
     aux_2: u32,
     kind: u32,
-    c: vec2<f32>,
-    _pad: vec2<f32>,
+    color: u32,
+    _pad: u32,
     m_inv: vec4<f32>,
-    color: vec4<f32>,
 }
 
 struct SdfData {
@@ -91,6 +91,10 @@ fn sdf_rounded_rect(p: vec2<f32>, b: vec2<f32>, r: vec4<f32>) -> f32 {
 
 fn dot2(v: vec2<f32>) -> f32 {
     return dot(v, v);
+}
+
+fn sdf_color(prim: SdfPrim) -> vec4<f32> {
+    return unpack4x8unorm(prim.color);
 }
 
 // GLSL style mod (always non-negative for a positive modulus).
@@ -1045,7 +1049,7 @@ fn fs_debug_bg(in: BgVsOut) -> @location(0) vec4<f32> {
         let prim = sdf.prims[i];
         let dist = eval_sdf(in.world, prim);
         if dist < d {
-            prim_col = prim.color.rgb * 0.4;
+            prim_col = sdf_color(prim).rgb * 0.4;
             d = dist;
         }
     }
@@ -1085,7 +1089,7 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
     var out: VsOut;
     out.clip = vec4<f32>(ndc, 0., 1.);
     out.world = world;
-    out.color = prim.color;
+    out.color = sdf_color(prim);
     out.prim_idx = ii;
     return out;
 }
@@ -1105,9 +1109,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         discard;
     }
     let stroke_color = vec3<f32>(0.16, 0.4, 0.24);
-    let col = mix(prim.color.rgb, stroke_color, stroke / max(alpha, 1e-5));
+    let color = sdf_color(prim);
+    let col = mix(color.rgb, stroke_color, stroke / max(alpha, 1e-5));
 
-    return vec4<f32>(col, prim.color.a * alpha);
+    return vec4<f32>(col, color.a * alpha);
 }
 
 // ----------------------------------------
@@ -1130,7 +1135,7 @@ fn fs_boolean_union(in: VsOut) -> BooleanUnionOut {
 
     var out: BooleanUnionOut;
     if d < 0. {
-        out.color = prim.color;
+        out.color = sdf_color(prim);
     } else {
         out.color = vec4<f32>(0.);
     }

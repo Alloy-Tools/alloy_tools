@@ -27,6 +27,11 @@ fn designer_sdf_wgsl_is_valid() {
         .expect("SdfPrim struct not found in designer_sdf.wgsl");
 
     assert_eq!(
+        al_math::sdf::SDF_PRIM_SIZE,
+        64,
+        "Sdf2dPrim should stay at the compressed 64-byte layout",
+    );
+    assert_eq!(
         sdf_prim as usize,
         al_math::sdf::SDF_PRIM_SIZE,
         "SdfPrim WGSL layout does not match Sdf2dPrim",

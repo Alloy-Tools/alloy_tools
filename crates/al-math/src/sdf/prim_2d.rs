@@ -6,22 +6,29 @@ pub const SDF_PRIM_SIZE: usize = std::mem::size_of::<Sdf2dPrim>();
 ///
 /// The layout is mirrored by `SdfPrim` in `apps/tools/anim-tool/src/designer_sdf.wgsl`.
 /// Shape parameters are packed into `a`, `b`, `c`, `radius` and `aux`; the exact
-/// meaning of each slot is documented on the corresponding constructor.
-#[repr(C)]
+/// meaning of each slot is documented on the corresponding constructor. Color is
+/// packed as RGBA8 to keep the struct at 64 bytes.
+#[repr(C, align(16))]
 #[derive(Clone, Copy, Debug, Default)]
 #[cfg_attr(feature = "gpu", derive(bytemuck::Pod, bytemuck::Zeroable,))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Sdf2dPrim {
     a: Vec2,         // 8:  0 -7
     b: Vec2,         // 8:  8 -15
-    radius: f32,     // 4:  16-19
-    aux: f32,        // 4:  20-23
-    aux_2: u32,      // 4:  24-27
-    kind: u32,       // 4:  28-31
-    c: Vec2,         // 8:  32-39
-    _pad: Vec2,      // 8:  40-47 (keeps m_inv 16-byte aligned)
+    c: Vec2,         // 8:  16-23
+    radius: f32,     // 4:  24-27
+    aux: f32,        // 4:  28-31
+    aux_2: u32,      // 4:  32-35
+    kind: u32,       // 4:  36-39
+    color: u32,      // 4:  40-43 (RGBA8)
+    _pad: u32,       // 4:  44-47
     m_inv: [f32; 4], // 16: 48-63
-    color: Vec4,     // 16: 64-79
+}
+
+#[inline]
+fn pack_color(color: Vec4) -> u32 {
+    let channel = |value: f32| (value.clamp(0.0, 1.0) * 255.0 + 0.5) as u32;
+    channel(color.x) | (channel(color.y) << 8) | (channel(color.z) << 16) | (channel(color.w) << 24)
 }
 
 impl Sdf2dPrim {
@@ -78,6 +85,7 @@ impl Sdf2dPrim {
         m_inv: [f32; 4],
         color: impl Into<Vec4>,
     ) -> Self {
+        let color = color.into();
         Self {
             a: a.into(),
             b: b.into(),
@@ -86,9 +94,9 @@ impl Sdf2dPrim {
             aux,
             aux_2,
             kind,
-            _pad: Vec2::ZERO,
+            color: pack_color(color),
+            _pad: 0,
             m_inv,
-            color: color.into(),
         }
     }
 
