@@ -11,5 +11,5 @@ pub use sdf_2d::{
     pentagram_sdf_2d, pie_sdf_2d, quadratic_bezier_sdf_2d, quadratic_circle_sdf_2d, rect_sdf_2d,
     rhombus_sdf_2d, ring_sdf_2d, rounded_rect_sdf_2d, rounded_x_sdf_2d, stairs_sdf_2d, star_sdf_2d,
     trapezoid_sdf_2d, triangle_sdf_2d, tunnel_sdf_2d, uneven_capsule_sdf_2d, vesica_sdf_2d, Sdf2d,
-    Sdf2dBoolean, Sdf2dKind, Sdf2dOp, SDF_OP_SIZE,
+    Sdf2dBoolean, Sdf2dGroup, Sdf2dKind, Sdf2dOp, SDF_GROUP_SIZE, SDF_OP_SIZE,
 };

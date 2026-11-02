@@ -1,6 +1,6 @@
 use crate::camera::Camera;
 use al_math::{
-    sdf::{Sdf2dOp, Sdf2dPrim},
+    sdf::{Sdf2dGroup, Sdf2dOp, Sdf2dPrim},
     vec::Vec2,
 };
 use std::time::Instant;
@@ -10,6 +10,7 @@ pub struct RenderData {
     pub globals: Globals,
     pub sdfs: Vec<Sdf2dPrim>,
     pub ops: Vec<Sdf2dOp>,
+    pub groups: Vec<Sdf2dGroup>,
     pub hud_string: String,
 }
 
@@ -18,6 +19,7 @@ impl RenderData {
         globals: Globals,
         sdfs: Vec<Sdf2dPrim>,
         mut ops: Vec<Sdf2dOp>,
+        groups: Vec<Sdf2dGroup>,
         hud_string: impl Into<String>,
     ) -> Self {
         ops.resize(sdfs.len(), Sdf2dOp::default());
@@ -25,6 +27,7 @@ impl RenderData {
             globals,
             sdfs,
             ops,
+            groups,
             hud_string: hud_string.into(),
         }
     }

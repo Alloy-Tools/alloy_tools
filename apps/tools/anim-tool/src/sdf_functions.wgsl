@@ -20,6 +20,10 @@ struct SdfOp {
     round: f32,
     onion: f32,
     elongate: vec2<f32>,
+    boolean: u32,
+    smoothing: f32,
+    _pad0: u32,
+    _pad1: u32,
 }
 
 fn mat2_from_inv(mi0: vec2<f32>, mi1: vec2<f32>) -> mat2x2<f32> {

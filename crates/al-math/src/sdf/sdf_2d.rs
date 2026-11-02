@@ -41,9 +41,42 @@ pub struct Sdf2dOp {
     round: f32,
     onion: f32,
     elongate: Vec2,
+    /// 0 = union, 1 = subtraction, 2 = smooth union, 3 = smooth subtraction.
+    boolean: u32,
+    smooth: f32,
+    _pad: [u32; 2],
 }
 
 pub const SDF_OP_SIZE: usize = std::mem::size_of::<Sdf2dOp>();
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+#[cfg_attr(feature = "gpu", derive(bytemuck::Pod, bytemuck::Zeroable))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Sdf2dGroup {
+    start: u32,
+    len: u32,
+}
+
+pub const SDF_GROUP_SIZE: usize = std::mem::size_of::<Sdf2dGroup>();
+
+impl Sdf2dGroup {
+    pub fn new(start: u32, len: u32) -> Self {
+        Self { start, len }
+    }
+
+    pub fn start(&self) -> u32 {
+        self.start
+    }
+
+    pub fn len(&self) -> u32 {
+        self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+}
 
 impl Sdf2dOp {
     pub fn new() -> Self {
@@ -72,6 +105,34 @@ impl Sdf2dOp {
 
     pub fn with_elongate(&mut self, elongate: Vec2) {
         self.elongate = elongate
+    }
+
+    pub fn boolean(&self) -> Sdf2dBoolean {
+        match self.boolean {
+            1 => Sdf2dBoolean::Subtraction,
+            2 => Sdf2dBoolean::SmoothUnion(self.smooth),
+            3 => Sdf2dBoolean::SmoothSubtraction(self.smooth),
+            _ => Sdf2dBoolean::Union,
+        }
+    }
+
+    pub fn with_boolean(&mut self, boolean: Sdf2dBoolean) {
+        let (kind, smooth) = match boolean {
+            Sdf2dBoolean::Union => (0, 0.),
+            Sdf2dBoolean::Subtraction => (1, 0.),
+            Sdf2dBoolean::SmoothUnion(k) => (2, k),
+            Sdf2dBoolean::SmoothSubtraction(k) => (3, k),
+        };
+        self.boolean = kind;
+        self.smooth = smooth;
+    }
+
+    pub fn smooth(&self) -> f32 {
+        self.smooth
+    }
+
+    pub fn with_smooth(&mut self, smooth: f32) {
+        self.smooth = smooth
     }
 }
 

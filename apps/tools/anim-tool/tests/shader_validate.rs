@@ -79,12 +79,37 @@ fn designer_sdf_wgsl_is_valid() {
 
     assert_eq!(
         al_math::sdf::SDF_OP_SIZE,
-        16,
-        "Sdf2dOp should stay at the compressed 16-byte layout",
+        32,
+        "Sdf2dOp should stay at the compressed 32-byte layout",
     );
     assert_eq!(
         sdf_op as usize,
         al_math::sdf::SDF_OP_SIZE,
         "SdfOp WGSL layout does not match Sdf2dOp",
+    );
+
+    let sdf_group = module
+        .types
+        .iter()
+        .find_map(|(_, ty)| {
+            if ty.name.as_deref() != Some("SdfGroup") {
+                return None;
+            }
+            match &ty.inner {
+                naga::TypeInner::Struct { span, .. } => Some(*span),
+                _ => None,
+            }
+        })
+        .expect("SdfGroup struct not found in designer_sdf.wgsl");
+
+    assert_eq!(
+        al_math::sdf::SDF_GROUP_SIZE,
+        8,
+        "Sdf2dGroup should stay at 8 bytes",
+    );
+    assert_eq!(
+        sdf_group as usize,
+        al_math::sdf::SDF_GROUP_SIZE,
+        "SdfGroup WGSL layout does not match Sdf2dGroup",
     );
 }

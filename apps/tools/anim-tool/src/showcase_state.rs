@@ -686,7 +686,7 @@ impl ShowcaseState {
             BackgroundMode::Solid => 1.,
             BackgroundMode::Bands => 20.,
         };
-        RenderData::new(globals, sdfs, ops, self.hud_string())
+        RenderData::new(globals, sdfs, ops, vec![], self.hud_string())
     }
 }
 

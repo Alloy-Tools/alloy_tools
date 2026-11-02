@@ -4,7 +4,7 @@ use crate::{
 };
 use al_math::{
     matrix::Mat2,
-    sdf::{Sdf2dOp, Sdf2dPrim, SDF_OP_SIZE, SDF_PRIM_SIZE},
+    sdf::{Sdf2dGroup, Sdf2dOp, Sdf2dPrim, SDF_GROUP_SIZE, SDF_OP_SIZE, SDF_PRIM_SIZE},
     transform::Transform2d,
     vec::{Vec2, Vec4},
 };
@@ -104,6 +104,7 @@ pub struct RenderState {
     pub config: SurfaceConfiguration,
     pub sdf_pipeline: wgpu::RenderPipeline,
     pub sdf_ops_pipeline: wgpu::RenderPipeline,
+    pub sdf_groups_pipeline: wgpu::RenderPipeline,
     pub globals_buffer: wgpu::Buffer,
     pub union_buffer: wgpu::Buffer,
     pub union_bind_group: wgpu::BindGroup,
@@ -112,6 +113,7 @@ pub struct RenderState {
     pub overlay_buffer: wgpu::Buffer,
     pub overlay_bind_group: wgpu::BindGroup,
     pub ops_buffer: wgpu::Buffer,
+    pub groups_buffer: wgpu::Buffer,
     pub bg_pipeline: wgpu::RenderPipeline,
     pub solid_bg_pipeline: wgpu::RenderPipeline,
     pub debug_bg_pipeline: wgpu::RenderPipeline,
@@ -325,6 +327,16 @@ impl RenderState {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -350,6 +362,13 @@ impl RenderState {
             mapped_at_creation: false,
         });
 
+        let groups_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("SDF Groups Buffer"),
+            size: (MAX_SDF_PRIMS * SDF_GROUP_SIZE) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         let mk_bgl = |label: &str, buffer: &wgpu::Buffer| {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some(label),
@@ -366,6 +385,10 @@ impl RenderState {
                     wgpu::BindGroupEntry {
                         binding: 2,
                         resource: ops_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: groups_buffer.as_entire_binding(),
                     },
                 ],
             })
@@ -449,6 +472,40 @@ impl RenderState {
             cache: None,
         });
 
+        let sdf_groups_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("SDF Groups Pipeline"),
+            layout: Some(&sdf_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &designer_shader,
+                entry_point: Some("vs_groups"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &designer_shader,
+                entry_point: Some("fs_groups"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            depth_stencil: None,
+            multiview_mask: None,
+            cache: None,
+        });
+
         let debug_bg_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Debug BG Pipeline"),
             layout: Some(&sdf_pipeline_layout),
@@ -498,6 +555,10 @@ impl RenderState {
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: ops_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: groups_buffer.as_entire_binding(),
                 },
             ],
         });
@@ -764,6 +825,7 @@ impl RenderState {
             config,
             sdf_pipeline,
             sdf_ops_pipeline,
+            sdf_groups_pipeline,
             globals_buffer,
             union_buffer,
             union_bind_group,
@@ -772,6 +834,7 @@ impl RenderState {
             overlay_buffer,
             overlay_bind_group,
             ops_buffer,
+            groups_buffer,
             bg_pipeline,
             solid_bg_pipeline,
             debug_bg_pipeline,
@@ -1254,6 +1317,7 @@ impl RenderState {
 
         write_sdf(&self.queue, &self.overlay_buffer, &to_render.sdfs);
         write_ops(&self.queue, &self.ops_buffer, &to_render.ops);
+        write_groups(&self.queue, &self.groups_buffer, &to_render.groups);
 
         let mut encoder = self.device.create_command_encoder(&Default::default());
         // ----- Background Pass -----
@@ -1317,6 +1381,36 @@ impl RenderState {
                 pass.set_pipeline(&self.sdf_ops_pipeline);
                 pass.set_bind_group(0, &self.overlay_bind_group, &[]);
                 pass.draw(0..6, 0..n_showcase as u32);
+            }
+
+            let n_groups = to_render.groups.len();
+            debug_assert!(
+                n_groups <= MAX_SDF_PRIMS,
+                "groups overflow: {} > {}",
+                n_groups,
+                MAX_SDF_PRIMS
+            );
+            let n_groups = n_groups.min(MAX_SDF_PRIMS);
+            if n_groups > 0 {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("Groups Pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                pass.set_pipeline(&self.sdf_groups_pipeline);
+                pass.set_bind_group(0, &self.overlay_bind_group, &[]);
+                pass.draw(0..6, 0..n_groups as u32);
             }
         }
 
@@ -1448,6 +1542,19 @@ fn write_ops(queue: &wgpu::Queue, buffer: &wgpu::Buffer, ops: &[Sdf2dOp]) {
     let n = ops.len().min(MAX_SDF_PRIMS);
     if n > 0 {
         queue.write_buffer(buffer, 0, bytemuck::cast_slice(&ops[..n]));
+    }
+}
+
+fn write_groups(queue: &wgpu::Queue, buffer: &wgpu::Buffer, groups: &[Sdf2dGroup]) {
+    debug_assert!(
+        groups.len() <= MAX_SDF_PRIMS,
+        "groups overflow: {} > {}",
+        groups.len(),
+        MAX_SDF_PRIMS
+    );
+    let n = groups.len().min(MAX_SDF_PRIMS);
+    if n > 0 {
+        queue.write_buffer(buffer, 0, bytemuck::cast_slice(&groups[..n]));
     }
 }
 
