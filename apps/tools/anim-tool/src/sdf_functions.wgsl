@@ -120,6 +120,40 @@ fn eval_shape(local: vec2<f32>, prim: SdfPrim) -> f32 {
     return d_local;
 }
 
+// ----- Operations -----
+
+fn op_elongate(p: vec2<f32>, h: vec2<f32>) -> vec2<f32> {
+    return p - clamp(p, -h, h);
+}
+
+fn op_onion(d: f32, thickness: f32) -> f32 {
+    return abs(d) - thickness;
+}
+
+fn op_round(d: f32, radius: f32) -> f32 {
+    return d - radius;
+}
+
+// ----- CSG -----
+
+fn op_union(a: f32, b: f32) -> f32 {
+    return min(a, b);
+}
+
+fn op_subtraction(a: f32, b: f32) -> f32 {
+    return max(a, -b);
+}
+
+fn op_smooth_union(a: f32, b: f32, k: f32) -> f32 {
+    let h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+    return mix(b, a, h) - k * h * (1.0 - h);
+}
+
+fn op_smooth_subtraction(a: f32, b: f32, k: f32) -> f32 {
+    let h = clamp(0.5 - 0.5 * (b + a) / k, 0.0, 1.0);
+    return mix(a, -b, h) + k * h * (1.0 - h);
+}
+
 // ----- Evaluation -----
 
 fn eval_sdf(p: vec2<f32>, prim: SdfPrim) -> f32 {
@@ -131,12 +165,12 @@ fn eval_sdf(p: vec2<f32>, prim: SdfPrim) -> f32 {
 fn eval_sdf_ops(p: vec2<f32>, prim: SdfPrim, op: SdfOp) -> f32 {
     let mi = inverse_mat(prim);
     let local = mi * (p - prim.a);
-    let q = local - clamp(local, -op.elongate, op.elongate);
+    let q = op_elongate(local, op.elongate);
     var d = eval_shape(q, prim);
     if (op.onion > 0.0) {
-        d = abs(d) - op.onion;
+        d = op_onion(d, op.onion);
     }
-    d = d - op.round;
+    d = op_round(d, op.round);
     return d * inv_scale(mi);
 }
 

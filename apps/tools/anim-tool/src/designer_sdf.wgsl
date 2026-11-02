@@ -68,20 +68,6 @@ struct SdfData {
     prims: array<SdfPrim>,
 }
 
-// elongation
-
-// rounding
-
-// onion
-
-// union
-
-// subtraction
-
-// smooth union
-
-// smooth subtraction
-
 fn grid_line(world: vec2<f32>, cell: f32, thickness: f32) -> f32 {
     let g = world / cell;
     let d = abs(fract(g - 0.5) - 0.5);
