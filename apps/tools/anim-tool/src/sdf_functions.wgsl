@@ -1,3 +1,11 @@
+struct SdfData {
+    count: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+    prims: array<SdfPrim>,
+}
+
 struct Aabb {
     min: vec2<f32>,
     max: vec2<f32>,
@@ -12,7 +20,7 @@ struct SdfPrim {
     aux_2: u32,
     kind: u32,
     color: u32,
-    _pad: u32,
+    stroke_color: u32,
     m_inv: vec4<f32>,
 }
 
@@ -58,6 +66,24 @@ fn dot2(v: vec2<f32>) -> f32 {
 
 fn sdf_color(prim: SdfPrim) -> vec4<f32> {
     return unpack4x8unorm(prim.color);
+}
+
+fn sdf_stroke_color(prim: SdfPrim) -> vec4<f32> {
+    return unpack4x8unorm(prim.stroke_color);
+}
+
+fn shade_sdf(d: f32, color: vec4<f32>, stroke_color: vec3<f32>) -> vec4<f32> {
+    let aa = max(fwidth(d), 1e-5);
+    let stroke_w = aa * 3.5;
+    let saa = smoothstep(-aa, aa, d);
+    let fill = 1. - saa;
+    let stroke = saa * (1. - smoothstep(stroke_w - aa, stroke_w + aa, d));
+    let alpha = fill + stroke;
+    if alpha <= 0. {
+        discard;
+    }
+    let col = mix(color.rgb, stroke_color, stroke / max(alpha, 1e-5));
+    return vec4<f32>(col, color.a * alpha);
 }
 
 // GLSL style mod (always non-negative for a positive modulus).
@@ -399,33 +425,6 @@ fn eval_aabb_ops(prim: SdfPrim, op: SdfOp, pad: f32, view_size: f32) -> Aabb {
     out.min -= grow_world;
     out.max += grow_world;
     return out;
-}
-
-fn group_aabb(group: SdfGroup, pad: f32, view_size: f32) -> Aabb {
-    let first = group.start;
-    var bounds = eval_aabb_ops(sdf.prims[first], ops[first], pad, view_size);
-    for (var j = 1u; j < group.len; j++) {
-        let i = group.start + j;
-        let b = eval_aabb_ops(sdf.prims[i], ops[i], pad, view_size);
-        bounds.min = min(bounds.min, b.min);
-        bounds.max = max(bounds.max, b.max);
-    }
-    return bounds;
-}
-
-fn shade_sdf(d: f32, color: vec4<f32>) -> vec4<f32> {
-    let aa = max(fwidth(d), 1e-5);
-    let stroke_w = aa * 3.5;
-    let saa = smoothstep(-aa, aa, d);
-    let fill = 1. - saa;
-    let stroke = saa * (1. - smoothstep(stroke_w - aa, stroke_w + aa, d));
-    let alpha = fill + stroke;
-    if alpha <= 0. {
-        discard;
-    }
-    let stroke_color = vec3<f32>(0.16, 0.4, 0.24);
-    let col = mix(color.rgb, stroke_color, stroke / max(alpha, 1e-5));
-    return vec4<f32>(col, color.a * alpha);
 }
 
 // ----- SDF Functions -----

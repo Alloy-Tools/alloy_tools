@@ -6,7 +6,7 @@ use al_math::{
     matrix::Mat2,
     sdf::{Sdf2dGroup, Sdf2dOp, Sdf2dPrim, SDF_GROUP_SIZE, SDF_OP_SIZE, SDF_PRIM_SIZE},
     transform::Transform2d,
-    vec::{Vec2, Vec4},
+    vec::{Vec2, Vec3, Vec4},
 };
 use al_skeleton::skeleton::ColliderRef;
 use wgpu::{Surface, SurfaceConfiguration};
@@ -983,15 +983,17 @@ impl RenderState {
         if d.show_extras {
             for (i, extra) in d.skeleton.extras().iter().enumerate() {
                 let shape = extra.shape();
-                let color = if d.extra_active.get(i).copied().unwrap_or(false) {
-                    Vec4::new(0.3, 0.95, 0.3, 1.)
+                let (color, stroke_color) = if d.extra_active.get(i).copied().unwrap_or(false) {
+                    let col = Vec3::new(0.3, 0.95, 0.3);
+                    (col.extend(1.), (col * 0.4).extend(1.))
                 } else {
-                    Vec4::new(0.3, 0.55, 0.3, 0.35)
+                    let col = Vec3::new(0.3, 0.55, 0.3);
+                    (col.extend(0.35), (col * 0.4).extend(0.35))
                 };
                 overlay_prims.push(if let Some(idx) = extra.parent() {
-                    shape.to_prim(world[idx], color)
+                    shape.to_prim(world[idx], color, stroke_color)
                 } else {
-                    shape.to_prim(Transform2d::IDENTITY, color)
+                    shape.to_prim(Transform2d::IDENTITY, color, stroke_color)
                 });
             }
         }
@@ -1014,6 +1016,11 @@ impl RenderState {
                 } else {
                     Vec4::new(1., 1., 1., 0.85)
                 },
+                if selected {
+                    Vec4::new(0.4, 0.3, 0.06, 1.)
+                } else {
+                    Vec4::new(0.4, 0.4, 0.4, 0.85)
+                },
             ));
         }
 
@@ -1023,6 +1030,7 @@ impl RenderState {
             0.006,
             Mat2::IDENTITY.to_cols_array(),
             Vec4::new(0.4, 1., 0.6, 1.),
+            Vec4::new(0.16, 0.4, 0.24, 1.),
         ));
 
         let mut encoder = self.device.create_command_encoder(&Default::default());
@@ -1491,22 +1499,57 @@ impl RenderState {
     }
 }
 
-fn strip_editor_header(source: &str) -> &str {
-    const MARKER: &str = "// ----- Header End -----";
-    match source.find(MARKER) {
-        Some(pos) => {
-            let rest = &source[pos + MARKER.len()..];
-            rest.strip_prefix("\r\n")
-                .or_else(|| rest.strip_prefix('\n'))
-                .unwrap_or(rest)
+fn strip_editor_meta(source: &str) -> String {
+    const START_MARKER: &str = "// ----- Meta Start -----";
+    const END_MARKER: &str = "// ----- Meta End -----";
+
+    // Find the start of the editor meta block.
+    let start_pos = match source.find(START_MARKER) {
+        Some(pos) => pos,
+        None => {
+            // No Start marker: fall back to stripping everything above Meta End.
+            match source.find(END_MARKER) {
+                Some(pos) => {
+                    let rest = &source[pos + END_MARKER.len()..];
+                    return rest
+                        .strip_prefix("\r\n")
+                        .or_else(|| rest.strip_prefix('\n'))
+                        .unwrap_or(rest)
+                        .to_string();
+                }
+                None => return source.to_string(),
+            }
         }
-        None => source,
+    };
+
+    // Find the end of the editor meta block.
+    let end_search = &source[start_pos..];
+    let end_pos = match end_search.find(END_MARKER) {
+        Some(pos) => start_pos + pos + END_MARKER.len(),
+        None => source.len(),
+    };
+
+    // Keep everything before Meta Start, skip to after Meta End.
+    let before = &source[..start_pos];
+    let after = &source[end_pos..];
+    let after = after
+        .strip_prefix("\r\n")
+        .or_else(|| after.strip_prefix('\n'))
+        .unwrap_or(after);
+
+    // Join before and after with a newline between them.
+    if before.is_empty() {
+        after.to_string()
+    } else if after.is_empty() {
+        before.to_string()
+    } else {
+        format!("{before}\n{after}")
     }
 }
 
-fn designer_sdf_source() -> String {
+pub fn designer_sdf_source() -> String {
     let functions = include_str!("sdf_functions.wgsl");
-    let body = strip_editor_header(include_str!("designer_sdf.wgsl"));
+    let body = strip_editor_meta(include_str!("designer_sdf.wgsl"));
     format!("{functions}\n{body}")
 }
 
@@ -1586,6 +1629,7 @@ fn push_body_prims(
                     .unwrap_or(Mat2::IDENTITY)
                     .to_cols_array(),
                 Vec4::new(col.x, col.y, col.z, col.w * alpha_mul),
+                Vec4::new(col.x * 0.4, col.y * 0.4, col.z * 0.4, col.w * alpha_mul),
             ),
         ));
     }
@@ -1609,6 +1653,7 @@ fn push_body_prims(
                 length,
                 world_radius, //bone.radius(),
                 m_inv,
+                Vec4::new(col.x, col.y, col.z, col.w * alpha_mul),
                 Vec4::new(col.x, col.y, col.z, col.w * alpha_mul),
             ),
         ));

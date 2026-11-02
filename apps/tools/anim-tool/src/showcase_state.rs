@@ -64,6 +64,35 @@ impl OpMode {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum AnimMode {
+    #[default]
+    None,
+    Rotation,
+    Position,
+    Scale,
+}
+
+impl AnimMode {
+    fn next(self) -> Self {
+        match self {
+            Self::None => Self::Rotation,
+            Self::Rotation => Self::Position,
+            Self::Position => Self::Scale,
+            Self::Scale => Self::None,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Rotation => "rotation",
+            Self::Position => "position",
+            Self::Scale => "scale",
+        }
+    }
+}
+
 pub struct ShowcaseState {
     timeline: Timeline,
     camera_state: CameraState,
@@ -78,12 +107,13 @@ pub struct ShowcaseState {
     op_elongate_y_delta: f32,
     scale: Vec2,
     rotation: f32,
+    anim_mode: AnimMode,
 }
 
 impl ShowcaseState {
     pub fn new() -> Self {
         Self {
-            timeline: Timeline::new(0.),
+            timeline: Timeline::new(4.),
             camera_state: CameraState::new([800., 600.], Camera::new([0., 0.], 1.4)),
             keys: InputState::default(),
             following: 0,
@@ -96,12 +126,13 @@ impl ShowcaseState {
             op_elongate_y_delta: 0.,
             scale: Vec2::ONE,
             rotation: 0.,
+            anim_mode: AnimMode::default(),
         }
     }
 
     pub fn hud_string(&self) -> String {
         format!(
-            "{} {:.3}/{:.3} loop {} | bg {} | op {} on {:.2} ro {:.2} el x {:.2} y {:.2}",
+            "{} {:.3}/{:.3} loop {} | bg {} | op {} on {:.2} ro {:.2} el x {:.2} y {:.2} | anim {}",
             if self.timeline.playing() {
                 "▶"
             } else {
@@ -116,6 +147,7 @@ impl ShowcaseState {
             self.op_round_delta,
             self.op_elongate_x_delta,
             self.op_elongate_y_delta,
+            self.anim_mode.label(),
         )
     }
 
@@ -270,6 +302,7 @@ impl ShowcaseState {
                             KeyCode::KeyF => self.following = !self.following,
 
                             KeyCode::KeyB => self.bg_mode = self.bg_mode.next(),
+                            KeyCode::KeyY => self.anim_mode = self.anim_mode.next(),
 
                             KeyCode::KeyO => self.op_mode = OpMode::Onion,
                             KeyCode::KeyR => self.op_mode = OpMode::Round,
@@ -338,7 +371,8 @@ impl ShowcaseState {
             .try_inverse()
             .unwrap_or(Mat2::IDENTITY)
             .to_cols_array();
-        let color = [0.9, 0.9, 0.9, 1.];
+        let color = [1., 1., 1., 1.];
+        let stroke_color = [0.4, 0.4, 0.4, 1.];
         let mut sdfs = Vec::new();
 
         if self.curr_set == SHOWCASE_SET_NORMAL {
@@ -348,6 +382,7 @@ impl ShowcaseState {
                 radius,
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::capsule(
@@ -356,6 +391,7 @@ impl ShowcaseState {
                 radius,
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::rect(
@@ -363,6 +399,7 @@ impl ShowcaseState {
                 radius,
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::ellipse(
@@ -370,6 +407,7 @@ impl ShowcaseState {
                 [0.5, 0.3],
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::uneven_capsule(
@@ -379,6 +417,7 @@ impl ShowcaseState {
                 0.1,
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::rounded_rect(
@@ -387,6 +426,7 @@ impl ShowcaseState {
                 [0.18, 0.06, 0.12, 0.24].into(),
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::chamfer_rect(
@@ -395,6 +435,7 @@ impl ShowcaseState {
                 [0.1, 0.16, 0.2, 0.08].into(),
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::rhombus(
@@ -402,6 +443,7 @@ impl ShowcaseState {
                 [0.5, 0.3],
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::trapezoid(
@@ -411,6 +453,7 @@ impl ShowcaseState {
                 0.4,
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::parallelogram(
@@ -420,6 +463,7 @@ impl ShowcaseState {
                 0.22,
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::triangle(
@@ -429,6 +473,7 @@ impl ShowcaseState {
                 [0.0, 0.45],
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::equ_triangle(
@@ -436,6 +481,7 @@ impl ShowcaseState {
                 0.5,
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::iso_triangle(
@@ -444,6 +490,7 @@ impl ShowcaseState {
                 0.42,
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::pentagon(
@@ -451,6 +498,7 @@ impl ShowcaseState {
                 0.48,
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::hexagon(
@@ -458,6 +506,7 @@ impl ShowcaseState {
                 0.48,
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::octogon(
@@ -465,6 +514,7 @@ impl ShowcaseState {
                 0.48,
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::pentagram(
@@ -472,6 +522,7 @@ impl ShowcaseState {
                 0.45,
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::hexagram(
@@ -479,6 +530,7 @@ impl ShowcaseState {
                 0.4,
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::star(
@@ -488,6 +540,7 @@ impl ShowcaseState {
                 4,
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::pie(
@@ -496,6 +549,7 @@ impl ShowcaseState {
                 0.5,
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::cut_disk(
@@ -504,6 +558,7 @@ impl ShowcaseState {
                 0.18,
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::arc(
@@ -513,6 +568,7 @@ impl ShowcaseState {
                 0.08,
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::ring(
@@ -522,6 +578,7 @@ impl ShowcaseState {
                 0.12,
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::horseshoe(
@@ -531,6 +588,7 @@ impl ShowcaseState {
                 [0.12, 0.08],
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::vesica(
@@ -539,6 +597,7 @@ impl ShowcaseState {
                 0.4,
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::moon(
@@ -548,6 +607,7 @@ impl ShowcaseState {
                 0.38,
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::egg(
@@ -558,12 +618,14 @@ impl ShowcaseState {
                 0.8,
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::heart(
                 showcase_pos(SHOWCASE_SET_NORMAL, pos),
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::rounded_x(
@@ -572,6 +634,7 @@ impl ShowcaseState {
                 0.08,
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::cross(
@@ -580,6 +643,7 @@ impl ShowcaseState {
                 0.08,
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::circle_cross(
@@ -587,6 +651,7 @@ impl ShowcaseState {
                 0.5,
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::blobby_cross(
@@ -594,6 +659,7 @@ impl ShowcaseState {
                 0.4,
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::quadratic_bezier(
@@ -603,12 +669,14 @@ impl ShowcaseState {
                 [0.45, -0.3],
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::quadratic_circle(
                 showcase_pos(SHOWCASE_SET_NORMAL, pos),
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::tunnel(
@@ -616,6 +684,7 @@ impl ShowcaseState {
                 [0.4, 0.3],
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::stairs(
@@ -624,6 +693,7 @@ impl ShowcaseState {
                 3.0,
                 m_inv,
                 color,
+                stroke_color,
             ));
         } else if self.curr_set == SHOWCASE_SET_INFINITE {
             let mut pos = 0;
@@ -632,6 +702,7 @@ impl ShowcaseState {
                 1.5,
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::parabola_segment(
@@ -640,6 +711,7 @@ impl ShowcaseState {
                 0.4,
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::hyperbola(
@@ -648,6 +720,7 @@ impl ShowcaseState {
                 0.5,
                 m_inv,
                 color,
+                stroke_color,
             ));
             pos += 1;
             sdfs.push(Sdf2dPrim::circle_wave(
@@ -656,21 +729,36 @@ impl ShowcaseState {
                 0.35,
                 m_inv,
                 color,
+                stroke_color,
             ));
         } else if self.curr_set == SHOWCASE_SET_GROUPS {
+            let t = self.timeline.time();
+            // Animation factor oscillates 0..1 over 1 second.
+            let cycle = (t / 4. * 2.0 * std::f32::consts::PI).sin() * 0.5 + 0.5;
+            // Compute animation transform matrix for the second shape of each group.
+            let anim_tf = match self.anim_mode {
+                AnimMode::Rotation => Mat2::from_angle(cycle * 2.0 * std::f32::consts::PI),
+                AnimMode::Position => Mat2::from_scale(Vec2::new(1.0 + cycle * 0.5, 1.0)),
+                AnimMode::Scale => Mat2::from_scale(Vec2::from(1.0 + cycle)),
+                AnimMode::None => Mat2::IDENTITY,
+            };
+            let anim_m_inv = anim_tf.try_inverse().unwrap_or(Mat2::IDENTITY);
+
             // Group 0: Circle & capsule
             sdfs.push(Sdf2dPrim::circle(
                 Vec2::new(-1.75, 1.),
                 0.5,
                 m_inv,
                 color,
+                stroke_color,
             ));
             sdfs.push(Sdf2dPrim::capsule(
                 Vec2::new(-1.5, 1.),
                 0.8,
                 0.25,
-                m_inv,
+                anim_m_inv.to_cols_array(),
                 color,
+                stroke_color,
             ));
 
             // Group 1: Rect & circle
@@ -679,12 +767,14 @@ impl ShowcaseState {
                 [0.45, 0.45],
                 m_inv,
                 color,
+                stroke_color,
             ));
             sdfs.push(Sdf2dPrim::circle(
                 Vec2::new(1.5, 1.),
                 0.35,
-                m_inv,
+                anim_m_inv.to_cols_array(),
                 color,
+                stroke_color,
             ));
 
             // Group 2: rect & rect
@@ -693,12 +783,14 @@ impl ShowcaseState {
                 [0.25, 0.5],
                 m_inv,
                 color,
+                stroke_color,
             ));
             sdfs.push(Sdf2dPrim::rect(
                 Vec2::new(-1.25, -1.),
                 [0.5, 0.25],
-                m_inv,
+                anim_m_inv.to_cols_array(),
                 color,
+                stroke_color,
             ));
 
             // Group 3: Star & circle
@@ -709,12 +801,14 @@ impl ShowcaseState {
                 5,
                 m_inv,
                 color,
+                stroke_color,
             ));
             sdfs.push(Sdf2dPrim::circle(
                 Vec2::new(1.75, -1.),
                 0.35,
-                m_inv,
+                anim_m_inv.to_cols_array(),
                 color,
+                stroke_color,
             ));
         }
 
@@ -725,7 +819,13 @@ impl ShowcaseState {
         );
 
         // Cursor
-        sdfs.push(Sdf2dPrim::circle(c_world, 0.006, m_inv, [0.4, 1., 0.6, 1.]));
+        sdfs.push(Sdf2dPrim::circle(
+            c_world,
+            0.006,
+            m_inv,
+            [0.4, 1., 0.6, 1.],
+            [0.4, 1., 0.6, 1.],
+        ));
 
         let mut ops: Vec<Sdf2dOp> = Vec::with_capacity(sdfs.len());
 

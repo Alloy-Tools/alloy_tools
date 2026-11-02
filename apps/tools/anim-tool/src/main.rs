@@ -1,6 +1,6 @@
 mod app;
 mod camera;
-mod render;
+pub mod render;
 mod designer_state;
 mod showcase_state;
 mod common_state;

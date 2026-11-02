@@ -1,3 +1,12 @@
+// ----- Meta Start -----
+struct SdfData {
+    count: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+    prims: array<SdfPrim>,
+}
+
 struct Aabb {
     min: vec2<f32>,
     max: vec2<f32>,
@@ -12,7 +21,7 @@ struct SdfPrim {
     aux_2: u32,
     kind: u32,
     color: u32,
-    _pad: u32,
+    stroke_color: u32,
     m_inv: vec4<f32>,
 }
 
@@ -39,6 +48,14 @@ fn sdf_color(_prim: SdfPrim) -> vec4<f32> {
     return vec4<f32>(0.);
 }
 
+fn sdf_stroke_color(_prim: SdfPrim) -> vec4<f32> {
+    return vec4<f32>(0.);
+}
+
+fn shade_sdf(d: f32, color: vec4<f32>, stroke_color: vec3<f32>) -> vec4<f32> {
+    return vec4<f32>(1.);
+}
+
 fn eval_shape(_local: vec2<f32>, _prim: SdfPrim) -> f32 {
     return 0.;
 }
@@ -61,15 +78,6 @@ fn eval_aabb_ops(_prim: SdfPrim, _op: SdfOp, _pad: f32, _view_size: f32) -> Aabb
     return out;
 }
 
-fn group_aabb(group: SdfGroup, pad: f32, view_size: f32) -> Aabb {
-    var out: Aabb;
-    return out;
-}
-
-fn shade_sdf(d: f32, color: vec4<f32>) -> vec4<f32> {
-    return vec4<f32>(0.);
-}
-
 fn op_union(_a: f32, _b: f32) -> f32 {
     return 0.;
 }
@@ -85,22 +93,14 @@ fn op_smooth_union(_a: f32, _b: f32, _k: f32) -> f32 {
 fn op_smooth_subtraction(_a: f32, _b: f32, _k: f32) -> f32 {
     return 0.;
 }
+// ----- Meta End -----
 
-// ----- Header End -----
 struct Globals {
     resolution: vec2<f32>,
     camera_pos: vec2<f32>,
     cursor_world: vec2<f32>,
     view_size: f32,
     aux: f32,
-}
-
-struct SdfData {
-    count: u32,
-    _pad0: u32,
-    _pad1: u32,
-    _pad2: u32,
-    prims: array<SdfPrim>,
 }
 
 fn grid_line(world: vec2<f32>, cell: f32, thickness: f32) -> f32 {
@@ -180,24 +180,86 @@ fn fs_bg_solid() -> @location(0) vec4<f32> {
 
 @fragment
 fn fs_debug_bg(in: BgVsOut) -> @location(0) vec4<f32> {
-    if sdf.count == 0 {
+    if sdf.count == 0 && arrayLength(&groups) == 0 {
         return vec4<f32>(0.05, 0.05, 0.08, 1.);
     }
 
     var d = 1e10;
     var prim_col = vec3<f32>(1.);
     var inner = false;
+
+    // Evaluate individual (non-grouped) prims - skip any prim that belongs to a group.
     for(var i = 0u; i < sdf.count; i++) {
         let prim = sdf.prims[i];
         let op = ops[i];
-        let dist = eval_sdf_ops(in.world, prim, op);
+
+        // Check if this prim belongs to any group.
+        var is_grouped = false;
+        for(var g = 0u; g < arrayLength(&groups); g++) {
+            let grp = groups[g];
+            if (i >= grp.start && i < grp.start + grp.len) {
+                is_grouped = true;
+                break;
+            }
+        }
+        if is_grouped {
+            continue;
+        }
+
+        let dist = eval_sdf(in.world, prim);
         if dist < d {
             prim_col = sdf_color(prim).rgb * 0.4;
             d = dist;
-            let local = inverse_mat(prim) * (in.world - prim.a);
-            let q = local - clamp(local, -op.elongate, op.elongate);
-            let base = eval_shape(q, prim);
-            inner = op.onion > 0.0 && base < 0.0 && dist > 0.0;
+        }
+    }
+
+    // Evaluate groups applying CSG operations.
+    for(var g = 0u; g < arrayLength(&groups); g++) {
+        let group = groups[g];
+        var group_d = 1e10;
+        var group_col = vec3<f32>(1.);
+        var group_inner = false;
+        for(var j = 0u; j < group.len; j++) {
+            let i = group.start + j;
+            let prim = sdf.prims[i];
+            let op = ops[i];
+            let dist = eval_sdf_ops(in.world, prim, op);
+
+            if j == 0u {
+                group_d = dist;
+                group_col = sdf_color(prim).rgb * 0.4;
+                let local = inverse_mat(prim) * (in.world - prim.a);
+                let q = local - clamp(local, -op.elongate, op.elongate);
+                let base = eval_shape(q, prim);
+                group_inner = op.onion > 0.0 && base < 0.0 && dist > 0.0;
+            } else {
+                switch op.boolean {
+                    case 1u {
+                        group_d = op_subtraction(group_d, dist);
+                    }
+                    case 2u {
+                        if dist < group_d {
+                            group_col = sdf_color(prim).rgb * 0.4;
+                        }
+                        group_d = op_smooth_union(group_d, dist, op.smoothing);
+                    }
+                    case 3u {
+                        group_d = op_smooth_subtraction(group_d, dist, op.smoothing);
+                    }
+                    default {
+                        if dist < group_d {
+                            group_col = sdf_color(prim).rgb * 0.4;
+                        }
+                        group_d = op_union(group_d, dist);
+                    }
+                }
+            }
+        }
+
+        if group_d < d {
+            d = group_d;
+            prim_col = group_col;
+            inner = group_inner;
         }
     }
 
@@ -273,6 +335,18 @@ fn vs_main_ops(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32)
     return out;
 }
 
+fn group_aabb(group: SdfGroup, pad: f32, view_size: f32) -> Aabb {
+    let first = group.start;
+    var bounds = eval_aabb_ops(sdf.prims[first], ops[first], pad, view_size);
+    for (var j = 1u; j < group.len; j++) {
+        let i = group.start + j;
+        let b = eval_aabb_ops(sdf.prims[i], ops[i], pad, view_size);
+        bounds.min = min(bounds.min, b.min);
+        bounds.max = max(bounds.max, b.max);
+    }
+    return bounds;
+}
+
 @vertex
 fn vs_groups(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> GroupVsOut {
     let group = groups[ii];
@@ -314,7 +388,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     if alpha <= 0. {
         discard;
     }
-    let stroke_color = vec3<f32>(0.16, 0.4, 0.24);
+    let stroke_color = sdf_stroke_color(prim).rgb;
     let color = sdf_color(prim);
     let col = mix(color.rgb, stroke_color, stroke / max(alpha, 1e-5));
 
@@ -350,7 +424,7 @@ fn fs_main_ops(in: VsOut) -> @location(0) vec4<f32> {
     if alpha <= 0. {
         discard;
     }
-    let stroke_color = vec3<f32>(0.16, 0.4, 0.24);
+    let stroke_color = sdf_stroke_color(prim).rgb;
     let color = sdf_color(prim);
     let col = mix(color.rgb, stroke_color, stroke / max(alpha, 1e-5));
 
@@ -363,6 +437,7 @@ fn fs_groups(in: GroupVsOut) -> @location(0) vec4<f32> {
 
     var d = 1e10;
     var color = vec4<f32>(1.0);
+    var stroke_color = vec3<f32>(0.16, 0.4, 0.24);
     for (var j = 0u; j < group.len; j++) {
         let i = group.start + j;
         let prim = sdf.prims[i];
@@ -372,6 +447,7 @@ fn fs_groups(in: GroupVsOut) -> @location(0) vec4<f32> {
         if j == 0u {
             d = dist;
             color = sdf_color(prim);
+            stroke_color = sdf_stroke_color(prim).rgb;
         } else {
             switch op.boolean {
                 case 1u {
@@ -380,6 +456,7 @@ fn fs_groups(in: GroupVsOut) -> @location(0) vec4<f32> {
                 case 2u {
                     if dist < d {
                         color = sdf_color(prim);
+                        stroke_color = sdf_stroke_color(prim).rgb;
                     }
                     d = op_smooth_union(d, dist, op.smoothing);
                 }
@@ -389,6 +466,7 @@ fn fs_groups(in: GroupVsOut) -> @location(0) vec4<f32> {
                 default {
                     if dist < d {
                         color = sdf_color(prim);
+                        stroke_color = sdf_stroke_color(prim).rgb;
                     }
                     d = op_union(d, dist);
                 }
@@ -396,7 +474,7 @@ fn fs_groups(in: GroupVsOut) -> @location(0) vec4<f32> {
         }
     }
 
-    return shade_sdf(d, color);
+    return shade_sdf(d, color, stroke_color);
 }
 
 // ----------------------------------------

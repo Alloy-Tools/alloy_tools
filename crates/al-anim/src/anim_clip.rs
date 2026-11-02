@@ -256,7 +256,11 @@ impl AnimationClip2d {
             let col = vfx.color();
             out.push(
                 vfx.shape()
-                    .to_prim(trans, Vec4::new(col.x, col.y, col.z, col.w * alpha)),
+                    .to_prim(
+                        trans,
+                        Vec4::new(col.x, col.y, col.z, col.w * alpha),
+                        Vec4::new(col.x * 0.4, col.y * 0.4, col.z * 0.4, col.w * alpha),
+                    ),
             );
         }
 

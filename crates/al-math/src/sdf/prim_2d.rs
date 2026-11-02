@@ -13,16 +13,16 @@ pub const SDF_PRIM_SIZE: usize = std::mem::size_of::<Sdf2dPrim>();
 #[cfg_attr(feature = "gpu", derive(bytemuck::Pod, bytemuck::Zeroable,))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Sdf2dPrim {
-    a: Vec2,         // 8:  0 -7
-    b: Vec2,         // 8:  8 -15
-    c: Vec2,         // 8:  16-23
-    radius: f32,     // 4:  24-27
-    aux: f32,        // 4:  28-31
-    aux_2: u32,      // 4:  32-35
-    kind: u32,       // 4:  36-39
-    color: u32,      // 4:  40-43 (RGBA8)
-    _pad: u32,       // 4:  44-47
-    m_inv: [f32; 4], // 16: 48-63
+    a: Vec2,           // 8:  0 -7
+    b: Vec2,           // 8:  8 -15
+    c: Vec2,           // 8:  16-23
+    radius: f32,       // 4:  24-27
+    aux: f32,          // 4:  28-31
+    aux_2: u32,        // 4:  32-35
+    kind: u32,         // 4:  36-39
+    color: u32,        // 4:  40-43 (RGBA8 fill)
+    stroke_color: u32, // 4: 44-47 (RGBA8 stroke)
+    m_inv: [f32; 4],   // 16: 48-63
 }
 
 #[inline]
@@ -83,9 +83,11 @@ impl Sdf2dPrim {
         aux_2: u32,
         kind: u32,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
-        let color = color.into();
+        let fill_color = fill_color.into();
+        let stroke_color = stroke_color.into();
         Self {
             a: a.into(),
             b: b.into(),
@@ -94,8 +96,8 @@ impl Sdf2dPrim {
             aux,
             aux_2,
             kind,
-            color: pack_color(color),
-            _pad: 0,
+            color: pack_color(fill_color),
+            stroke_color: pack_color(stroke_color),
             m_inv,
         }
     }
@@ -104,7 +106,8 @@ impl Sdf2dPrim {
         center: impl Into<Vec2>,
         radius: f32,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             center,
@@ -115,7 +118,8 @@ impl Sdf2dPrim {
             0,
             Self::CIRCLE,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
@@ -124,7 +128,8 @@ impl Sdf2dPrim {
         length: f32,
         radius: f32,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             origin,
@@ -135,7 +140,8 @@ impl Sdf2dPrim {
             0,
             Self::CAPSULE,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
@@ -143,7 +149,8 @@ impl Sdf2dPrim {
         center: impl Into<Vec2>,
         half_size: impl Into<Vec2>,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             center,
@@ -154,7 +161,8 @@ impl Sdf2dPrim {
             0,
             Self::RECT,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
@@ -163,7 +171,8 @@ impl Sdf2dPrim {
         center: impl Into<Vec2>,
         ab: impl Into<Vec2>,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             center,
@@ -174,7 +183,8 @@ impl Sdf2dPrim {
             0,
             Self::ELLIPSE,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
@@ -186,7 +196,8 @@ impl Sdf2dPrim {
         origin_radius: f32,
         tip_radius: f32,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             center,
@@ -197,7 +208,8 @@ impl Sdf2dPrim {
             0,
             Self::UNEVEN_CAPSULE,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
@@ -208,7 +220,8 @@ impl Sdf2dPrim {
         half_size: impl Into<Vec2>,
         corner_radii: Vec4,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             center,
@@ -219,7 +232,8 @@ impl Sdf2dPrim {
             0,
             Self::ROUNDED_RECT,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
@@ -229,7 +243,8 @@ impl Sdf2dPrim {
         half_size: impl Into<Vec2>,
         chamfers: Vec4,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             center,
@@ -240,7 +255,8 @@ impl Sdf2dPrim {
             0,
             Self::CHAMFER_RECT,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
@@ -249,7 +265,8 @@ impl Sdf2dPrim {
         center: impl Into<Vec2>,
         half_size: impl Into<Vec2>,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             center,
@@ -260,7 +277,8 @@ impl Sdf2dPrim {
             0,
             Self::RHOMBUS,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
@@ -270,7 +288,8 @@ impl Sdf2dPrim {
         top_radius: f32,
         half_height: f32,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             center,
@@ -281,7 +300,8 @@ impl Sdf2dPrim {
             0,
             Self::TRAPEZOID,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
@@ -291,7 +311,8 @@ impl Sdf2dPrim {
         height: f32,
         skew: f32,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             center,
@@ -302,7 +323,8 @@ impl Sdf2dPrim {
             0,
             Self::PARALLELOGRAM,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
@@ -312,17 +334,30 @@ impl Sdf2dPrim {
         p1: impl Into<Vec2>,
         p2: impl Into<Vec2>,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         let p2 = p2.into();
-        Self::new(center, p0, p1, p2.x, p2.y, 0, Self::TRIANGLE, m_inv, color)
+        Self::new(
+            center,
+            p0,
+            p1,
+            p2.x,
+            p2.y,
+            0,
+            Self::TRIANGLE,
+            m_inv,
+            fill_color,
+            stroke_color,
+        )
     }
 
     pub fn equ_triangle(
         center: impl Into<Vec2>,
         radius: f32,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             center,
@@ -333,7 +368,8 @@ impl Sdf2dPrim {
             0,
             Self::EQU_TRIANGLE,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
@@ -344,7 +380,8 @@ impl Sdf2dPrim {
         height: f32,
         half_base: f32,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             center,
@@ -355,7 +392,8 @@ impl Sdf2dPrim {
             0,
             Self::ISO_TRIANGLE,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
@@ -364,7 +402,8 @@ impl Sdf2dPrim {
         radius: f32,
         kind: u32,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             center,
@@ -375,7 +414,8 @@ impl Sdf2dPrim {
             0,
             kind,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
@@ -383,45 +423,85 @@ impl Sdf2dPrim {
         center: impl Into<Vec2>,
         radius: f32,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
-        Self::regular_polygon(center, radius, Self::PENTAGON, m_inv, color)
+        Self::regular_polygon(
+            center,
+            radius,
+            Self::PENTAGON,
+            m_inv,
+            fill_color,
+            stroke_color,
+        )
     }
 
     pub fn hexagon(
         center: impl Into<Vec2>,
         radius: f32,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
-        Self::regular_polygon(center, radius, Self::HEXAGON, m_inv, color)
+        Self::regular_polygon(
+            center,
+            radius,
+            Self::HEXAGON,
+            m_inv,
+            fill_color,
+            stroke_color,
+        )
     }
 
     pub fn octogon(
         center: impl Into<Vec2>,
         radius: f32,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
-        Self::regular_polygon(center, radius, Self::OCTOGON, m_inv, color)
+        Self::regular_polygon(
+            center,
+            radius,
+            Self::OCTOGON,
+            m_inv,
+            fill_color,
+            stroke_color,
+        )
     }
 
     pub fn pentagram(
         center: impl Into<Vec2>,
         radius: f32,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
-        Self::regular_polygon(center, radius, Self::PENTAGRAM, m_inv, color)
+        Self::regular_polygon(
+            center,
+            radius,
+            Self::PENTAGRAM,
+            m_inv,
+            fill_color,
+            stroke_color,
+        )
     }
 
     pub fn hexagram(
         center: impl Into<Vec2>,
         radius: f32,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
-        Self::regular_polygon(center, radius, Self::HEXAGRAM, m_inv, color)
+        Self::regular_polygon(
+            center,
+            radius,
+            Self::HEXAGRAM,
+            m_inv,
+            fill_color,
+            stroke_color,
+        )
     }
 
     /// `inner_radius_factor` is Inigo's `m` and must be in `(0, point_count]`;
@@ -432,7 +512,8 @@ impl Sdf2dPrim {
         inner_radius_factor: f32,
         point_count: u32,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             center,
@@ -443,7 +524,8 @@ impl Sdf2dPrim {
             point_count,
             Self::STAR,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
@@ -453,7 +535,8 @@ impl Sdf2dPrim {
         open_angle: impl Into<Vec2>,
         radius: f32,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             center,
@@ -464,7 +547,8 @@ impl Sdf2dPrim {
             0,
             Self::PIE,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
@@ -473,7 +557,8 @@ impl Sdf2dPrim {
         radius: f32,
         cut_height: f32,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             center,
@@ -484,7 +569,8 @@ impl Sdf2dPrim {
             0,
             Self::CUT_DISK,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
@@ -495,7 +581,8 @@ impl Sdf2dPrim {
         radius: f32,
         thickness: f32,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             center,
@@ -506,7 +593,8 @@ impl Sdf2dPrim {
             0,
             Self::ARC,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
@@ -516,7 +604,8 @@ impl Sdf2dPrim {
         radius: f32,
         thickness: f32,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             center,
@@ -527,7 +616,8 @@ impl Sdf2dPrim {
             0,
             Self::RING,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
@@ -539,7 +629,8 @@ impl Sdf2dPrim {
         radius: f32,
         thickness: impl Into<Vec2>,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             center,
@@ -550,7 +641,8 @@ impl Sdf2dPrim {
             0,
             Self::HORSESHOE,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
@@ -559,7 +651,8 @@ impl Sdf2dPrim {
         width: f32,
         height: f32,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             center,
@@ -570,7 +663,8 @@ impl Sdf2dPrim {
             0,
             Self::VESICA,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
@@ -580,7 +674,8 @@ impl Sdf2dPrim {
         outer_radius: f32,
         inner_radius: f32,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             center,
@@ -591,7 +686,8 @@ impl Sdf2dPrim {
             0,
             Self::MOON,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
@@ -604,7 +700,8 @@ impl Sdf2dPrim {
         bottom_radius: f32,
         bulge: f32,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             center,
@@ -615,11 +712,17 @@ impl Sdf2dPrim {
             0,
             Self::EGG,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
-    pub fn heart(center: impl Into<Vec2>, m_inv: [f32; 4], color: impl Into<Vec4>) -> Self {
+    pub fn heart(
+        center: impl Into<Vec2>,
+        m_inv: [f32; 4],
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
+    ) -> Self {
         Self::new(
             center,
             Vec2::ZERO,
@@ -629,7 +732,8 @@ impl Sdf2dPrim {
             0,
             Self::HEART,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
@@ -638,7 +742,8 @@ impl Sdf2dPrim {
         thickness: f32,
         corner_radius: f32,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             center,
@@ -649,7 +754,8 @@ impl Sdf2dPrim {
             0,
             Self::ROUNDED_X,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
@@ -658,7 +764,8 @@ impl Sdf2dPrim {
         arm_half_extent: impl Into<Vec2>,
         corner_radius: f32,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             center,
@@ -669,7 +776,8 @@ impl Sdf2dPrim {
             0,
             Self::CROSS,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
@@ -677,7 +785,8 @@ impl Sdf2dPrim {
         center: impl Into<Vec2>,
         arm_extent: f32,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             center,
@@ -688,7 +797,8 @@ impl Sdf2dPrim {
             0,
             Self::CIRCLE_CROSS,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
@@ -696,7 +806,8 @@ impl Sdf2dPrim {
         center: impl Into<Vec2>,
         half_extent: f32,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             center,
@@ -707,7 +818,8 @@ impl Sdf2dPrim {
             0,
             Self::BLOBBY_CROSS,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
@@ -715,7 +827,8 @@ impl Sdf2dPrim {
         center: impl Into<Vec2>,
         curvature: f32,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             center,
@@ -726,7 +839,8 @@ impl Sdf2dPrim {
             0,
             Self::PARABOLA,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
@@ -735,7 +849,8 @@ impl Sdf2dPrim {
         half_width: f32,
         height: f32,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             center,
@@ -746,7 +861,8 @@ impl Sdf2dPrim {
             0,
             Self::PARABOLA_SEGMENT,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
@@ -755,7 +871,8 @@ impl Sdf2dPrim {
         curvature: f32,
         half_length: f32,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             center,
@@ -766,7 +883,8 @@ impl Sdf2dPrim {
             0,
             Self::HYPERBOLA,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
@@ -776,7 +894,8 @@ impl Sdf2dPrim {
         point_b: impl Into<Vec2>,
         point_c: impl Into<Vec2>,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         let point_c = point_c.into();
         Self::new(
@@ -788,14 +907,16 @@ impl Sdf2dPrim {
             0,
             Self::QUADRATIC_BEZIER,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
     pub fn quadratic_circle(
         center: impl Into<Vec2>,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             center,
@@ -806,7 +927,8 @@ impl Sdf2dPrim {
             0,
             Self::QUADRATIC_CIRCLE,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
@@ -814,7 +936,8 @@ impl Sdf2dPrim {
         center: impl Into<Vec2>,
         half_extents: impl Into<Vec2>,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             center,
@@ -825,7 +948,8 @@ impl Sdf2dPrim {
             0,
             Self::TUNNEL,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
@@ -834,7 +958,8 @@ impl Sdf2dPrim {
         step_size: impl Into<Vec2>,
         count: f32,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             center,
@@ -845,7 +970,8 @@ impl Sdf2dPrim {
             0,
             Self::STAIRS,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 
@@ -854,7 +980,8 @@ impl Sdf2dPrim {
         wave_angle: f32,
         radius: f32,
         m_inv: [f32; 4],
-        color: impl Into<Vec4>,
+        fill_color: impl Into<Vec4>,
+        stroke_color: impl Into<Vec4>,
     ) -> Self {
         Self::new(
             center,
@@ -865,7 +992,8 @@ impl Sdf2dPrim {
             0,
             Self::CIRCLE_WAVE,
             m_inv,
-            color,
+            fill_color,
+            stroke_color,
         )
     }
 }

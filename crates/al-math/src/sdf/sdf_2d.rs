@@ -113,7 +113,7 @@ impl Sdf2dOp {
         self.smooth = smooth;
         self
     }
-    
+
     pub fn set_boolean(&mut self, boolean: Sdf2dBoolean) {
         let (kind, smooth) = match boolean {
             Sdf2dBoolean::Union => (0, 0.),
@@ -133,7 +133,7 @@ impl Sdf2dOp {
         self.smooth = smooth;
         self
     }
-    
+
     pub fn set_smooth(&mut self, smooth: f32) {
         self.smooth = smooth
     }
@@ -263,7 +263,7 @@ impl Sdf2d {
         d / inv_det_sqrt
     }
 
-    pub fn to_prim(self, world: Transform2d, color: Vec4) -> Sdf2dPrim {
+    pub fn to_prim(self, world: Transform2d, fill_color: Vec4, stroke_color: Vec4) -> Sdf2dPrim {
         let composed = world.compose(&self.transform);
         let m_inv = composed
             .linear
@@ -272,50 +272,106 @@ impl Sdf2d {
             .to_cols_array();
         let center = composed.translation;
         match self.shape {
-            Sdf2dKind::Circle { radius } => Sdf2dPrim::circle(center, radius, m_inv, color),
-            Sdf2dKind::Ellipse { ab } => Sdf2dPrim::ellipse(center, ab, m_inv, color),
+            Sdf2dKind::Circle { radius } => {
+                Sdf2dPrim::circle(center, radius, m_inv, fill_color, stroke_color)
+            }
+            Sdf2dKind::Ellipse { ab } => {
+                Sdf2dPrim::ellipse(center, ab, m_inv, fill_color, stroke_color)
+            }
             Sdf2dKind::Capsule { length, radius } => {
-                Sdf2dPrim::capsule(center, length, radius, m_inv, color)
+                Sdf2dPrim::capsule(center, length, radius, m_inv, fill_color, stroke_color)
             }
             Sdf2dKind::UnevenCapsule {
                 length,
                 origin_radius,
                 tip_radius,
-            } => Sdf2dPrim::uneven_capsule(center, length, origin_radius, tip_radius, m_inv, color),
-            Sdf2dKind::Rect { half_size } => Sdf2dPrim::rect(center, half_size, m_inv, color),
+            } => Sdf2dPrim::uneven_capsule(
+                center,
+                length,
+                origin_radius,
+                tip_radius,
+                m_inv,
+                fill_color,
+                stroke_color,
+            ),
+            Sdf2dKind::Rect { half_size } => {
+                Sdf2dPrim::rect(center, half_size, m_inv, fill_color, stroke_color)
+            }
             Sdf2dKind::RoundedRect {
                 half_size,
                 corner_radii,
-            } => Sdf2dPrim::rounded_rect(center, half_size, corner_radii, m_inv, color),
+            } => Sdf2dPrim::rounded_rect(
+                center,
+                half_size,
+                corner_radii,
+                m_inv,
+                fill_color,
+                stroke_color,
+            ),
             Sdf2dKind::ChamferRect {
                 half_size,
                 chamfers,
-            } => Sdf2dPrim::chamfer_rect(center, half_size, chamfers, m_inv, color),
-            Sdf2dKind::Rhombus { half_size } => Sdf2dPrim::rhombus(center, half_size, m_inv, color),
+            } => Sdf2dPrim::chamfer_rect(
+                center,
+                half_size,
+                chamfers,
+                m_inv,
+                fill_color,
+                stroke_color,
+            ),
+            Sdf2dKind::Rhombus { half_size } => {
+                Sdf2dPrim::rhombus(center, half_size, m_inv, fill_color, stroke_color)
+            }
             Sdf2dKind::Trapezoid {
                 bottom_radius,
                 top_radius,
                 half_height,
-            } => Sdf2dPrim::trapezoid(center, bottom_radius, top_radius, half_height, m_inv, color),
+            } => Sdf2dPrim::trapezoid(
+                center,
+                bottom_radius,
+                top_radius,
+                half_height,
+                m_inv,
+                fill_color,
+                stroke_color,
+            ),
             Sdf2dKind::Parallelogram {
                 width,
                 height,
                 skew,
-            } => Sdf2dPrim::parallelogram(center, width, height, skew, m_inv, color),
+            } => Sdf2dPrim::parallelogram(
+                center,
+                width,
+                height,
+                skew,
+                m_inv,
+                fill_color,
+                stroke_color,
+            ),
             Sdf2dKind::Triangle { p0, p1, p2 } => {
-                Sdf2dPrim::triangle(center, p0, p1, p2, m_inv, color)
+                Sdf2dPrim::triangle(center, p0, p1, p2, m_inv, fill_color, stroke_color)
             }
             Sdf2dKind::EquTriangle { radius } => {
-                Sdf2dPrim::equ_triangle(center, radius, m_inv, color)
+                Sdf2dPrim::equ_triangle(center, radius, m_inv, fill_color, stroke_color)
             }
             Sdf2dKind::IsoTriangle { height, half_base } => {
-                Sdf2dPrim::iso_triangle(center, height, half_base, m_inv, color)
+                Sdf2dPrim::iso_triangle(center, height, half_base, m_inv, fill_color, stroke_color)
             }
-            Sdf2dKind::Pentagon { radius } => Sdf2dPrim::pentagon(center, radius, m_inv, color),
-            Sdf2dKind::Hexagon { radius } => Sdf2dPrim::hexagon(center, radius, m_inv, color),
-            Sdf2dKind::Octogon { radius } => Sdf2dPrim::octogon(center, radius, m_inv, color),
-            Sdf2dKind::Pentagram { radius } => Sdf2dPrim::pentagram(center, radius, m_inv, color),
-            Sdf2dKind::Hexagram { radius } => Sdf2dPrim::hexagram(center, radius, m_inv, color),
+            Sdf2dKind::Pentagon { radius } => {
+                Sdf2dPrim::pentagon(center, radius, m_inv, fill_color, stroke_color)
+            }
+            Sdf2dKind::Hexagon { radius } => {
+                Sdf2dPrim::hexagon(center, radius, m_inv, fill_color, stroke_color)
+            }
+            Sdf2dKind::Octogon { radius } => {
+                Sdf2dPrim::octogon(center, radius, m_inv, fill_color, stroke_color)
+            }
+            Sdf2dKind::Pentagram { radius } => {
+                Sdf2dPrim::pentagram(center, radius, m_inv, fill_color, stroke_color)
+            }
+            Sdf2dKind::Hexagram { radius } => {
+                Sdf2dPrim::hexagram(center, radius, m_inv, fill_color, stroke_color)
+            }
             Sdf2dKind::Star {
                 outer_radius,
                 inner_radius_factor,
@@ -326,31 +382,32 @@ impl Sdf2d {
                 inner_radius_factor,
                 point_count,
                 m_inv,
-                color,
+                fill_color,
+                stroke_color,
             ),
             Sdf2dKind::Pie { open_angle, radius } => {
-                Sdf2dPrim::pie(center, open_angle, radius, m_inv, color)
+                Sdf2dPrim::pie(center, open_angle, radius, m_inv, fill_color, stroke_color)
             }
             Sdf2dKind::CutDisk { radius, cut_height } => {
-                Sdf2dPrim::cut_disk(center, radius, cut_height, m_inv, color)
+                Sdf2dPrim::cut_disk(center, radius, cut_height, m_inv, fill_color, stroke_color)
             }
             Sdf2dKind::Arc {
                 open_angle,
                 radius,
                 thickness,
-            } => Sdf2dPrim::arc(center, open_angle, radius, thickness, m_inv, color),
+            } => Sdf2dPrim::arc(center, open_angle, radius, thickness, m_inv, fill_color, stroke_color),
             Sdf2dKind::Ring {
                 normal,
                 radius,
                 thickness,
-            } => Sdf2dPrim::ring(center, normal, radius, thickness, m_inv, color),
+            } => Sdf2dPrim::ring(center, normal, radius, thickness, m_inv, fill_color, stroke_color),
             Sdf2dKind::Horseshoe {
                 open_angle,
                 radius,
                 thickness,
-            } => Sdf2dPrim::horseshoe(center, open_angle, radius, thickness, m_inv, color),
+            } => Sdf2dPrim::horseshoe(center, open_angle, radius, thickness, m_inv, fill_color, stroke_color),
             Sdf2dKind::Vesica { width, height } => {
-                Sdf2dPrim::vesica(center, width, height, m_inv, color)
+                Sdf2dPrim::vesica(center, width, height, m_inv, fill_color, stroke_color)
             }
             Sdf2dKind::Moon {
                 center_distance,
@@ -362,7 +419,8 @@ impl Sdf2d {
                 outer_radius,
                 inner_radius,
                 m_inv,
-                color,
+                fill_color,
+                fill_color,
             ),
             Sdf2dKind::Egg {
                 half_height,
@@ -376,47 +434,48 @@ impl Sdf2d {
                 bottom_radius,
                 bulge,
                 m_inv,
-                color,
+                fill_color,
+                fill_color,
             ),
-            Sdf2dKind::Heart => Sdf2dPrim::heart(center, m_inv, color),
+            Sdf2dKind::Heart => Sdf2dPrim::heart(center, m_inv, fill_color, stroke_color),
             Sdf2dKind::RoundedX {
                 thickness,
                 corner_radius,
-            } => Sdf2dPrim::rounded_x(center, thickness, corner_radius, m_inv, color),
+            } => Sdf2dPrim::rounded_x(center, thickness, corner_radius, m_inv, fill_color, stroke_color),
             Sdf2dKind::Cross {
                 arm_half_extent,
                 corner_radius,
-            } => Sdf2dPrim::cross(center, arm_half_extent, corner_radius, m_inv, color),
+            } => Sdf2dPrim::cross(center, arm_half_extent, corner_radius, m_inv, fill_color, stroke_color),
             Sdf2dKind::CircleCross { arm_extent } => {
-                Sdf2dPrim::circle_cross(center, arm_extent, m_inv, color)
+                Sdf2dPrim::circle_cross(center, arm_extent, m_inv, fill_color, stroke_color)
             }
             Sdf2dKind::BlobbyCross { half_extent } => {
-                Sdf2dPrim::blobby_cross(center, half_extent, m_inv, color)
+                Sdf2dPrim::blobby_cross(center, half_extent, m_inv, fill_color, stroke_color)
             }
             Sdf2dKind::Parabola { curvature } => {
-                Sdf2dPrim::parabola(center, curvature, m_inv, color)
+                Sdf2dPrim::parabola(center, curvature, m_inv, fill_color, stroke_color)
             }
             Sdf2dKind::ParabolaSegment { half_width, height } => {
-                Sdf2dPrim::parabola_segment(center, half_width, height, m_inv, color)
+                Sdf2dPrim::parabola_segment(center, half_width, height, m_inv, fill_color, stroke_color)
             }
             Sdf2dKind::Hyperbola {
                 curvature,
                 half_length,
-            } => Sdf2dPrim::hyperbola(center, curvature, half_length, m_inv, color),
+            } => Sdf2dPrim::hyperbola(center, curvature, half_length, m_inv, fill_color, stroke_color),
             Sdf2dKind::QuadraticBezier {
                 point_a,
                 point_b,
                 point_c,
-            } => Sdf2dPrim::quadratic_bezier(center, point_a, point_b, point_c, m_inv, color),
-            Sdf2dKind::QuadraticCircle => Sdf2dPrim::quadratic_circle(center, m_inv, color),
+            } => Sdf2dPrim::quadratic_bezier(center, point_a, point_b, point_c, m_inv, fill_color, stroke_color),
+            Sdf2dKind::QuadraticCircle => Sdf2dPrim::quadratic_circle(center, m_inv, fill_color, stroke_color),
             Sdf2dKind::Tunnel { half_extents } => {
-                Sdf2dPrim::tunnel(center, half_extents, m_inv, color)
+                Sdf2dPrim::tunnel(center, half_extents, m_inv, fill_color, stroke_color)
             }
             Sdf2dKind::Stairs { step_size, count } => {
-                Sdf2dPrim::stairs(center, step_size, count, m_inv, color)
+                Sdf2dPrim::stairs(center, step_size, count, m_inv, fill_color, stroke_color)
             }
             Sdf2dKind::CircleWave { wave_angle, radius } => {
-                Sdf2dPrim::circle_wave(center, wave_angle, radius, m_inv, color)
+                Sdf2dPrim::circle_wave(center, wave_angle, radius, m_inv, fill_color, stroke_color)
             }
         }
     }
