@@ -49,6 +49,96 @@ pub struct Sdf2dOp {
 
 pub const SDF_OP_SIZE: usize = std::mem::size_of::<Sdf2dOp>();
 
+impl Sdf2dOp {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn round(&self) -> f32 {
+        self.round
+    }
+
+    pub fn with_round(mut self, round: f32) -> Self {
+        self.round = round;
+        self
+    }
+
+    pub fn set_round(&mut self, round: f32) {
+        self.round = round
+    }
+
+    pub fn onion(&self) -> f32 {
+        self.onion
+    }
+
+    pub fn with_onion(mut self, onion: f32) -> Self {
+        self.onion = onion;
+        self
+    }
+
+    pub fn set_onion(&mut self, onion: f32) {
+        self.onion = onion
+    }
+
+    pub fn elongate(&self) -> Vec2 {
+        self.elongate
+    }
+
+    pub fn with_elongate(mut self, elongate: Vec2) -> Self {
+        self.elongate = elongate;
+        self
+    }
+
+    pub fn set_elongate(&mut self, elongate: Vec2) {
+        self.elongate = elongate
+    }
+
+    pub fn boolean(&self) -> Sdf2dBoolean {
+        match self.boolean {
+            1 => Sdf2dBoolean::Subtraction,
+            2 => Sdf2dBoolean::SmoothUnion(self.smooth),
+            3 => Sdf2dBoolean::SmoothSubtraction(self.smooth),
+            _ => Sdf2dBoolean::Union,
+        }
+    }
+
+    pub fn with_boolean(mut self, boolean: Sdf2dBoolean) -> Self {
+        let (kind, smooth) = match boolean {
+            Sdf2dBoolean::Union => (0, 0.),
+            Sdf2dBoolean::Subtraction => (1, 0.),
+            Sdf2dBoolean::SmoothUnion(k) => (2, k),
+            Sdf2dBoolean::SmoothSubtraction(k) => (3, k),
+        };
+        self.boolean = kind;
+        self.smooth = smooth;
+        self
+    }
+    
+    pub fn set_boolean(&mut self, boolean: Sdf2dBoolean) {
+        let (kind, smooth) = match boolean {
+            Sdf2dBoolean::Union => (0, 0.),
+            Sdf2dBoolean::Subtraction => (1, 0.),
+            Sdf2dBoolean::SmoothUnion(k) => (2, k),
+            Sdf2dBoolean::SmoothSubtraction(k) => (3, k),
+        };
+        self.boolean = kind;
+        self.smooth = smooth;
+    }
+
+    pub fn smooth(&self) -> f32 {
+        self.smooth
+    }
+
+    pub fn with_smooth(mut self, smooth: f32) -> Self {
+        self.smooth = smooth;
+        self
+    }
+    
+    pub fn set_smooth(&mut self, smooth: f32) {
+        self.smooth = smooth
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 #[cfg_attr(feature = "gpu", derive(bytemuck::Pod, bytemuck::Zeroable))]
@@ -75,64 +165,6 @@ impl Sdf2dGroup {
 
     pub fn is_empty(&self) -> bool {
         self.len == 0
-    }
-}
-
-impl Sdf2dOp {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn round(&self) -> f32 {
-        self.round
-    }
-
-    pub fn with_round(&mut self, round: f32) {
-        self.round = round
-    }
-
-    pub fn onion(&self) -> f32 {
-        self.onion
-    }
-
-    pub fn with_onion(&mut self, onion: f32) {
-        self.onion = onion
-    }
-
-    pub fn elongate(&self) -> Vec2 {
-        self.elongate
-    }
-
-    pub fn with_elongate(&mut self, elongate: Vec2) {
-        self.elongate = elongate
-    }
-
-    pub fn boolean(&self) -> Sdf2dBoolean {
-        match self.boolean {
-            1 => Sdf2dBoolean::Subtraction,
-            2 => Sdf2dBoolean::SmoothUnion(self.smooth),
-            3 => Sdf2dBoolean::SmoothSubtraction(self.smooth),
-            _ => Sdf2dBoolean::Union,
-        }
-    }
-
-    pub fn with_boolean(&mut self, boolean: Sdf2dBoolean) {
-        let (kind, smooth) = match boolean {
-            Sdf2dBoolean::Union => (0, 0.),
-            Sdf2dBoolean::Subtraction => (1, 0.),
-            Sdf2dBoolean::SmoothUnion(k) => (2, k),
-            Sdf2dBoolean::SmoothSubtraction(k) => (3, k),
-        };
-        self.boolean = kind;
-        self.smooth = smooth;
-    }
-
-    pub fn smooth(&self) -> f32 {
-        self.smooth
-    }
-
-    pub fn with_smooth(&mut self, smooth: f32) {
-        self.smooth = smooth
     }
 }
 

@@ -26,6 +26,11 @@ struct SdfOp {
     _pad1: u32,
 }
 
+struct SdfGroup {
+    start: u32,
+    len: u32,
+}
+
 fn mat2_from_inv(mi0: vec2<f32>, mi1: vec2<f32>) -> mat2x2<f32> {
     let det = mi0.x * mi1.y - mi1.x * mi0.y;
     let s = select(0., 1. / det, abs(det) > 1e-8);
@@ -394,6 +399,33 @@ fn eval_aabb_ops(prim: SdfPrim, op: SdfOp, pad: f32, view_size: f32) -> Aabb {
     out.min -= grow_world;
     out.max += grow_world;
     return out;
+}
+
+fn group_aabb(group: SdfGroup, pad: f32, view_size: f32) -> Aabb {
+    let first = group.start;
+    var bounds = eval_aabb_ops(sdf.prims[first], ops[first], pad, view_size);
+    for (var j = 1u; j < group.len; j++) {
+        let i = group.start + j;
+        let b = eval_aabb_ops(sdf.prims[i], ops[i], pad, view_size);
+        bounds.min = min(bounds.min, b.min);
+        bounds.max = max(bounds.max, b.max);
+    }
+    return bounds;
+}
+
+fn shade_sdf(d: f32, color: vec4<f32>) -> vec4<f32> {
+    let aa = max(fwidth(d), 1e-5);
+    let stroke_w = aa * 3.5;
+    let saa = smoothstep(-aa, aa, d);
+    let fill = 1. - saa;
+    let stroke = saa * (1. - smoothstep(stroke_w - aa, stroke_w + aa, d));
+    let alpha = fill + stroke;
+    if alpha <= 0. {
+        discard;
+    }
+    let stroke_color = vec3<f32>(0.16, 0.4, 0.24);
+    let col = mix(color.rgb, stroke_color, stroke / max(alpha, 1e-5));
+    return vec4<f32>(col, color.a * alpha);
 }
 
 // ----- SDF Functions -----

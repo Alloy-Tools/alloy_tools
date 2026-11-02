@@ -26,24 +26,29 @@ struct SdfOp {
     _pad1: u32,
 }
 
+struct SdfGroup {
+    start: u32,
+    len: u32,
+}
+
 fn inverse_mat(_prim: SdfPrim) -> mat2x2<f32> {
-    return mat2x2<f32>(vec2<f32>(1.0, 0.0), vec2<f32>(0.0, 1.0));
+    return mat2x2<f32>(vec2<f32>(1., 0.), vec2<f32>(0., 1.));
 }
 
 fn sdf_color(_prim: SdfPrim) -> vec4<f32> {
-    return vec4<f32>(0.0);
+    return vec4<f32>(0.);
 }
 
 fn eval_shape(_local: vec2<f32>, _prim: SdfPrim) -> f32 {
-    return 0.0;
+    return 0.;
 }
 
 fn eval_sdf(_p: vec2<f32>, _prim: SdfPrim) -> f32 {
-    return 0.0;
+    return 0.;
 }
 
 fn eval_sdf_ops(_p: vec2<f32>, _prim: SdfPrim, _op: SdfOp) -> f32 {
-    return 0.0;
+    return 0.;
 }
 
 fn eval_aabb(_prim: SdfPrim, _pad: f32, _view_size: f32) -> Aabb {
@@ -56,21 +61,31 @@ fn eval_aabb_ops(_prim: SdfPrim, _op: SdfOp, _pad: f32, _view_size: f32) -> Aabb
     return out;
 }
 
+fn group_aabb(group: SdfGroup, pad: f32, view_size: f32) -> Aabb {
+    var out: Aabb;
+    return out;
+}
+
+fn shade_sdf(d: f32, color: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(0.);
+}
+
 fn op_union(_a: f32, _b: f32) -> f32 {
-    return 0.0;
+    return 0.;
 }
 
 fn op_subtraction(_a: f32, _b: f32) -> f32 {
-    return 0.0;
+    return 0.;
 }
 
 fn op_smooth_union(_a: f32, _b: f32, _k: f32) -> f32 {
-    return 0.0;
+    return 0.;
 }
 
 fn op_smooth_subtraction(_a: f32, _b: f32, _k: f32) -> f32 {
-    return 0.0;
+    return 0.;
 }
+
 // ----- Header End -----
 struct Globals {
     resolution: vec2<f32>,
@@ -86,11 +101,6 @@ struct SdfData {
     _pad1: u32,
     _pad2: u32,
     prims: array<SdfPrim>,
-}
-
-struct SdfGroup {
-    start: u32,
-    len: u32,
 }
 
 fn grid_line(world: vec2<f32>, cell: f32, thickness: f32) -> f32 {
@@ -263,18 +273,6 @@ fn vs_main_ops(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32)
     return out;
 }
 
-fn group_aabb(group: SdfGroup, pad: f32, view_size: f32) -> Aabb {
-    let first = group.start;
-    var bounds = eval_aabb_ops(sdf.prims[first], ops[first], pad, view_size);
-    for (var j = 1u; j < group.len; j++) {
-        let i = group.start + j;
-        let b = eval_aabb_ops(sdf.prims[i], ops[i], pad, view_size);
-        bounds.min = min(bounds.min, b.min);
-        bounds.max = max(bounds.max, b.max);
-    }
-    return bounds;
-}
-
 @vertex
 fn vs_groups(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> GroupVsOut {
     let group = groups[ii];
@@ -327,6 +325,20 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 fn fs_main_ops(in: VsOut) -> @location(0) vec4<f32> {
     let prim = sdf.prims[in.prim_idx];
     let op = ops[in.prim_idx];
+    
+    // Skip prims that are part of a group - the groups pipeline handles them.
+    var is_grouped = false;
+    for (var g = 0u; g < arrayLength(&groups); g++) {
+        let grp = groups[g];
+        if (in.prim_idx >= grp.start && in.prim_idx < grp.start + grp.len) {
+            is_grouped = true;
+            break;
+        }
+    }
+    if (is_grouped) {
+        discard;
+    }
+
     let d = eval_sdf_ops(in.world, prim, op);
 
     let aa = max(fwidth(d), 1e-5);
@@ -342,21 +354,6 @@ fn fs_main_ops(in: VsOut) -> @location(0) vec4<f32> {
     let color = sdf_color(prim);
     let col = mix(color.rgb, stroke_color, stroke / max(alpha, 1e-5));
 
-    return vec4<f32>(col, color.a * alpha);
-}
-
-fn shade_sdf(d: f32, color: vec4<f32>) -> vec4<f32> {
-    let aa = max(fwidth(d), 1e-5);
-    let stroke_w = aa * 3.5;
-    let saa = smoothstep(-aa, aa, d);
-    let fill = 1. - saa;
-    let stroke = saa * (1. - smoothstep(stroke_w - aa, stroke_w + aa, d));
-    let alpha = fill + stroke;
-    if alpha <= 0. {
-        discard;
-    }
-    let stroke_color = vec3<f32>(0.16, 0.4, 0.24);
-    let col = mix(color.rgb, stroke_color, stroke / max(alpha, 1e-5));
     return vec4<f32>(col, color.a * alpha);
 }
 

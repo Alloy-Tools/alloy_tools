@@ -5,16 +5,17 @@ use crate::{
 };
 use al_math::{
     matrix::Mat2,
-    sdf::{Sdf2dOp, Sdf2dPrim},
+    sdf::{Sdf2dBoolean, Sdf2dGroup, Sdf2dOp, Sdf2dPrim},
     vec::Vec2,
 };
 
-pub const SHOWCASE_SET_COUNT: usize = 2;
+pub const SHOWCASE_SET_COUNT: usize = 3;
 pub const SHOWCASE_SET_NORMAL: usize = 0;
 pub const SHOWCASE_SET_INFINITE: usize = 1;
+pub const SHOWCASE_SET_GROUPS: usize = 2;
 
-pub const SHOWCASE_SDF_COUNTS: [usize; SHOWCASE_SET_COUNT] = [36, 4];
-pub const SHOWCASE_SDF_COLUMNS: [usize; SHOWCASE_SET_COUNT] = [7, 4];
+pub const SHOWCASE_SDF_COUNTS: [usize; SHOWCASE_SET_COUNT] = [36, 4, 8];
+pub const SHOWCASE_SDF_COLUMNS: [usize; SHOWCASE_SET_COUNT] = [7, 4, 4];
 pub const SHOWCASE_SPACING: Vec2 = Vec2 { x: 2., y: 2. };
 
 const OP_STEP: f32 = 0.02;
@@ -656,6 +657,65 @@ impl ShowcaseState {
                 m_inv,
                 color,
             ));
+        } else if self.curr_set == SHOWCASE_SET_GROUPS {
+            // Group 0: Circle & capsule
+            sdfs.push(Sdf2dPrim::circle(
+                Vec2::new(-1.75, 1.),
+                0.5,
+                m_inv,
+                color,
+            ));
+            sdfs.push(Sdf2dPrim::capsule(
+                Vec2::new(-1.5, 1.),
+                0.8,
+                0.25,
+                m_inv,
+                color,
+            ));
+
+            // Group 1: Rect & circle
+            sdfs.push(Sdf2dPrim::rect(
+                Vec2::new(1.5, 1.),
+                [0.45, 0.45],
+                m_inv,
+                color,
+            ));
+            sdfs.push(Sdf2dPrim::circle(
+                Vec2::new(1.5, 1.),
+                0.35,
+                m_inv,
+                color,
+            ));
+
+            // Group 2: rect & rect
+            sdfs.push(Sdf2dPrim::rect(
+                Vec2::new(-1.75, -1.),
+                [0.25, 0.5],
+                m_inv,
+                color,
+            ));
+            sdfs.push(Sdf2dPrim::rect(
+                Vec2::new(-1.25, -1.),
+                [0.5, 0.25],
+                m_inv,
+                color,
+            ));
+
+            // Group 3: Star & circle
+            sdfs.push(Sdf2dPrim::star(
+                Vec2::new(1.25, -1.),
+                0.45,
+                2.5,
+                5,
+                m_inv,
+                color,
+            ));
+            sdfs.push(Sdf2dPrim::circle(
+                Vec2::new(1.75, -1.),
+                0.35,
+                m_inv,
+                color,
+            ));
         }
 
         debug_assert_eq!(
@@ -667,18 +727,53 @@ impl ShowcaseState {
         // Cursor
         sdfs.push(Sdf2dPrim::circle(c_world, 0.006, m_inv, [0.4, 1., 0.6, 1.]));
 
-        let mut ops = vec![Sdf2dOp::default(); sdfs.len()];
+        let mut ops: Vec<Sdf2dOp> = Vec::with_capacity(sdfs.len());
 
-        // Ctrl+Up/Down nudges the selected field on every shape (the cursor
-        // keeps identity ops).
+        if self.curr_set == SHOWCASE_SET_GROUPS {
+            // circle
+            ops.push(Sdf2dOp::default());
+            // capsule
+            ops.push(Sdf2dOp::default());
+
+            // rect
+            ops.push(Sdf2dOp::default());
+            // circle
+            ops.push(Sdf2dOp::default().with_boolean(Sdf2dBoolean::Subtraction));
+
+            // rect
+            ops.push(Sdf2dOp::default());
+            // rect
+            ops.push(Sdf2dOp::default().with_boolean(Sdf2dBoolean::SmoothUnion(0.1)));
+
+            // star
+            ops.push(Sdf2dOp::default());
+            // circle
+            ops.push(Sdf2dOp::default().with_boolean(Sdf2dBoolean::SmoothSubtraction(0.2)));
+        } else {
+            ops = vec![Sdf2dOp::default(); sdfs.len()];
+        }
+
+        // Ctrl+Up/Down nudges the selected field on every shape
         let shape_count = ops.len().saturating_sub(1);
         for op in &mut ops[..shape_count] {
-            op.with_onion((op.onion() + self.op_onion_delta).max(0.0));
-            op.with_round(op.round() + self.op_round_delta);
+            op.set_onion((op.onion() + self.op_onion_delta).max(0.0));
+            op.set_round(op.round() + self.op_round_delta);
             let elongate =
                 op.elongate() + Vec2::new(self.op_elongate_x_delta, self.op_elongate_y_delta);
-            op.with_elongate(Vec2::new(elongate.x.max(0.0), elongate.y.max(0.0)));
+            op.set_elongate(Vec2::new(elongate.x.max(0.0), elongate.y.max(0.0)));
         }
+
+        // Build groups for the groups set.
+        let groups = if self.curr_set == SHOWCASE_SET_GROUPS {
+            vec![
+                Sdf2dGroup::new(0, 2), // circle + capsule union
+                Sdf2dGroup::new(2, 2), // rect - circle subtraction
+                Sdf2dGroup::new(4, 2), // circle + circle smooth union
+                Sdf2dGroup::new(6, 2), // star - circle smooth subtraction
+            ]
+        } else {
+            Vec::new()
+        };
 
         let mut globals = Globals::new(resolution, cam.pos, c_world, cam.view_size);
         globals.aux = match self.bg_mode {
@@ -686,7 +781,7 @@ impl ShowcaseState {
             BackgroundMode::Solid => 1.,
             BackgroundMode::Bands => 20.,
         };
-        RenderData::new(globals, sdfs, ops, vec![], self.hud_string())
+        RenderData::new(globals, sdfs, ops, groups, self.hud_string())
     }
 }
 
