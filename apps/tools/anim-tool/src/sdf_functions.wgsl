@@ -55,6 +55,14 @@ fn inverse_mat(prim: SdfPrim) -> mat2x2<f32> {
 }
 
 fn inv_scale(mi: mat2x2<f32>) -> f32 {
+    // Uniform scale: 1 / sqrt(|det|).
+    //
+    // Use this when CPU and GPU must agree (marching/collision).
+    // It is a conservative lower bound, safe for raymarching.
+    //
+    // For visual-only distortion, you can skip this — the inverse-matrix
+    // transform (local = inverse_mat * (p - prim.a)) already applies
+    // per-axis non-uniform scaling in local space.
     let abs_det_inv = abs(mi[0].x * mi[1].y - mi[1].x * mi[0].y);
     return select(1., 1. / sqrt(abs_det_inv), abs_det_inv > 1e-8);
 }

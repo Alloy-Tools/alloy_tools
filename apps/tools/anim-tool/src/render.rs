@@ -1,6 +1,7 @@
 use crate::{
     app::FIXED_FPS,
     common_state::{Globals, RenderData, SDF_HEADER_SIZE},
+    text_layout::{glyphs_to_quads, layout_text, LayoutOptions},
 };
 use al_math::{
     matrix::Mat2,
@@ -9,11 +10,99 @@ use al_math::{
     vec::{Vec2, Vec3, Vec4},
 };
 use al_skeleton::skeleton::ColliderRef;
-use wgpu::{Surface, SurfaceConfiguration};
+use wgpu::{
+    util::{DeviceExt, TextureDataOrder},
+    Surface, SurfaceConfiguration,
+};
 
 pub const MAX_SDF_PRIMS: usize = 1024;
+pub const MSDF_RECT_DEFAULT: MsdfRect = MsdfRect {
+    left: 0.,
+    bottom: 0.,
+    right: 0.,
+    top: 0.,
+};
 
-#[allow(unused)]
+// Mirrors the TextQuad struct in sdf_text.wgsl (32-byte aligned).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct TextQuad {
+    pub min: [f32; 2],
+    pub max: [f32; 2],
+    pub uv_min: [f32; 2],
+    pub uv_max: [f32; 2],
+    pub color: [f32; 4],
+}
+
+// Mirrors the TextGlobals struct in sdf_text.wgsl.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct TextGlobals {
+    pub atlas_size: [f32; 2],
+    pub _pad: [f32; 2],
+}
+
+// MSDF Atlas data structures parsed from Asul-msdf.json.
+#[allow(dead_code)]
+#[derive(serde::Deserialize)]
+pub struct MsdfAtlasData {
+    atlas: MsdfAtlasInfo,
+    metrics: MsdfMetrics,
+    glyphs: Vec<MsdfGlyph>,
+}
+
+#[allow(dead_code)]
+#[derive(serde::Deserialize)]
+pub struct MsdfAtlasInfo {
+    r#type: String,
+    #[serde(rename = "distanceRange")]
+    distance_range: f32,
+    #[serde(rename = "distanceRangeMiddle")]
+    distance_range_middle: f32,
+    size: f32,
+    width: u32,
+    height: u32,
+    #[serde(rename = "yOrigin")]
+    y_origin: String,
+}
+
+#[allow(dead_code)]
+#[derive(serde::Deserialize)]
+pub struct MsdfMetrics {
+    #[serde(rename = "emSize")]
+    em_size: f32,
+    #[serde(rename = "lineHeight")]
+    line_height: f32,
+    ascender: f32,
+    descender: f32,
+    #[serde(rename = "underlineY")]
+    underline_y: f32,
+    #[serde(rename = "underlineThickness")]
+    underline_thickness: f32,
+}
+
+#[allow(dead_code)]
+#[derive(Default, serde::Deserialize)]
+pub struct MsdfGlyph {
+    pub unicode: u32,
+    pub advance: f32,
+    #[serde(rename = "planeBounds")]
+    #[serde(default)]
+    pub plane_bounds: MsdfRect,
+    #[serde(rename = "atlasBounds")]
+    #[serde(default)]
+    pub atlas_bounds: MsdfRect,
+}
+
+#[allow(dead_code)]
+#[derive(Default, serde::Deserialize)]
+pub struct MsdfRect {
+    pub left: f32,
+    pub bottom: f32,
+    pub right: f32,
+    pub top: f32,
+}
+
 pub struct BooleanTargets {
     pub color_view: wgpu::TextureView,
     pub union_view: wgpu::TextureView,
@@ -135,6 +224,18 @@ pub struct RenderState {
     pub atlas: glyphon::TextAtlas,
     pub text_renderer: glyphon::TextRenderer,
     pub viewport: glyphon::Viewport,
+    // MSDF Text
+    pub text_pipeline: wgpu::RenderPipeline,
+    pub text_quads_buffer: wgpu::Buffer,
+    pub text_bind_group: wgpu::BindGroup,
+    pub text_atlas_texture: wgpu::Texture,
+    pub text_atlas_view: wgpu::TextureView,
+    pub text_atlas_sampler: wgpu::Sampler,
+    pub text_atlas_width: u32,
+    pub text_atlas_height: u32,
+    pub text_atlas_data: MsdfAtlasData,
+    pub text_globals_buffer: wgpu::Buffer,
+    pub text_bind_group_layout: wgpu::BindGroupLayout,
 }
 
 impl RenderState {
@@ -195,6 +296,156 @@ impl RenderState {
         let designer_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("SDF Designer Shader"),
             source: wgpu::ShaderSource::Wgsl(designer_sdf_source().into()),
+        });
+
+        // MSDF Text Shader
+        let text_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("MSDF Text Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("sdf_text.wgsl").into()),
+        });
+
+        // MSDF Text Bind Group Layout
+        let text_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Text Bind Group Layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        // Text quads buffer (per-instance quads).
+        let text_quads_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Text Quads Buffer"),
+            size: 4096,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // Text globals buffer (atlas size uniform).
+        let text_globals_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Text Globals Buffer"),
+            size: std::mem::size_of::<TextGlobals>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // Load MSDF atlas texture and metadata from files.
+        let atlas_path = std::path::Path::new("apps/tools/anim-tool/src/Asul_msdf/Asul-msdf.png");
+        let atlas_json_path =
+            std::path::Path::new("apps/tools/anim-tool/src/Asul_msdf/Asul-msdf.json");
+        let atlas_bytes = std::fs::read(atlas_path).expect("Failed to read MSDF atlas PNG");
+        let atlas_json =
+            std::fs::read_to_string(atlas_json_path).expect("Failed to read MSDF atlas JSON");
+        let atlas_data: MsdfAtlasData =
+            serde_json::from_str(&atlas_json).expect("Failed to parse MSDF atlas JSON");
+
+        let atlas_image = image::load_from_memory(&atlas_bytes)
+            .expect("Failed to decode MSDF atlas PNG")
+            .into_rgba8();
+        let atlas_dimensions = atlas_image.dimensions();
+
+        let text_atlas_texture = device.create_texture_with_data(
+            &queue,
+            &wgpu::TextureDescriptor {
+                label: Some("MSDF Text Atlas"),
+                size: wgpu::Extent3d {
+                    width: atlas_dimensions.0,
+                    height: atlas_dimensions.1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            },
+            TextureDataOrder::default(),
+            &atlas_image,
+        );
+        let text_atlas_view = text_atlas_texture.create_view(&Default::default());
+        let text_atlas_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("MSDF Atlas Sampler"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            ..Default::default()
+        });
+        let text_atlas_width = atlas_dimensions.0;
+        let text_atlas_height = atlas_dimensions.1;
+
+        let text_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Text Pipeline Layout"),
+            bind_group_layouts: &[Some(&text_bgl)],
+            immediate_size: 0,
+        });
+
+        let text_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("MSDF Text Pipeline"),
+            layout: Some(&text_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &text_shader,
+                entry_point: Some("vs_text"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &text_shader,
+                entry_point: Some("fs_text"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            depth_stencil: None,
+            multiview_mask: None,
+            cache: None,
         });
 
         let bg_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -563,6 +814,30 @@ impl RenderState {
             ],
         });
 
+        // MSDF Text Bind Group
+        let text_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("MSDF Text Bind Group"),
+            layout: &text_bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: text_quads_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&text_atlas_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&text_atlas_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: text_globals_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
         let vfx_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("SDF Vfx Pipeline Layout"),
             bind_group_layouts: &[Some(&sdf_bgl)],
@@ -854,6 +1129,17 @@ impl RenderState {
             atlas,
             text_renderer,
             viewport,
+            text_pipeline,
+            text_quads_buffer,
+            text_bind_group,
+            text_atlas_texture,
+            text_atlas_view,
+            text_atlas_sampler,
+            text_atlas_width,
+            text_atlas_height,
+            text_atlas_data: atlas_data,
+            text_globals_buffer,
+            text_bind_group_layout: text_bgl,
         }
     }
 
@@ -1304,6 +1590,59 @@ impl RenderState {
                 .unwrap();
         }
 
+        // ----- MSDF Text Pass -----
+        {
+            // Write text quads to storage buffer for MVP demo.
+            // These quads render "Hello MSDF" as three demo glyph quads.
+
+            let quads: [TextQuad; 3] = [
+                TextQuad {
+                    min: [50., 50.].into(),
+                    max: [150., 100.].into(),
+                    uv_min: [0.0, 0.0].into(),
+                    uv_max: [0.33, 1.0].into(),
+                    color: [1., 1., 1., 1.],
+                },
+                TextQuad {
+                    min: [160., 50.].into(),
+                    max: [260., 100.].into(),
+                    uv_min: [0.33, 0.0].into(),
+                    uv_max: [0.66, 1.0].into(),
+                    color: [1., 0.5, 0.5, 1.],
+                },
+                TextQuad {
+                    min: [270., 50.].into(),
+                    max: [370., 100.].into(),
+                    uv_min: [0.66, 0.0].into(),
+                    uv_max: [1.0, 1.0].into(),
+                    color: [0.5, 1., 0.5, 1.],
+                },
+            ];
+
+            self.queue
+                .write_buffer(&self.text_quads_buffer, 0, bytemuck::cast_slice(&quads));
+
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("MSDF Text Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&self.text_pipeline);
+            pass.set_bind_group(0, &self.text_bind_group, &[]);
+            pass.draw(0..6, 0..quads.len() as u32);
+        }
+
         self.queue.submit(Some(encoder.finish()));
         self.atlas.trim();
         self.queue.present(surface_texture);
@@ -1662,4 +2001,225 @@ fn push_body_prims(
     batch.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
 
     prims.extend(batch.into_iter().map(|(_, p)| p));
+}
+
+impl RenderState {
+    pub fn render_text(&mut self, text: &str, font_size: f32, position: [f32; 2], cursor_px: [f32; 2]) {
+        let surface_texture = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(t)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
+            _ => return,
+        };
+        let view = surface_texture.texture.create_view(&Default::default());
+
+        // Set up globals for text rendering (cursor world computed here).
+        let res = [self.config.width as f32, self.config.height as f32];
+        let px_per_unit = res[1] / 2.0;
+        let cx = cursor_px[0] - 0.5 * res[0];
+        let cy = cursor_px[1] - 0.5 * res[1];
+        let cursor_world = Vec2::new(cx / px_per_unit, -cy / px_per_unit);
+
+        let globals = Globals {
+            resolution: Vec2::new(res[0], res[1]),
+            camera_pos: Vec2::ZERO,
+            cursor_world,
+            view_size: 2.0,
+            aux: 0.0,
+        };
+
+        self.queue
+            .write_buffer(&self.globals_buffer, 0, bytemuck::bytes_of(&globals));
+
+        // Write atlas size to text globals uniform.
+        let text_globals = TextGlobals {
+            atlas_size: [self.text_atlas_width as f32, self.text_atlas_height as f32],
+            _pad: [0.0, 0.0],
+        };
+        self.queue.write_buffer(
+            &self.text_globals_buffer,
+            0,
+            bytemuck::bytes_of(&text_globals),
+        );
+
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+
+        // Clear background.
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Text Background"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&self.solid_bg_pipeline);
+            pass.set_bind_group(0, &self.bg_bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+
+        // Set up globals for text rendering (cursor world computed here).
+        let res = [self.config.width as f32, self.config.height as f32];
+        let px_per_unit = res[1] / 2.0;
+        let cx = cursor_px[0] - 0.5 * res[0];
+        let cy = cursor_px[1] - 0.5 * res[1];
+        let cursor_world = Vec2::new(cx / px_per_unit, -cy / px_per_unit);
+        let cursor_radius_world = 0.008;
+
+        let globals = Globals {
+            resolution: Vec2::new(res[0], res[1]),
+            camera_pos: Vec2::ZERO,
+            cursor_world,
+            view_size: 2.0,
+            aux: 0.0,
+        };
+
+        self.queue
+            .write_buffer(&self.globals_buffer, 0, bytemuck::bytes_of(&globals));
+
+        // Write atlas size to text globals uniform.
+        let text_globals = TextGlobals {
+            atlas_size: [self.text_atlas_width as f32, self.text_atlas_height as f32],
+            _pad: [0.0, 0.0],
+        };
+        self.queue.write_buffer(
+            &self.text_globals_buffer,
+            0,
+            bytemuck::bytes_of(&text_globals),
+        );
+
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+
+        // Clear background.
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Text Background"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&self.solid_bg_pipeline);
+            pass.set_bind_group(0, &self.bg_bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+
+        // MSDF Text Pass - shape text using atlas data and render dynamic quads.
+        // Maps Unicode chars directly to glyph entries in the atlas.
+        let atlas_w = self.text_atlas_width as f32;
+        let atlas_h = self.text_atlas_height as f32;
+
+        let glyphs_slice = &self.text_atlas_data.glyphs;
+
+        // Shape text into glyphs using atlas data directly (no font file yet for rustybuzz).
+        let shaped = crate::text_layout::shape_text(glyphs_slice, text, font_size);
+
+        // Layout shaped glyphs into lines.
+        // Start at the passed position in NDC space.
+        let options = LayoutOptions::new(font_size)
+            .with_max_width(1.8) // Leave margins on left/right
+            .with_line_height(1.2);
+        let lines = layout_text(&shaped, &options, position[0], position[1]);
+
+        // Convert layout into TextQuads in NDC space.
+        // scale converts em-units to NDC units. With font_size=2.0 and advance_x~0.25,
+        // each glyph is ~0.5 em units = 0.25 NDC units wide.
+        let scale = font_size; // em->NDC scale, matches font_size
+        let quads: Vec<TextQuad> = glyphs_to_quads(
+            &lines,
+            glyphs_slice,
+            atlas_w,
+            atlas_h,
+            scale,
+            [1.0, 1.0, 1.0, 1.0],
+        );
+
+        if !quads.is_empty() {
+            self.queue
+                .write_buffer(&self.text_quads_buffer, 0, bytemuck::cast_slice(&quads));
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("MSDF Text Pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                pass.set_pipeline(&self.text_pipeline);
+                pass.set_bind_group(0, &self.text_bind_group, &[]);
+                pass.draw(0..6, 0..quads.len() as u32);
+            }
+        }
+
+        // Draw cursor circle using SDF pipeline.
+        {
+            let cursor_prim = Sdf2dPrim::circle(
+                cursor_world,
+                cursor_radius_world,
+                Mat2::IDENTITY.to_cols_array(),
+                Vec4::new(0.4, 1.0, 0.6, 1.0),
+                Vec4::new(0.4, 1.0, 0.6, 1.0),
+            );
+            self.queue.write_buffer(
+                &self.overlay_buffer,
+                0,
+                bytemuck::bytes_of(&crate::common_state::SdfHeader::new(1)),
+            );
+            self.queue.write_buffer(
+                &self.overlay_buffer,
+                crate::common_state::SDF_HEADER_SIZE as u64,
+                bytemuck::cast_slice(&[cursor_prim]),
+            );
+
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Text Cursor"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&self.sdf_pipeline);
+            pass.set_bind_group(0, &self.overlay_bind_group, &[]);
+            pass.draw(0..6, 0..1);
+        }
+
+        self.queue.submit(Some(encoder.finish()));
+        self.atlas.trim();
+        self.queue.present(surface_texture);
+    }
 }

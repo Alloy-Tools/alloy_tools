@@ -4,6 +4,7 @@ pub mod render;
 mod designer_state;
 mod showcase_state;
 mod common_state;
+mod text_layout;
 
 fn block_on<F: std::future::Future>(future: F) -> F::Output {
     pollster::block_on(future)

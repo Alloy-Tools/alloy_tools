@@ -259,7 +259,16 @@ impl Sdf2d {
         let (local, inv_det_sqrt) = match transform.try_inverse() {
             Some(inv) => (
                 inv.transform_point(point),
-                //REVIEW: Want to use uniform scale for collision, should I use `.cols[0].length()` or `.determinant().abs().sqrt()`
+                // Uniform scale factor: 1 / sqrt(|det|).
+                //
+                // Use this for marching/collision math where CPU and GPU must agree.
+                // It is a conservative lower bound: the true distance in local space
+                // is always <= this * world_distance, so raymarching won't overshoot.
+                //
+                // For pure visual distortion you can skip this entirely — the
+                // inverse-matrix transform (local = inv * (p - center)) already
+                // applies per-axis non-uniform scaling, which is fine for drawing
+                // but not for collision/raymarching correctness.
                 inv.linear.determinant().abs().sqrt(),
             ),
             None => (point, 1.),
