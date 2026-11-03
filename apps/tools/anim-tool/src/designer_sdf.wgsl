@@ -29,10 +29,9 @@ struct SdfOp {
     round: f32,
     onion: f32,
     elongate: vec2<f32>,
+    elongate_origin: vec2<f32>,
     boolean: u32,
     smoothing: f32,
-    _pad0: u32,
-    _pad1: u32,
 }
 
 struct SdfGroup {

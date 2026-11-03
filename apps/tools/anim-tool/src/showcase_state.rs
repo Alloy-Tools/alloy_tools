@@ -851,6 +851,10 @@ impl ShowcaseState {
             ops.push(Sdf2dOp::default().with_boolean(Sdf2dBoolean::SmoothSubtraction(0.2)));
         } else {
             ops = vec![Sdf2dOp::default(); sdfs.len()];
+            if self.curr_set == SHOWCASE_SET_NORMAL {
+                // Move heart elongate origin up from the tip
+                ops[27].set_elongate_origin(Vec2::new(0., 0.25));
+            }
         }
 
         // Ctrl+Up/Down nudges the selected field on every shape

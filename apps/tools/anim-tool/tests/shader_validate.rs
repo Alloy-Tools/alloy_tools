@@ -1,6 +1,6 @@
 fn strip_editor_header(source: &str) -> String {
-    const START_MARKER: &str = "// ----- Header Start -----";
-    const END_MARKER: &str = "// ----- Header End -----";
+    const START_MARKER: &str = "// ----- Meta Start -----";
+    const END_MARKER: &str = "// ----- Meta End -----";
 
     // Find the start of the editor header block.
     let start_pos = match source.find(START_MARKER) {

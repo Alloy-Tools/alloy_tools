@@ -41,10 +41,10 @@ pub struct Sdf2dOp {
     round: f32,
     onion: f32,
     elongate: Vec2,
+    elongate_origin: Vec2,
     /// 0 = union, 1 = subtraction, 2 = smooth union, 3 = smooth subtraction.
     boolean: u32,
     smooth: f32,
-    _pad: [u32; 2],
 }
 
 pub const SDF_OP_SIZE: usize = std::mem::size_of::<Sdf2dOp>();
@@ -82,6 +82,19 @@ impl Sdf2dOp {
 
     pub fn elongate(&self) -> Vec2 {
         self.elongate
+    }
+
+    pub fn elongate_origin(&self) -> Vec2 {
+        self.elongate_origin
+    }
+
+    pub fn with_elongate_origin(mut self, origin: Vec2) -> Self {
+        self.elongate_origin = origin;
+        self
+    }
+
+    pub fn set_elongate_origin(&mut self, origin: Vec2) {
+        self.elongate_origin = origin
     }
 
     pub fn with_elongate(mut self, elongate: Vec2) -> Self {
