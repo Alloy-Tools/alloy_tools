@@ -1,7 +1,7 @@
 use crate::{
     app::FIXED_FPS,
     common_state::{Globals, RenderData, SDF_HEADER_SIZE},
-    text_layout::{glyphs_to_quads, layout_text, LayoutOptions},
+    text_layout::{glyphs_to_quads, layout_text, LayoutOptions, WrapMode},
 };
 use al_math::{
     matrix::Mat2,
@@ -40,6 +40,19 @@ pub struct TextQuad {
 pub struct TextGlobals {
     pub atlas_size: [f32; 2],
     pub _pad: [f32; 2],
+}
+
+/// A single text rendering instance with its own text, font size, position, and color.
+#[derive(Clone, Copy, Debug)]
+pub struct TextInstance {
+    pub text: &'static str,
+    pub font_size: f32,
+    pub position: [f32; 2],
+    /// Maximum available width for wrapping from position.x (NDC units). None = no wrapping.
+    pub max_width: Option<f32>,
+    /// Wrapping mode (PerChar or PerWord). Defaults to PerChar.
+    pub wrap_mode: WrapMode,
+    pub color: [f32; 4],
 }
 
 // MSDF Atlas data structures parsed from Asul-msdf.json.
@@ -2004,7 +2017,7 @@ fn push_body_prims(
 }
 
 impl RenderState {
-    pub fn render_text(&mut self, text: &str, font_size: f32, position: [f32; 2], cursor_px: [f32; 2]) {
+    pub fn render_text(&mut self, text_instances: &[TextInstance], cursor_px: [f32; 2], zoom: f32) {
         let surface_texture = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t)
             | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
@@ -2128,32 +2141,42 @@ impl RenderState {
 
         let glyphs_slice = &self.text_atlas_data.glyphs;
 
-        // Shape text into glyphs using atlas data directly (no font file yet for rustybuzz).
-        let shaped = crate::text_layout::shape_text(glyphs_slice, text, font_size);
+        // Build all quads from all text instances.
+        let mut all_quads: Vec<TextQuad> = Vec::new();
 
-        // Layout shaped glyphs into lines.
-        // Start at the passed position in NDC space.
-        let options = LayoutOptions::new(font_size)
-            .with_max_width(1.8) // Leave margins on left/right
-            .with_line_height(1.2);
-        let lines = layout_text(&shaped, &options, position[0], position[1]);
+        for instance in text_instances.iter() {
+            // Apply zoom to font size.
+            let zoomed_font_size = instance.font_size * zoom;
 
-        // Convert layout into TextQuads in NDC space.
-        // scale converts em-units to NDC units. With font_size=2.0 and advance_x~0.25,
-        // each glyph is ~0.5 em units = 0.25 NDC units wide.
-        let scale = font_size; // em->NDC scale, matches font_size
-        let quads: Vec<TextQuad> = glyphs_to_quads(
-            &lines,
-            glyphs_slice,
-            atlas_w,
-            atlas_h,
-            scale,
-            [1.0, 1.0, 1.0, 1.0],
-        );
+            // Shape text into glyphs using atlas data directly (no font file yet for rustybuzz).
+            let shaped = crate::text_layout::shape_text(glyphs_slice, instance.text, zoomed_font_size);
 
-        if !quads.is_empty() {
+            // Layout shaped glyphs into lines.
+            // Start at the passed position in NDC space.
+            let options = LayoutOptions::new(zoomed_font_size)
+                .with_max_width(instance.max_width.unwrap_or(1.8)) // Leave margins on left/right
+                .with_line_height(1.2)
+                .with_wrap_mode(instance.wrap_mode);
+            let lines = layout_text(&shaped, &options, instance.position[0], instance.position[1]);
+
+            // Convert layout into TextQuads in NDC space.
+            // scale converts em-units to NDC units.
+            let scale = zoomed_font_size; // em->NDC scale, matches font_size
+            let quads: Vec<TextQuad> = glyphs_to_quads(
+                &lines,
+                glyphs_slice,
+                atlas_w,
+                atlas_h,
+                scale,
+                instance.color,
+            );
+
+            all_quads.extend(quads);
+        }
+
+        if !all_quads.is_empty() {
             self.queue
-                .write_buffer(&self.text_quads_buffer, 0, bytemuck::cast_slice(&quads));
+                .write_buffer(&self.text_quads_buffer, 0, bytemuck::cast_slice(&all_quads));
             {
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("MSDF Text Pass"),
@@ -2173,7 +2196,7 @@ impl RenderState {
                 });
                 pass.set_pipeline(&self.text_pipeline);
                 pass.set_bind_group(0, &self.text_bind_group, &[]);
-                pass.draw(0..6, 0..quads.len() as u32);
+                pass.draw(0..6, 0..all_quads.len() as u32);
             }
         }
 

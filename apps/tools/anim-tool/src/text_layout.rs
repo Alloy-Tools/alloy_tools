@@ -1,11 +1,4 @@
-//! Text layout module for MSDF text rendering.
-//!
-//! Uses rustybuzz for shaping (Unicode -> glyph IDs + positions)
-//! and a custom layout system (left-to-right, word wrap, line height).
-//!
-//! Outputs TextQuad instances ready for GPU upload.
-
-use crate::render::{MsdfGlyph, MsdfRect, MSDF_RECT_DEFAULT, TextQuad};
+use crate::render::{MsdfGlyph, MsdfRect, TextQuad, MSDF_RECT_DEFAULT};
 
 /// A shaped glyph ready for layout.
 #[derive(Clone, Copy, Debug)]
@@ -16,12 +9,10 @@ pub struct ShapedGlyph {
     pub glyph_id: u32,
     /// Advance in em units.
     pub advance_x: f32,
-    /// Advance Y in em units.
-    pub advance_y: f32,
-    /// X offset in em units.
-    pub offset_x: f32,
-    /// Y offset in em units.
-    pub offset_y: f32,
+    // TODO: re-add when integrating TTF font shaping with rustybuzz
+    // pub advance_y: f32,
+    // pub offset_x: f32,
+    // pub offset_y: f32,
 }
 
 /// Shapes text into glyphs using atlas data directly.
@@ -35,13 +26,20 @@ pub fn shape_text(atlas_glyphs: &[MsdfGlyph], text: &str, _font_size: f32) -> Ve
                 codepoint,
                 glyph_id: codepoint as u32, // REVIEW: Shouldn't this be `glyph.glyph_id` as shaping might change the glyph?
                 advance_x: glyph.advance,
-                advance_y: 0.0,
-                offset_x: 0.0,
-                offset_y: 0.0,
             });
         }
     }
     result
+}
+
+/// Wrapping mode for text layout.
+#[derive(Clone, Copy, Debug, Default)]
+pub enum WrapMode {
+    /// Wrap at character boundaries (breaks mid-word if needed).
+    #[default]
+    PerChar,
+    /// Wrap at word boundaries (keeps whole words together).
+    PerWord,
 }
 
 /// Layout options for text rendering.
@@ -53,10 +51,11 @@ pub struct LayoutOptions {
     pub max_width: Option<f32>,
     /// Line height multiplier.
     pub line_height: f32,
-    /// Horizontal alignment (0.0 = left, 0.5 = center, 1.0 = right).
-    pub align_x: f32,
-    /// Vertical alignment (0.5 = center, 1.0 = bottom).
-    pub align_y: f32,
+    /// Wrapping mode (PerChar or PerWord).
+    pub wrap_mode: WrapMode,
+    // TODO: re-add when adding text containers/boxes for alignment within them
+    // pub align_x: f32,
+    // pub align_y: f32,
 }
 
 impl LayoutOptions {
@@ -65,8 +64,7 @@ impl LayoutOptions {
             font_size,
             max_width: None,
             line_height: 1.2,
-            align_x: 0.0,
-            align_y: 0.0,
+            wrap_mode: WrapMode::default(),
         }
     }
 
@@ -79,6 +77,11 @@ impl LayoutOptions {
         self.line_height = line_height;
         self
     }
+
+    pub fn with_wrap_mode(mut self, wrap_mode: WrapMode) -> Self {
+        self.wrap_mode = wrap_mode;
+        self
+    }
 }
 
 /// A placed glyph ready for quad generation.
@@ -86,14 +89,14 @@ impl LayoutOptions {
 pub struct PlacedGlyph {
     pub codepoint: u32,
     pub glyph_id: u32,
-    /// Position in em units.
+    /// Position in em units (x offset from start_x).
     pub pos_x: f32,
-    pub pos_y: f32,
 }
 
 /// Lay out shaped glyphs into lines with word wrapping.
 ///
 /// Returns a list of (glyphs, line_y) where line_y is the baseline Y in em units.
+/// Wrapping moves downward (increasing Y) rather than upward.
 pub fn layout_text(
     shaped: &[ShapedGlyph],
     options: &LayoutOptions,
@@ -102,6 +105,22 @@ pub fn layout_text(
 ) -> Vec<(Vec<PlacedGlyph>, f32)> {
     let mut lines: Vec<(Vec<PlacedGlyph>, f32)> = Vec::new();
 
+    match options.wrap_mode {
+        WrapMode::PerChar => layout_text_per_char(shaped, options, start_x, start_y, &mut lines),
+        WrapMode::PerWord => layout_text_per_word(shaped, options, start_x, start_y, &mut lines),
+    }
+
+    lines
+}
+
+/// Layout with per-character wrapping (breaks mid-word if needed).
+fn layout_text_per_char(
+    shaped: &[ShapedGlyph],
+    options: &LayoutOptions,
+    start_x: f32,
+    start_y: f32,
+    lines: &mut Vec<(Vec<PlacedGlyph>, f32)>,
+) {
     let mut current_line: Vec<PlacedGlyph> = Vec::new();
     let mut current_x = start_x;
     let mut current_y = start_y;
@@ -111,10 +130,11 @@ pub fn layout_text(
 
         // Check if this glyph would exceed max width
         if let Some(max_w) = options.max_width {
-            if current_x + glyph_width > max_w && !current_line.is_empty() {
+            let right_boundary = start_x + max_w; // Right edge = start + available width
+            if current_x + glyph_width > right_boundary && !current_line.is_empty() {
                 // Start new line
                 lines.push((std::mem::take(&mut current_line), current_y));
-                current_y -= options.line_height * options.font_size;
+                current_y += options.line_height * options.font_size; // Move DOWN
                 current_x = start_x; // Start new line at same x offset
             }
         }
@@ -123,7 +143,6 @@ pub fn layout_text(
             codepoint: glyph.codepoint,
             glyph_id: glyph.glyph_id,
             pos_x: current_x,
-            pos_y: current_y,
         });
         current_x += glyph_width;
     }
@@ -131,8 +150,97 @@ pub fn layout_text(
     if !current_line.is_empty() {
         lines.push((current_line, current_y));
     }
+}
 
-    lines
+/// Layout with per-word wrapping (keeps whole words together).
+fn layout_text_per_word(
+    shaped: &[ShapedGlyph],
+    options: &LayoutOptions,
+    start_x: f32,
+    start_y: f32,
+    lines: &mut Vec<(Vec<PlacedGlyph>, f32)>,
+) {
+    let mut current_line: Vec<PlacedGlyph> = Vec::new();
+    let mut current_x = start_x;
+    let mut current_y = start_y;
+
+    // Accumulate current word glyphs (relative x offsets within the word).
+    let mut word_rel_x: Vec<f32> = Vec::new();
+    let mut word_glyphs: Vec<PlacedGlyph> = Vec::new();
+    let mut word_width = 0.0; // Total advance of the word in NDC units
+
+    let space_codepoint = 32u32;
+
+    for glyph in shaped.iter() {
+        let glyph_width = glyph.advance_x * options.font_size;
+
+        if glyph.codepoint == space_codepoint {
+            // Space character ends the current word.
+            let word_total_width = word_width + glyph_width;
+            let right_boundary = start_x + options.max_width.unwrap_or(f32::INFINITY);
+
+            if current_x + word_total_width > right_boundary && !current_line.is_empty() {
+                // Word doesn't fit on current line, wrap to next line.
+                lines.push((std::mem::take(&mut current_line), current_y));
+                current_y += options.line_height * options.font_size; // Move DOWN
+                current_x = start_x;
+            }
+
+            // Place the word glyphs at current_x + their relative offsets.
+            for (i, wg) in word_glyphs.drain(..).enumerate() {
+                current_line.push(PlacedGlyph {
+                    codepoint: wg.codepoint,
+                    glyph_id: wg.glyph_id,
+                    pos_x: current_x + word_rel_x[i],
+                });
+            }
+
+            // Place the space itself right after the word ends.
+            current_line.push(PlacedGlyph {
+                codepoint: glyph.codepoint,
+                glyph_id: glyph.glyph_id,
+                pos_x: current_x + word_width,
+            });
+
+            // Advance past the word and its space.
+            current_x += word_total_width;
+
+            // Reset word accumulation.
+            word_rel_x.clear();
+            word_width = 0.0;
+        } else {
+            // Accumulate glyph into current word with relative offset.
+            word_rel_x.push(word_width);
+            word_glyphs.push(PlacedGlyph {
+                codepoint: glyph.codepoint,
+                glyph_id: glyph.glyph_id,
+                pos_x: 0.0, // placeholder, will be set when placed
+            });
+            word_width += glyph_width;
+        }
+    }
+
+    // Place any remaining word at end of text.
+    let right_boundary = start_x + options.max_width.unwrap_or(f32::INFINITY);
+    if current_x + word_width > right_boundary
+        && !current_line.is_empty()
+        && !word_glyphs.is_empty()
+    {
+        lines.push((std::mem::take(&mut current_line), current_y));
+        current_y += options.line_height * options.font_size; // Move DOWN
+        current_x = start_x;
+    }
+    for (i, wg) in word_glyphs.drain(..).enumerate() {
+        current_line.push(PlacedGlyph {
+            codepoint: wg.codepoint,
+            glyph_id: wg.glyph_id,
+            pos_x: current_x + word_rel_x[i],
+        });
+    }
+
+    if !current_line.is_empty() {
+        lines.push((current_line, current_y));
+    }
 }
 
 /// Generate TextQuads from laid-out glyphs using atlas data.
@@ -155,8 +263,14 @@ pub fn glyphs_to_quads(
 
             let (uv_min, uv_max) = match atlas_entry {
                 Some(entry) => {
-                    let uv_min = [entry.atlas_bounds.left / atlas_w, 1.0 - entry.atlas_bounds.top / atlas_h];
-                    let uv_max = [entry.atlas_bounds.right / atlas_w, 1.0 - entry.atlas_bounds.bottom / atlas_h];
+                    let uv_min = [
+                        entry.atlas_bounds.left / atlas_w,
+                        1.0 - entry.atlas_bounds.top / atlas_h,
+                    ];
+                    let uv_max = [
+                        entry.atlas_bounds.right / atlas_w,
+                        1.0 - entry.atlas_bounds.bottom / atlas_h,
+                    ];
                     (uv_min, uv_max)
                 }
                 None => continue, // Skip glyphs not in atlas

@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use crate::{
-    block_on, designer_state::DesignerState, render::RenderState, showcase_state::ShowcaseState,
+    block_on, designer_state::DesignerState, render::RenderState, render::TextInstance,
+    text_layout::WrapMode, showcase_state::ShowcaseState,
 };
 use winit::{application::ApplicationHandler, event::WindowEvent, window::Window};
 
@@ -26,6 +27,7 @@ pub struct App {
     text_camera_keys: crate::common_state::CameraKeys,
     text_cursor_px: [f32; 2],
     text_scroll: f32,
+    text_zoom: f32,
 }
 
 impl App {
@@ -37,6 +39,7 @@ impl App {
             text_camera_keys: crate::common_state::CameraKeys::default(),
             text_cursor_px: [0.0, 0.0],
             text_scroll: 0.0,
+            text_zoom: 1.0,
         }
     }
 
@@ -162,6 +165,8 @@ impl ApplicationHandler for App {
                         KeyCode::KeyS => self.text_camera_keys.cam_down = true,
                         KeyCode::KeyD => self.text_camera_keys.cam_right = true,
                         KeyCode::KeyA => self.text_camera_keys.cam_left = true,
+                        KeyCode::Equal => self.text_zoom *= 1.2,
+                        KeyCode::Minus => self.text_zoom /= 1.2,
                         _ => {}
                     }
                 }
@@ -187,7 +192,36 @@ impl ApplicationHandler for App {
                 }
                 State::Text => {
                     if let Some(render_state) = &mut self.render_state {
-                        render_state.render_text("Hello MSDF", 0.1, [-0.9, 0.], self.text_cursor_px);
+                        render_state.render_text(
+                            &[
+                                TextInstance {
+                                    text: "Hello MSDF",
+                                    font_size: 0.05,
+                                    position: [-0.9, 0.0],
+                                    max_width: None,
+                                    wrap_mode: WrapMode::PerWord,
+                                    color: [1.0, 1.0, 1.0, 1.0],
+                                },
+                                TextInstance {
+                                    text: "Text char wrapping test",
+                                    font_size: 0.08,
+                                    position: [0.55, -0.3],
+                                    max_width: Some(0.45),
+                                    wrap_mode: WrapMode::PerChar,
+                                    color: [1.0, 0.5, 0.5, 1.0],
+                                },
+                                TextInstance {
+                                    text: "Text word wrapping test",
+                                    font_size: 0.08,
+                                    position: [0.55, 0.3],
+                                    max_width: Some(0.45),
+                                    wrap_mode: WrapMode::PerWord,
+                                    color: [1.0, 0.5, 0.5, 1.0],
+                                },
+                            ],
+                            self.text_cursor_px,
+                            self.text_zoom,
+                        );
                     }
                 }
             },

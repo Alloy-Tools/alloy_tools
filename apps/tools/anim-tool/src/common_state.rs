@@ -93,6 +93,7 @@ impl Default for Timeline {
     }
 }
 
+#[allow(unused)]
 impl Timeline {
     pub fn new(duration: f32) -> Self {
         Self {
@@ -196,6 +197,7 @@ pub struct CameraState {
     resolution: Vec2,
 }
 
+#[allow(unused)]
 impl CameraState {
     pub fn new(resolution: impl Into<Vec2>, camera: Camera) -> Self {
         Self {
