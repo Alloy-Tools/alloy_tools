@@ -1,9 +1,10 @@
 mod app;
+mod atlas_generator;
 mod camera;
-pub mod render;
-mod designer_state;
-mod showcase_state;
 mod common_state;
+mod designer_state;
+pub mod render;
+mod showcase_state;
 mod text_layout;
 
 fn block_on<F: std::future::Future>(future: F) -> F::Output {

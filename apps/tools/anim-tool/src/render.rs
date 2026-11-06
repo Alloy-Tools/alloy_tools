@@ -1,5 +1,6 @@
 use crate::{
     app::FIXED_FPS,
+    atlas_generator::{build_atlas, save_atlas_png, AtlasGenConfig, FontAtlas, FontId},
     common_state::{Globals, RenderData, SDF_HEADER_SIZE},
     text_layout::{glyphs_to_quads, layout_text, LayoutOptions, WrapMode},
 };
@@ -10,18 +11,11 @@ use al_math::{
     vec::{Vec2, Vec3, Vec4},
 };
 use al_skeleton::skeleton::ColliderRef;
-use wgpu::{
-    util::{DeviceExt, TextureDataOrder},
-    Surface, SurfaceConfiguration,
-};
+use std::path::Path;
+use wgpu::{Surface, SurfaceConfiguration};
 
+pub const MAX_TEXT_QUADS: usize = 4096;
 pub const MAX_SDF_PRIMS: usize = 1024;
-pub const MSDF_RECT_DEFAULT: MsdfRect = MsdfRect {
-    left: 0.,
-    bottom: 0.,
-    right: 0.,
-    top: 0.,
-};
 
 // Mirrors the TextQuad struct in sdf_text.wgsl (32-byte aligned).
 #[repr(C)]
@@ -39,13 +33,15 @@ pub struct TextQuad {
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct TextGlobals {
     pub atlas_size: [f32; 2],
-    pub _pad: [f32; 2],
+    pub atlas_type: f32, // 0 = MSDF, 1 = MTSDF
+    pub _pad: f32,
 }
 
 /// A single text rendering instance with its own text, font size, position, and color.
 #[derive(Clone, Copy, Debug)]
 pub struct TextInstance {
     pub text: &'static str,
+    pub font_id: FontId,
     pub font_size: f32,
     pub position: [f32; 2],
     /// Maximum available width for wrapping from position.x (NDC units). None = no wrapping.
@@ -53,67 +49,6 @@ pub struct TextInstance {
     /// Wrapping mode (PerChar or PerWord). Defaults to PerChar.
     pub wrap_mode: WrapMode,
     pub color: [f32; 4],
-}
-
-// MSDF Atlas data structures parsed from Asul-msdf.json.
-#[allow(dead_code)]
-#[derive(serde::Deserialize)]
-pub struct MsdfAtlasData {
-    atlas: MsdfAtlasInfo,
-    metrics: MsdfMetrics,
-    glyphs: Vec<MsdfGlyph>,
-}
-
-#[allow(dead_code)]
-#[derive(serde::Deserialize)]
-pub struct MsdfAtlasInfo {
-    r#type: String,
-    #[serde(rename = "distanceRange")]
-    distance_range: f32,
-    #[serde(rename = "distanceRangeMiddle")]
-    distance_range_middle: f32,
-    size: f32,
-    width: u32,
-    height: u32,
-    #[serde(rename = "yOrigin")]
-    y_origin: String,
-}
-
-#[allow(dead_code)]
-#[derive(serde::Deserialize)]
-pub struct MsdfMetrics {
-    #[serde(rename = "emSize")]
-    em_size: f32,
-    #[serde(rename = "lineHeight")]
-    line_height: f32,
-    ascender: f32,
-    descender: f32,
-    #[serde(rename = "underlineY")]
-    underline_y: f32,
-    #[serde(rename = "underlineThickness")]
-    underline_thickness: f32,
-}
-
-#[allow(dead_code)]
-#[derive(Default, serde::Deserialize)]
-pub struct MsdfGlyph {
-    pub unicode: u32,
-    pub advance: f32,
-    #[serde(rename = "planeBounds")]
-    #[serde(default)]
-    pub plane_bounds: MsdfRect,
-    #[serde(rename = "atlasBounds")]
-    #[serde(default)]
-    pub atlas_bounds: MsdfRect,
-}
-
-#[allow(dead_code)]
-#[derive(Default, serde::Deserialize)]
-pub struct MsdfRect {
-    pub left: f32,
-    pub bottom: f32,
-    pub right: f32,
-    pub top: f32,
 }
 
 pub struct BooleanTargets {
@@ -237,18 +172,25 @@ pub struct RenderState {
     pub atlas: glyphon::TextAtlas,
     pub text_renderer: glyphon::TextRenderer,
     pub viewport: glyphon::Viewport,
-    // MSDF Text
+    // MTSDF Text
     pub text_pipeline: wgpu::RenderPipeline,
     pub text_quads_buffer: wgpu::Buffer,
     pub text_bind_group: wgpu::BindGroup,
-    pub text_atlas_texture: wgpu::Texture,
-    pub text_atlas_view: wgpu::TextureView,
-    pub text_atlas_sampler: wgpu::Sampler,
-    pub text_atlas_width: u32,
-    pub text_atlas_height: u32,
-    pub text_atlas_data: MsdfAtlasData,
+    pub text_atlas: FontAtlas,
+    pub text_atlas_type: TextAtlasType,
     pub text_globals_buffer: wgpu::Buffer,
     pub text_bind_group_layout: wgpu::BindGroupLayout,
+}
+
+//TODO: Remove
+/// Type of text atlas in use.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum TextAtlasType {
+    /// Pre-baked MSDF atlas loaded from PNG + JSON files.
+    #[default]
+    Msdf,
+    /// MTSDF atlas generated at runtime.
+    Mtsdf,
 }
 
 impl RenderState {
@@ -311,19 +253,19 @@ impl RenderState {
             source: wgpu::ShaderSource::Wgsl(designer_sdf_source().into()),
         });
 
-        // MSDF Text Shader
+        // MTSDF Text Shader
         let text_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("MSDF Text Shader"),
+            label: Some("MTSDF Text Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("sdf_text.wgsl").into()),
         });
 
-        // MSDF Text Bind Group Layout
+        // MTSDF Text Bind Group Layout
         let text_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Text Bind Group Layout"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT, //REVIEW: needed for Vertex only?
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
@@ -363,7 +305,7 @@ impl RenderState {
         // Text quads buffer (per-instance quads).
         let text_quads_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Text Quads Buffer"),
-            size: 4096,
+            size: (MAX_TEXT_QUADS * std::mem::size_of::<TextQuad>()) as u64,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -376,50 +318,31 @@ impl RenderState {
             mapped_at_creation: false,
         });
 
-        // Load MSDF atlas texture and metadata from files.
-        let atlas_path = std::path::Path::new("apps/tools/anim-tool/src/Asul_msdf/Asul-msdf.png");
-        let atlas_json_path =
-            std::path::Path::new("apps/tools/anim-tool/src/Asul_msdf/Asul-msdf.json");
-        let atlas_bytes = std::fs::read(atlas_path).expect("Failed to read MSDF atlas PNG");
-        let atlas_json =
-            std::fs::read_to_string(atlas_json_path).expect("Failed to read MSDF atlas JSON");
-        let atlas_data: MsdfAtlasData =
-            serde_json::from_str(&atlas_json).expect("Failed to parse MSDF atlas JSON");
-
-        let atlas_image = image::load_from_memory(&atlas_bytes)
-            .expect("Failed to decode MSDF atlas PNG")
-            .into_rgba8();
-        let atlas_dimensions = atlas_image.dimensions();
-
-        let text_atlas_texture = device.create_texture_with_data(
+        // Generate MTSDF atlas from `.ttf` file
+        let atlas_gen_config = AtlasGenConfig::default();
+        let chars = (' '..='~').collect::<Vec<_>>();
+        let fonts = [
+            (
+                FontId::Normal,
+                Path::new("apps/tools/anim-tool/src/font_files/asul/Asul-Regular.ttf"),
+            ),
+            (
+                FontId::Bold,
+                Path::new("apps/tools/anim-tool/src/font_files/asul/Asul-Bold.ttf"),
+            ),
+        ];
+        let text_atlas = build_atlas(&device, &queue, &fonts, &chars, &atlas_gen_config);
+        let text_atlas_name = "test_atlas.png";
+        save_atlas_png(
+            &device,
             &queue,
-            &wgpu::TextureDescriptor {
-                label: Some("MSDF Text Atlas"),
-                size: wgpu::Extent3d {
-                    width: atlas_dimensions.0,
-                    height: atlas_dimensions.1,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8Unorm,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-            },
-            TextureDataOrder::default(),
-            &atlas_image,
-        );
-        let text_atlas_view = text_atlas_texture.create_view(&Default::default());
-        let text_atlas_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("MSDF Atlas Sampler"),
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
-            ..Default::default()
-        });
-        let text_atlas_width = atlas_dimensions.0;
-        let text_atlas_height = atlas_dimensions.1;
+            &text_atlas.texture,
+            atlas_gen_config.atlas_size,
+            atlas_gen_config.atlas_size,
+            Path::new(text_atlas_name),
+        )
+        .expect(&format!("Failed to save atlas PNG as {text_atlas_name}"));
+        eprintln!("Saved test atlas PNG as {text_atlas_name}");
 
         let text_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Text Pipeline Layout"),
@@ -827,7 +750,7 @@ impl RenderState {
             ],
         });
 
-        // MSDF Text Bind Group
+        // MTSDF Text Bind Group
         let text_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("MSDF Text Bind Group"),
             layout: &text_bgl,
@@ -838,11 +761,11 @@ impl RenderState {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&text_atlas_view),
+                    resource: wgpu::BindingResource::TextureView(&text_atlas.view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&text_atlas_sampler),
+                    resource: wgpu::BindingResource::Sampler(&text_atlas.sampler),
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
@@ -1145,15 +1068,12 @@ impl RenderState {
             text_pipeline,
             text_quads_buffer,
             text_bind_group,
-            text_atlas_texture,
-            text_atlas_view,
-            text_atlas_sampler,
-            text_atlas_width,
-            text_atlas_height,
-            text_atlas_data: atlas_data,
+            text_atlas: text_atlas,
+            text_atlas_type: TextAtlasType::Mtsdf,
             text_globals_buffer,
             text_bind_group_layout: text_bgl,
         }
+        //atlas.texture, atlas.view, atlas.sampler, atlas.glyphs
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -2045,8 +1965,9 @@ impl RenderState {
 
         // Write atlas size to text globals uniform.
         let text_globals = TextGlobals {
-            atlas_size: [self.text_atlas_width as f32, self.text_atlas_height as f32],
-            _pad: [0.0, 0.0],
+            atlas_size: [self.text_atlas.size as f32, self.text_atlas.size as f32],
+            atlas_type: self.text_atlas_type as u32 as f32,
+            _pad: 0.0,
         };
         self.queue.write_buffer(
             &self.text_globals_buffer,
@@ -2100,8 +2021,9 @@ impl RenderState {
 
         // Write atlas size to text globals uniform.
         let text_globals = TextGlobals {
-            atlas_size: [self.text_atlas_width as f32, self.text_atlas_height as f32],
-            _pad: [0.0, 0.0],
+            atlas_size: [self.text_atlas.size as f32, self.text_atlas.size as f32],
+            atlas_type: self.text_atlas_type as u32 as f32,
+            _pad: 0.0,
         };
         self.queue.write_buffer(
             &self.text_globals_buffer,
@@ -2134,22 +2056,21 @@ impl RenderState {
             pass.draw(0..3, 0..1);
         }
 
-        // MSDF Text Pass - shape text using atlas data and render dynamic quads.
+        // MTSDF Text Pass - shape text using atlas data and render dynamic quads.
         // Maps Unicode chars directly to glyph entries in the atlas.
-        let atlas_w = self.text_atlas_width as f32;
-        let atlas_h = self.text_atlas_height as f32;
-
-        let glyphs_slice = &self.text_atlas_data.glyphs;
-
-        // Build all quads from all text instances.
+        // Builds all quads from all text instances.
         let mut all_quads: Vec<TextQuad> = Vec::new();
-
         for instance in text_instances.iter() {
             // Apply zoom to font size.
             let zoomed_font_size = instance.font_size * zoom;
 
-            // Shape text into glyphs using atlas data directly (no font file yet for rustybuzz).
-            let shaped = crate::text_layout::shape_text(glyphs_slice, instance.text, zoomed_font_size);
+            // Shape text into glyphs using atlas data.
+            let shaped = crate::text_layout::shape_text(
+                &self.text_atlas.glyphs,
+                instance.font_id,
+                instance.text,
+                self.text_atlas.em_size,
+            );
 
             // Layout shaped glyphs into lines.
             // Start at the passed position in NDC space.
@@ -2157,20 +2078,22 @@ impl RenderState {
                 .with_max_width(instance.max_width.unwrap_or(1.8)) // Leave margins on left/right
                 .with_line_height(1.2)
                 .with_wrap_mode(instance.wrap_mode);
-            let lines = layout_text(&shaped, &options, instance.position[0], instance.position[1]);
-
-            // Convert layout into TextQuads in NDC space.
-            // scale converts em-units to NDC units.
-            let scale = zoomed_font_size; // em->NDC scale, matches font_size
-            let quads: Vec<TextQuad> = glyphs_to_quads(
-                &lines,
-                glyphs_slice,
-                atlas_w,
-                atlas_h,
-                scale,
-                instance.color,
+            let lines = layout_text(
+                &shaped,
+                &options,
+                instance.position[0],
+                instance.position[1],
             );
 
+            // Convert layout into TextQuads in NDC space.
+            let quads = glyphs_to_quads(
+                &lines,
+                &self.text_atlas.glyphs,
+                instance.font_id,
+                self.text_atlas.em_size,
+                zoomed_font_size,
+                instance.color,
+            );
             all_quads.extend(quads);
         }
 
@@ -2245,4 +2168,89 @@ impl RenderState {
         self.atlas.trim();
         self.queue.present(surface_texture);
     }
+
+    /*/// Generate an MTSDF atlas from a TTF font file and switch to it.
+    ///
+    /// Requires the `wgpu` feature flag. Currently a placeholder — returns `None`
+    /// until a font file is bundled.
+    #[cfg(feature = "wgpu")]
+    pub fn generate_and_switch_to_mtsdf_atlas(
+        &mut self,
+        font_path: &std::path::Path,
+        config: &MtsdfAtlasConfig,
+    ) -> Option<()> {
+        let result = generate_mtsdf_atlas(font_path, config, &self.device, &self.queue)?;
+
+        let texture = self.device.create_texture_with_data(
+            &self.queue,
+            &wgpu::TextureDescriptor {
+                label: Some("MTSDF Text Atlas"),
+                size: wgpu::Extent3d {
+                    width: result.dimensions.0,
+                    height: result.dimensions.1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            },
+            TextureDataOrder::default(),
+            &result.image,
+        );
+        let view = texture.create_view(&Default::default());
+        let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("MTSDF Atlas Sampler"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            ..Default::default()
+        });
+
+        self.text_atlas_texture = texture;
+        self.text_atlas_view = view;
+        self.text_atlas_sampler = sampler;
+        self.text_atlas_width = result.dimensions.0;
+        self.text_atlas_height = result.dimensions.1;
+        self.text_atlas_data = result.data;
+        self.text_atlas_type = TextAtlasType::Mtsdf;
+
+        // Recreate bind group with new texture/sampler.
+        self.text_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("MSDF Text Bind Group"),
+            layout: &self.text_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.text_quads_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&self.text_atlas_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.text_atlas_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: self.text_globals_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        Some(())
+    }
+
+    /// Non-wgpu stub: generation not available without the `wgpu` feature.
+    #[cfg(not(feature = "wgpu"))]
+    pub fn generate_and_switch_to_mtsdf_atlas(
+        &mut self,
+        _font_path: &std::path::Path,
+        _config: &MtsdfAtlasConfig,
+    ) -> Option<()> {
+        None
+    }*/
 }
