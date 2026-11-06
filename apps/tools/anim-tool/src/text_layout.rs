@@ -1,4 +1,7 @@
-use crate::render::{MsdfGlyph, MsdfRect, TextQuad, MSDF_RECT_DEFAULT};
+use crate::{
+    atlas_generator::{FontId, MtsdfGlyphs},
+    render::TextQuad,
+};
 
 /// A shaped glyph ready for layout.
 #[derive(Clone, Copy, Debug)]
@@ -17,15 +20,25 @@ pub struct ShapedGlyph {
 
 /// Shapes text into glyphs using atlas data directly.
 /// Maps each Unicode character to its atlas entry.
-pub fn shape_text(atlas_glyphs: &[MsdfGlyph], text: &str, _font_size: f32) -> Vec<ShapedGlyph> {
+pub fn shape_text(
+    atlas_glyphs: &MtsdfGlyphs,
+    font_id: FontId,
+    text: &str,
+    em_size: f32,
+) -> Vec<ShapedGlyph> {
     let mut result = Vec::new();
     for ch in text.chars() {
-        let codepoint = ch as u32;
-        if let Some(glyph) = atlas_glyphs.iter().find(|g| g.unicode == codepoint) {
+        if let Some(info) = atlas_glyphs.get(&(font_id, ch)) {
             result.push(ShapedGlyph {
-                codepoint,
-                glyph_id: codepoint as u32, // REVIEW: Shouldn't this be `glyph.glyph_id` as shaping might change the glyph?
-                advance_x: glyph.advance,
+                codepoint: ch as u32,
+                glyph_id: 0, // REVIEW: Should this be removed?
+                advance_x: info.advance / em_size,
+            });
+        } else if ch.is_whitespace() {
+            result.push(ShapedGlyph {
+                codepoint: ch as u32,
+                glyph_id: 0,
+                advance_x: 0.25,
             });
         }
     }
@@ -248,63 +261,42 @@ fn layout_text_per_word(
 /// Returns TextQuads in NDC [-1, 1] space.
 pub fn glyphs_to_quads(
     lines: &[(Vec<PlacedGlyph>, f32)],
-    glyphs: &[MsdfGlyph],
-    atlas_w: f32,
-    atlas_h: f32,
+    glyphs: &MtsdfGlyphs,
+    font_id: FontId,
+    em_size: f32,
     scale: f32,
     color: [f32; 4],
 ) -> Vec<TextQuad> {
     let mut quads = Vec::new();
-
     for (line_glyphs, line_y) in lines.iter() {
         for glyph in line_glyphs.iter() {
-            // Find atlas data for this glyph by matching unicode codepoint
-            let atlas_entry = glyphs.iter().find(|g| g.unicode == glyph.codepoint);
-
-            let (uv_min, uv_max) = match atlas_entry {
-                Some(entry) => {
-                    let uv_min = [
-                        entry.atlas_bounds.left / atlas_w,
-                        1.0 - entry.atlas_bounds.top / atlas_h,
-                    ];
-                    let uv_max = [
-                        entry.atlas_bounds.right / atlas_w,
-                        1.0 - entry.atlas_bounds.bottom / atlas_h,
-                    ];
-                    (uv_min, uv_max)
-                }
-                None => continue, // Skip glyphs not in atlas
+            let Some(ch) = char::from_u32(glyph.codepoint) else {
+                continue;
             };
+            let Some(info) = glyphs.get(&(font_id, ch)) else {
+                continue;
+            };
+            if info.quad_size[0] <= 0. || info.quad_size[1] <= 0. {
+                continue;
+            }
 
-            // Get plane_bounds for this glyph to determine its shape extents
-            let plane_bounds = glyphs_entry_plane_bounds(glyphs, glyph.codepoint);
+            let bx = info.bearing[0] / em_size * scale;
+            let by = info.bearing[1] / em_size * scale;
+            let qw = info.quad_size[0] / em_size * scale;
+            let qh = info.quad_size[1] / em_size * scale;
 
-            // Align all glyphs to a common top (line_y). This ensures capital letters
-            // and other glyphs sit on the same visual line rather than floating at
-            // per-glyph plane_bounds.bottom offsets.
-            // min_y extends downward from line_y by each glyph's height.
-            let min_x = glyph.pos_x + plane_bounds.left * scale;
-            let min_y = *line_y - plane_bounds.top * scale;
-            let max_x = glyph.pos_x + plane_bounds.right * scale;
-            let max_y = *line_y;
+            let min_x = glyph.pos_x + bx;
+            let min_y = line_y + by;
 
             quads.push(TextQuad {
                 min: [min_x, min_y],
-                max: [max_x, max_y],
-                uv_min,
-                uv_max,
+                max: [min_x + qw, min_y + qh],
+                uv_min: info.uv_min,
+                uv_max: info.uv_max,
                 color,
             });
         }
     }
 
     quads
-}
-
-fn glyphs_entry_plane_bounds<'a>(glyphs: &'a [MsdfGlyph], codepoint: u32) -> &'a MsdfRect {
-    glyphs
-        .iter()
-        .find(|g| g.unicode == codepoint)
-        .map(|g| &g.plane_bounds)
-        .unwrap_or(&MSDF_RECT_DEFAULT)
 }

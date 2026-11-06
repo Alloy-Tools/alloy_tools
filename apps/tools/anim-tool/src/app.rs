@@ -1,9 +1,12 @@
-use std::sync::Arc;
-
 use crate::{
-    block_on, designer_state::DesignerState, render::RenderState, render::TextInstance,
-    text_layout::WrapMode, showcase_state::ShowcaseState,
+    atlas_generator::FontId,
+    block_on,
+    designer_state::DesignerState,
+    render::{RenderState, TextInstance},
+    showcase_state::ShowcaseState,
+    text_layout::WrapMode,
 };
+use std::sync::Arc;
 use winit::{application::ApplicationHandler, event::WindowEvent, window::Window};
 
 const TITLE: &str = "Skeleton2D Designer Tool";
@@ -196,6 +199,7 @@ impl ApplicationHandler for App {
                             &[
                                 TextInstance {
                                     text: "Hello MSDF",
+                                    font_id: FontId::Normal,
                                     font_size: 0.05,
                                     position: [-0.9, 0.0],
                                     max_width: None,
@@ -204,6 +208,7 @@ impl ApplicationHandler for App {
                                 },
                                 TextInstance {
                                     text: "Text char wrapping test",
+                                    font_id: FontId::Normal,
                                     font_size: 0.08,
                                     position: [0.55, -0.3],
                                     max_width: Some(0.45),
@@ -212,6 +217,7 @@ impl ApplicationHandler for App {
                                 },
                                 TextInstance {
                                     text: "Text word wrapping test",
+                                    font_id: FontId::Bold,
                                     font_size: 0.08,
                                     position: [0.55, 0.3],
                                     max_width: Some(0.45),
