@@ -266,6 +266,12 @@ pub fn glyphs_to_quads(
     em_size: f32,
     scale: f32,
     color: [f32; 4],
+    effects: u32,
+    baseline_y_offset: f32,
+    midline_y_offset: f32,
+    underline_thickness_ndc: f32,
+    strike_thickness_ndc: f32,
+    highlight_pad_ndc: f32,
 ) -> Vec<TextQuad> {
     let mut quads = Vec::new();
     for (line_glyphs, line_y) in lines.iter() {
@@ -294,6 +300,13 @@ pub fn glyphs_to_quads(
                 uv_min: info.uv_min,
                 uv_max: info.uv_max,
                 color,
+                effects,
+                baseline_y: *line_y + baseline_y_offset,
+                midline_y: (*line_y - 0.2 * scale) + midline_y_offset,
+                underline_thickness: underline_thickness_ndc,
+                strike_thickness: strike_thickness_ndc,
+                highlight_pad: highlight_pad_ndc,
+                _pad: [0., 0.],
             });
         }
     }

@@ -1,10 +1,7 @@
 use crate::{
-    atlas_generator::FontId,
-    block_on,
-    designer_state::DesignerState,
-    render::{RenderState, TextInstance},
-    showcase_state::ShowcaseState,
-    text_layout::WrapMode,
+    atlas_generator::FontId, block_on, designer_state::DesignerState, render::{
+        EFFECT_FILL, EFFECT_GLOW, EFFECT_HIGHLIGHT, EFFECT_OUTLINE, EFFECT_STRIKETHROUGH, EFFECT_UNDERLINE, RenderState, TextInstance,
+    }, showcase_state::ShowcaseState, text_layout::WrapMode,
 };
 use std::sync::Arc;
 use winit::{application::ApplicationHandler, event::WindowEvent, window::Window};
@@ -38,7 +35,7 @@ impl App {
         Self {
             window: None,
             render_state: None,
-            state: State::Designer(DesignerState::default()),
+            state: State::Text,
             text_camera_keys: crate::common_state::CameraKeys::default(),
             text_cursor_px: [0.0, 0.0],
             text_scroll: 0.0,
@@ -205,6 +202,12 @@ impl ApplicationHandler for App {
                                     max_width: None,
                                     wrap_mode: WrapMode::PerWord,
                                     color: [1.0, 1.0, 1.0, 1.0],
+                                    effects: EFFECT_FILL | EFFECT_OUTLINE,
+                                    baseline_offset: 0.,
+                                    midline_offset: 0.,
+                                    underline_thickness: 0.01,
+                                    strike_thickness: 0.01,
+                                    highlight_pad: 0.,
                                 },
                                 TextInstance {
                                     text: "Text char wrapping test",
@@ -214,6 +217,12 @@ impl ApplicationHandler for App {
                                     max_width: Some(0.45),
                                     wrap_mode: WrapMode::PerChar,
                                     color: [1.0, 0.5, 0.5, 1.0],
+                                    effects: EFFECT_FILL | EFFECT_OUTLINE | EFFECT_UNDERLINE,
+                                    baseline_offset: 0.,
+                                    midline_offset: 0.,
+                                    underline_thickness: 0.01,
+                                    strike_thickness: 0.01,
+                                    highlight_pad: 0.,
                                 },
                                 TextInstance {
                                     text: "Text word wrapping test",
@@ -223,6 +232,12 @@ impl ApplicationHandler for App {
                                     max_width: Some(0.45),
                                     wrap_mode: WrapMode::PerWord,
                                     color: [1.0, 0.5, 0.5, 1.0],
+                                    effects: EFFECT_FILL | EFFECT_OUTLINE | EFFECT_STRIKETHROUGH,
+                                    baseline_offset: 0.,
+                                    midline_offset: 0.,
+                                    underline_thickness: 0.01,
+                                    strike_thickness: 0.01,
+                                    highlight_pad: 0.,
                                 },
                             ],
                             self.text_cursor_px,

@@ -1,6 +1,6 @@
 use crate::{
     app::FIXED_FPS,
-    atlas_generator::{build_atlas, save_atlas_png, AtlasGenConfig, FontAtlas, FontId},
+    atlas_generator::{build_atlas, AtlasGenConfig, FontAtlas, FontId},
     common_state::{Globals, RenderData, SDF_HEADER_SIZE},
     text_layout::{glyphs_to_quads, layout_text, LayoutOptions, WrapMode},
 };
@@ -17,15 +17,30 @@ use wgpu::{Surface, SurfaceConfiguration};
 pub const MAX_TEXT_QUADS: usize = 4096;
 pub const MAX_SDF_PRIMS: usize = 1024;
 
-// Mirrors the TextQuad struct in sdf_text.wgsl (32-byte aligned).
-#[repr(C)]
+pub const EFFECT_UNDERLINE: u32 = 1;
+pub const EFFECT_STRIKETHROUGH: u32 = 1 << 1;
+pub const EFFECT_HIGHLIGHT: u32 = 1 << 2;
+pub const EFFECT_FILL: u32 = 1 << 3;
+pub const EFFECT_OUTLINE: u32 = 1 << 4;
+pub const EFFECT_GLOW: u32 = 1 << 5;
+
+#[repr(C, align(16))]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct TextQuad {
     pub min: [f32; 2],
     pub max: [f32; 2],
     pub uv_min: [f32; 2],
     pub uv_max: [f32; 2],
+    //TODO: pack into RGB8
     pub color: [f32; 4],
+    pub effects: u32,
+    pub baseline_y: f32,
+    pub midline_y: f32,
+    pub underline_thickness: f32,
+    pub strike_thickness: f32,
+    pub highlight_pad: f32,
+    //TODO: use for outline/glow packed RGB8 colors
+    pub _pad: [f32; 2],
 }
 
 // Mirrors the TextGlobals struct in sdf_text.wgsl.
@@ -49,6 +64,12 @@ pub struct TextInstance {
     /// Wrapping mode (PerChar or PerWord). Defaults to PerChar.
     pub wrap_mode: WrapMode,
     pub color: [f32; 4],
+    pub effects: u32,
+    pub baseline_offset: f32,
+    pub midline_offset: f32,
+    pub underline_thickness: f32,
+    pub strike_thickness: f32,
+    pub highlight_pad: f32,
 }
 
 pub struct BooleanTargets {
@@ -332,7 +353,7 @@ impl RenderState {
             ),
         ];
         let text_atlas = build_atlas(&device, &queue, &fonts, &chars, &atlas_gen_config);
-        let text_atlas_name = "test_atlas.png";
+        /*let text_atlas_name = "test_atlas.png";
         save_atlas_png(
             &device,
             &queue,
@@ -342,7 +363,7 @@ impl RenderState {
             Path::new(text_atlas_name),
         )
         .expect(&format!("Failed to save atlas PNG as {text_atlas_name}"));
-        eprintln!("Saved test atlas PNG as {text_atlas_name}");
+        eprintln!("Saved test atlas PNG as {text_atlas_name}");*/
 
         let text_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Text Pipeline Layout"),
@@ -370,7 +391,7 @@ impl RenderState {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &text_shader,
-                entry_point: Some("fs_text"),
+                entry_point: Some("fs_effect_text"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
@@ -1523,59 +1544,6 @@ impl RenderState {
                 .unwrap();
         }
 
-        // ----- MSDF Text Pass -----
-        {
-            // Write text quads to storage buffer for MVP demo.
-            // These quads render "Hello MSDF" as three demo glyph quads.
-
-            let quads: [TextQuad; 3] = [
-                TextQuad {
-                    min: [50., 50.].into(),
-                    max: [150., 100.].into(),
-                    uv_min: [0.0, 0.0].into(),
-                    uv_max: [0.33, 1.0].into(),
-                    color: [1., 1., 1., 1.],
-                },
-                TextQuad {
-                    min: [160., 50.].into(),
-                    max: [260., 100.].into(),
-                    uv_min: [0.33, 0.0].into(),
-                    uv_max: [0.66, 1.0].into(),
-                    color: [1., 0.5, 0.5, 1.],
-                },
-                TextQuad {
-                    min: [270., 50.].into(),
-                    max: [370., 100.].into(),
-                    uv_min: [0.66, 0.0].into(),
-                    uv_max: [1.0, 1.0].into(),
-                    color: [0.5, 1., 0.5, 1.],
-                },
-            ];
-
-            self.queue
-                .write_buffer(&self.text_quads_buffer, 0, bytemuck::cast_slice(&quads));
-
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("MSDF Text Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            pass.set_pipeline(&self.text_pipeline);
-            pass.set_bind_group(0, &self.text_bind_group, &[]);
-            pass.draw(0..6, 0..quads.len() as u32);
-        }
-
         self.queue.submit(Some(encoder.finish()));
         self.atlas.trim();
         self.queue.present(surface_texture);
@@ -2038,6 +2006,12 @@ impl RenderState {
                 self.text_atlas.em_size,
                 zoomed_font_size,
                 instance.color,
+                instance.effects,
+                instance.baseline_offset,
+                instance.midline_offset,
+                instance.underline_thickness,
+                instance.strike_thickness,
+                instance.highlight_pad,
             );
             all_quads.extend(quads);
         }
