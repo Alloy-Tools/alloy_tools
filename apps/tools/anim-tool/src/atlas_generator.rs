@@ -101,7 +101,8 @@ impl Default for AtlasGenConfig {
         Self {
             atlas_size: 1024,
             em_size: 48.0,
-            padding: 2,
+            //REQUIREMENT: padding ≥ max(OUTLINE_WIDTH, GLOW_WIDTH)
+            padding: 12,
         }
     }
 }
@@ -202,11 +203,8 @@ pub fn build_atlas(
                     }
                 };
 
-            let content_w = ((bbox.x_max - bbox.x_min).ceil() as u32).max(1);
-            let content_h = ((bbox.y_max - bbox.y_min).ceil() as u32).max(1);
-                
-            let cell_w = content_w + 2 * padding;
-            let cell_h = content_h + 2 * padding;
+            let cell_w = ((bbox.x_max - bbox.x_min).ceil() as u32).max(1) + 2 * padding;
+            let cell_h = ((bbox.y_max - bbox.y_min).ceil() as u32).max(1) + 2 * padding;
 
             let (x, y) = match packer.allocate(cell_w, cell_h) {
                 Some(p) => p,
@@ -234,16 +232,13 @@ pub fn build_atlas(
             glyphs.insert(
                 (*font_id, codepoint),
                 GlyphInfo {
-                    uv_min: [
-                        (x + padding) as f32 / atlas_size as f32,
-                        (y + padding) as f32 / atlas_size as f32,
-                    ],
+                    uv_min: [x as f32 / atlas_size as f32, y as f32 / atlas_size as f32],
                     uv_max: [
-                        (x + padding + content_w) as f32 / atlas_size as f32,
-                        (y + padding + content_h) as f32 / atlas_size as f32,
+                        (x + cell_w) as f32 / atlas_size as f32,
+                        (y + cell_h) as f32 / atlas_size as f32,
                     ],
-                    quad_size: [content_w as f32, content_h as f32],
-                    bearing: [bbox.x_min, -bbox.y_max],
+                    quad_size: [cell_w as f32, cell_h as f32],
+                    bearing: [bbox.x_min - padding as f32, -bbox.y_max - padding as f32],
                     advance,
                 },
             );
@@ -255,10 +250,10 @@ pub fn build_atlas(
     writer.write_glyphs(device, queue, &mut encoder, &texture);
     queue.submit(std::iter::once(encoder.finish()));
 
-    eprintln!(
+    /*eprintln!(
         "Atlas used {} / {} px vertically",
         packer.peak_y, atlas_size
-    );
+    );*/
 
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some("MTSDF Atlas Sampler"),
@@ -422,6 +417,13 @@ pub fn instances_to_quads(
             uv_min: gi.uv_min,
             uv_max: gi.uv_max,
             color,
+            effects: 8,
+            baseline_y: 0.,
+            midline_y: 0.5,
+            underline_thickness: 0.01,
+            strike_thickness: 0.01,
+            highlight_pad: 0.,
+            _pad: [0., 0.],
         });
     }
 }

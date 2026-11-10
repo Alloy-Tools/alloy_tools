@@ -1,3 +1,4 @@
+use std::f32::consts::PI;
 use crate::{
     app::FIXED_DT,
     camera::Camera,
@@ -253,7 +254,7 @@ impl ShowcaseState {
 
                             KeyCode::ArrowLeft => {
                                 if self.keys.ctrl_held && self.keys.shift_held {
-                                    self.rotation += 0.1;
+                                    self.rotation += PI / 20.;
                                 } else if self.keys.ctrl_held {
                                     self.nudge_elongate_x(-OP_STEP);
                                 } else {
@@ -267,7 +268,7 @@ impl ShowcaseState {
 
                             KeyCode::ArrowRight => {
                                 if self.keys.ctrl_held && self.keys.shift_held {
-                                    self.rotation -= 0.1;
+                                    self.rotation -= PI / 20.;
                                 } else if self.keys.ctrl_held {
                                     self.nudge_elongate_x(OP_STEP);
                                 } else {
