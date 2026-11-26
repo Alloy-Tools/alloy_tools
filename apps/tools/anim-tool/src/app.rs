@@ -1,7 +1,12 @@
 use crate::{
-    atlas_generator::FontId, block_on, designer_state::DesignerState, render::{
-        EFFECT_FILL, EFFECT_GLOW, EFFECT_HIGHLIGHT, EFFECT_OUTLINE, EFFECT_STRIKETHROUGH, EFFECT_UNDERLINE, EFFECT_WAVE_GLYPH, EFFECT_WAVE_STYLE, RenderState, TextInstance,
-    }, showcase_state::ShowcaseState, text_layout::WrapMode,
+    block_on,
+    designer_state::DesignerState,
+    render::RenderState,
+    showcase_state::ShowcaseState,
+    text::common::{
+        Align, AtlasHandle, FontHandle, LineHeight, OutlineSpec, ShapeOptions, TextInstance,
+        TextStyle, WaveSpec, WrapMode,
+    },
 };
 use std::sync::Arc;
 use winit::{application::ApplicationHandler, event::WindowEvent, window::Window};
@@ -51,16 +56,7 @@ impl App {
         match &mut self.state {
             State::Designer(state) => state.update(),
             State::Showcase(state) => state.update(),
-            State::Text => {
-                // Apply WASD movement to text camera.
-                let dt = FIXED_DT;
-                let speed = CAM_KEY_SPEED * 2.0; // text view_size starts at 2.0
-                if self.text_camera_keys.cam_up {
-                    // handled in render_text via view_size
-                }
-                // Movement is applied in render_text; we just need dt here.
-                let _ = (dt, speed);
-            }
+            State::Text => {}
         }
     }
 }
@@ -194,51 +190,64 @@ impl ApplicationHandler for App {
                     if let Some(render_state) = &mut self.render_state {
                         render_state.render_text(
                             &[
-                                TextInstance {
-                                    text: "Hello MSDF",
-                                    font_id: FontId::Normal,
-                                    font_size: 0.05,
-                                    position: [-0.9, 0.0],
-                                    max_width: None,
-                                    wrap_mode: WrapMode::PerWord,
-                                    color: [1.0, 1.0, 1.0, 1.0],
-                                    effects: EFFECT_FILL | EFFECT_OUTLINE,
-                                    baseline_offset: 0.,
-                                    midline_offset: 0.,
-                                    underline_thickness: 0.01,
-                                    strike_thickness: 0.01,
-                                    highlight_pad: 0.,
-                                },
-                                TextInstance {
-                                    text: "Text char wrapping test",
-                                    font_id: FontId::Normal,
-                                    font_size: 0.08,
-                                    position: [0.55, -0.3],
-                                    max_width: Some(0.45),
-                                    wrap_mode: WrapMode::PerChar,
-                                    color: [1.0, 0.5, 0.5, 1.0],
-                                    effects: EFFECT_FILL | EFFECT_OUTLINE | EFFECT_UNDERLINE | EFFECT_WAVE_STYLE,
-                                    baseline_offset: 0.,
-                                    midline_offset: 0.,
-                                    underline_thickness: 0.01,
-                                    strike_thickness: 0.01,
-                                    highlight_pad: 0.,
-                                },
-                                TextInstance {
-                                    text: "Text word wrapping test",
-                                    font_id: FontId::Bold,
-                                    font_size: 0.08,
-                                    position: [0.55, 0.3],
-                                    max_width: Some(0.45),
-                                    wrap_mode: WrapMode::PerWord,
-                                    color: [1.0, 0.5, 0.5, 1.0],
-                                    effects: EFFECT_FILL | EFFECT_OUTLINE | EFFECT_STRIKETHROUGH | EFFECT_WAVE_GLYPH | EFFECT_WAVE_STYLE,
-                                    baseline_offset: 0.,
-                                    midline_offset: 0.,
-                                    underline_thickness: 0.01,
-                                    strike_thickness: 0.01,
-                                    highlight_pad: 0.,
-                                },
+                                TextInstance::new(
+                                    "Hello MTSDF",
+                                    [-0.9, 0.],
+                                    FontHandle::new(AtlasHandle::new(0), 0),
+                                    ShapeOptions::new(
+                                        0.05,
+                                        None,
+                                        WrapMode::PerWord,
+                                        LineHeight::Metrics,
+                                        Align::Left,
+                                        0.,
+                                        0.,
+                                    ),
+                                    TextStyle::new()
+                                        .with_fill(Some([1., 1., 1., 1.]))
+                                        .with_outline(Some(OutlineSpec::new(
+                                            [1., 0., 0.5, 1.],
+                                            3.,
+                                        ))),
+                                ),
+                                //TODO: Add underline
+                                TextInstance::new(
+                                    "Text char wrapping test",
+                                    [0.55, -0.3],
+                                    FontHandle::new(AtlasHandle::new(0), 0),
+                                    ShapeOptions::new(
+                                        0.08,
+                                        Some(0.45),
+                                        WrapMode::PerChar,
+                                        LineHeight::Metrics,
+                                        Align::Left,
+                                        0.,
+                                        0.,
+                                    ),
+                                    TextStyle::new()
+                                        .with_fill(Some([1., 0.5, 0.5, 1.]))
+                                        .with_outline(Some(OutlineSpec::new([1., 0.5, 0., 1.], 3.)))
+                                        .with_glyph_wave(Some(WaveSpec::new(0.005, 100., 0.))),
+                                ),
+                                // Add strikethough
+                                TextInstance::new(
+                                    "Text word wrapping test",
+                                    [0.55, 0.3],
+                                    FontHandle::new(AtlasHandle::new(0), 0),
+                                    ShapeOptions::new(
+                                        0.08,
+                                        Some(0.45),
+                                        WrapMode::PerWord,
+                                        LineHeight::Metrics,
+                                        Align::Left,
+                                        0.,
+                                        0.,
+                                    ),
+                                    TextStyle::new()
+                                        .with_fill(Some([1., 0.5, 0.5, 1.]))
+                                        .with_outline(Some(OutlineSpec::new([1., 0.5, 0., 1.], 3.)))
+                                        .with_style_wave(Some(WaveSpec::new(0., 0., 0.))),
+                                ),
                             ],
                             self.text_cursor_px,
                             self.text_zoom,

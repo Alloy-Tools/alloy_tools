@@ -1,8 +1,10 @@
 use crate::{
-    app::FIXED_FPS,
-    atlas_generator::{build_atlas, AtlasGenConfig, FontAtlas, FontId},
-    common_state::{Globals, RenderData, SDF_HEADER_SIZE},
-    text_layout::{glyphs_to_quads, layout_text, LayoutOptions, WrapMode},
+    app::FIXED_FPS, common_state::{Globals, RenderData, SDF_HEADER_SIZE, Timeline}, text::{
+        atlas_generator::AtlasGenConfig,
+        atlas_state::AtlasState,
+        common::{Charset, FontHandle, FontSpec, TextInstance},
+        text_renderer::TextRenderer,
+    },
 };
 use al_math::{
     matrix::Mat2,
@@ -11,70 +13,10 @@ use al_math::{
     vec::{Vec2, Vec3, Vec4},
 };
 use al_skeleton::skeleton::ColliderRef;
-use std::path::Path;
 use wgpu::{Surface, SurfaceConfiguration};
 
 pub const MAX_TEXT_QUADS: usize = 4096;
 pub const MAX_SDF_PRIMS: usize = 1024;
-
-pub const EFFECT_UNDERLINE: u32 = 1;
-pub const EFFECT_STRIKETHROUGH: u32 = 1 << 1;
-pub const EFFECT_HIGHLIGHT: u32 = 1 << 2;
-pub const EFFECT_FILL: u32 = 1 << 3;
-pub const EFFECT_OUTLINE: u32 = 1 << 4;
-pub const EFFECT_GLOW: u32 = 1 << 5;
-pub const EFFECT_WAVE_GLYPH: u32 = 1 << 6;
-pub const EFFECT_WAVE_STYLE: u32 = 1 << 7;
-
-#[repr(C, align(16))]
-#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct TextQuad {
-    pub min: [f32; 2],
-    pub max: [f32; 2],
-    pub uv_min: [f32; 2],
-    pub uv_max: [f32; 2],
-    //TODO: pack into RGB8
-    pub color: [f32; 4],
-    pub effects: u32,
-    pub baseline_y: f32,
-    pub midline_y: f32,
-    pub underline_thickness: f32,
-    pub strike_thickness: f32,
-    pub highlight_pad: f32,
-    //TODO: use for outline/glow packed RGB8 colors
-    pub _pad: [f32; 2],
-}
-
-// Mirrors the TextGlobals struct in sdf_text.wgsl.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct TextGlobals {
-    pub atlas_size: [f32; 2],
-    pub msdf_edge: f32,
-    pub px_range: f32,
-    pub time: f32,
-    pub _pad: [f32; 2],
-}
-
-/// A single text rendering instance with its own text, font size, position, and color.
-#[derive(Clone, Copy, Debug)]
-pub struct TextInstance {
-    pub text: &'static str,
-    pub font_id: FontId,
-    pub font_size: f32,
-    pub position: [f32; 2],
-    /// Maximum available width for wrapping from position.x (NDC units). None = no wrapping.
-    pub max_width: Option<f32>,
-    /// Wrapping mode (PerChar or PerWord). Defaults to PerChar.
-    pub wrap_mode: WrapMode,
-    pub color: [f32; 4],
-    pub effects: u32,
-    pub baseline_offset: f32,
-    pub midline_offset: f32,
-    pub underline_thickness: f32,
-    pub strike_thickness: f32,
-    pub highlight_pad: f32,
-}
 
 pub struct BooleanTargets {
     pub color_view: wgpu::TextureView,
@@ -195,27 +137,13 @@ pub struct RenderState {
     pub swash_cache: glyphon::SwashCache,
     pub _cache: glyphon::Cache,
     pub atlas: glyphon::TextAtlas,
-    pub text_renderer: glyphon::TextRenderer,
+    pub glyphon_text_renderer: glyphon::TextRenderer,
     pub viewport: glyphon::Viewport,
     // MTSDF Text
-    pub text_pipeline: wgpu::RenderPipeline,
-    pub text_quads_buffer: wgpu::Buffer,
-    pub text_bind_group: wgpu::BindGroup,
-    pub text_atlas: FontAtlas,
-    pub text_atlas_type: TextAtlasType,
-    pub text_globals_buffer: wgpu::Buffer,
-    pub text_bind_group_layout: wgpu::BindGroupLayout,
-}
-
-//TODO: Remove
-/// Type of text atlas in use.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub enum TextAtlasType {
-    /// Pre-baked MSDF atlas loaded from PNG + JSON files.
-    #[default]
-    Msdf,
-    /// MTSDF atlas generated at runtime.
-    Mtsdf,
+    pub atlas_timeline: Timeline,
+    pub atlases: AtlasState,
+    pub text_renderer: TextRenderer,
+    pub font_handle: FontHandle,
 }
 
 impl RenderState {
@@ -276,137 +204,6 @@ impl RenderState {
         let designer_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("SDF Designer Shader"),
             source: wgpu::ShaderSource::Wgsl(designer_sdf_source().into()),
-        });
-
-        // MTSDF Text Shader
-        let text_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("MTSDF Text Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("sdf_text.wgsl").into()),
-        });
-
-        // MTSDF Text Bind Group Layout
-        let text_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Text Bind Group Layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT, //REVIEW: needed for Vertex only?
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
-        });
-
-        // Text quads buffer (per-instance quads).
-        let text_quads_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Text Quads Buffer"),
-            size: (MAX_TEXT_QUADS * std::mem::size_of::<TextQuad>()) as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        // Text globals buffer (atlas size uniform).
-        let text_globals_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Text Globals Buffer"),
-            size: std::mem::size_of::<TextGlobals>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        // Generate MTSDF atlas from `.ttf` file
-        let atlas_gen_config = AtlasGenConfig::default();
-        let chars = (' '..='~').collect::<Vec<_>>();
-        let fonts = [
-            (
-                FontId::Normal,
-                Path::new("apps/tools/anim-tool/src/font_files/asul/Asul-Regular.ttf"),
-            ),
-            (
-                FontId::Bold,
-                Path::new("apps/tools/anim-tool/src/font_files/asul/Asul-Bold.ttf"),
-            ),
-        ];
-        let text_atlas = build_atlas(&device, &queue, &fonts, &chars, &atlas_gen_config);
-        /*let text_atlas_name = "test_atlas.png";
-        save_atlas_png(
-            &device,
-            &queue,
-            &text_atlas.texture,
-            atlas_gen_config.atlas_size,
-            atlas_gen_config.atlas_size,
-            Path::new(text_atlas_name),
-        )
-        .expect(&format!("Failed to save atlas PNG as {text_atlas_name}"));
-        eprintln!("Saved test atlas PNG as {text_atlas_name}");*/
-
-        let text_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Text Pipeline Layout"),
-            bind_group_layouts: &[Some(&text_bgl)],
-            immediate_size: 0,
-        });
-
-        let text_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("MSDF Text Pipeline"),
-            layout: Some(&text_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &text_shader,
-                entry_point: Some("vs_text"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[],
-            },
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &text_shader,
-                entry_point: Some("fs_effect_text"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: config.format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multisample: wgpu::MultisampleState::default(),
-            depth_stencil: None,
-            multiview_mask: None,
-            cache: None,
         });
 
         let bg_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -775,30 +572,6 @@ impl RenderState {
             ],
         });
 
-        // MTSDF Text Bind Group
-        let text_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("MSDF Text Bind Group"),
-            layout: &text_bgl,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: text_quads_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&text_atlas.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&text_atlas.sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: text_globals_buffer.as_entire_binding(),
-                },
-            ],
-        });
-
         let vfx_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("SDF Vfx Pipeline Layout"),
             bind_group_layouts: &[Some(&sdf_bgl)],
@@ -1047,12 +820,37 @@ impl RenderState {
         let cache = glyphon::Cache::new(&device);
         let viewport = glyphon::Viewport::new(&device, &cache);
         let mut atlas = glyphon::TextAtlas::new(&device, &queue, &cache, config.format);
-        let text_renderer = glyphon::TextRenderer::new(
+        let glyphon_text_renderer = glyphon::TextRenderer::new(
             &mut atlas,
             &device,
             wgpu::MultisampleState::default(),
             None,
         );
+
+        // MTSDF Text Rendering
+        let text_renderer = TextRenderer::new(&device, config.format, MAX_TEXT_QUADS);
+        let mut atlas_state = AtlasState::new(device.clone(), queue.clone());
+        let (_atlas_handle, font_handles) = atlas_state
+            .build_atlas(
+                AtlasGenConfig::default(),
+                vec![FontSpec::new(
+                    "Asul",
+                    "apps/tools/anim-tool/src/font_files/asul/Asul-Regular.ttf",
+                    Charset::Ascii,
+                )],
+                text_renderer.quads_buffer(),
+                text_renderer.effects_buffer(),
+                text_renderer.bind_group_layout(),
+            )
+            .expect("Atlas should build");
+
+        /*atlas_state
+            .save_atlas(_atlas_handle)
+            .expect("Atlas should save");*/
+
+        let mut timeline = Timeline::new(1.);
+        timeline.set_looping(true);
+        timeline.set_playing(true);
 
         Self {
             surface,
@@ -1088,17 +886,13 @@ impl RenderState {
             swash_cache,
             _cache: cache,
             atlas,
-            text_renderer,
+            glyphon_text_renderer,
             viewport,
-            text_pipeline,
-            text_quads_buffer,
-            text_bind_group,
-            text_atlas: text_atlas,
-            text_atlas_type: TextAtlasType::Mtsdf,
-            text_globals_buffer,
-            text_bind_group_layout: text_bgl,
+            atlas_timeline: timeline,
+            atlases: atlas_state,
+            text_renderer,
+            font_handle: font_handles[0],
         }
-        //atlas.texture, atlas.view, atlas.sampler, atlas.glyphs
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -1502,7 +1296,7 @@ impl RenderState {
                 },
             );
 
-            self.text_renderer
+            self.glyphon_text_renderer
                 .prepare(
                     &self.device,
                     &self.queue,
@@ -1543,7 +1337,7 @@ impl RenderState {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            self.text_renderer
+            self.glyphon_text_renderer
                 .render(&self.atlas, &self.viewport, &mut pass)
                 .unwrap();
         }
@@ -1691,7 +1485,7 @@ impl RenderState {
                 },
             );
 
-            self.text_renderer
+            self.glyphon_text_renderer
                 .prepare(
                     &self.device,
                     &self.queue,
@@ -1732,9 +1526,126 @@ impl RenderState {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            self.text_renderer
+            self.glyphon_text_renderer
                 .render(&self.atlas, &self.viewport, &mut pass)
                 .unwrap();
+        }
+
+        self.queue.submit(Some(encoder.finish()));
+        self.atlas.trim();
+        self.queue.present(surface_texture);
+    }
+
+    pub fn render_text(&mut self, text_instances: &[TextInstance], cursor_px: [f32; 2], zoom: f32) {
+        let surface_texture = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(t)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
+            _ => return,
+        };
+        let view = surface_texture.texture.create_view(&Default::default());
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+
+        // Set up globals for cursor rendering
+        let res = [self.config.width as f32, self.config.height as f32];
+        let px_per_unit = res[1] / 2.0;
+        let cx = cursor_px[0] - 0.5 * res[0];
+        let cy = cursor_px[1] - 0.5 * res[1];
+        let cursor_world = Vec2::new(cx / px_per_unit, -cy / px_per_unit);
+        let cursor_radius_world = 0.008;
+
+        let globals = Globals {
+            resolution: Vec2::new(res[0], res[1]),
+            camera_pos: Vec2::ZERO,
+            cursor_world,
+            view_size: 2.0,
+            aux: 0.0,
+        };
+
+        self.queue
+            .write_buffer(&self.globals_buffer, 0, bytemuck::bytes_of(&globals));
+        self.atlas_timeline.tick();
+        self.atlases.set_atlas_time(self.atlas_timeline.time());
+
+        // Clear background.
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Text Background"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&self.solid_bg_pipeline);
+            pass.set_bind_group(0, &self.bg_bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+
+        // Text Batch
+        {
+            let batcher = self.text_renderer.batcher_mut();
+            for inst in text_instances {
+                let mut shape_ops = inst.shape_ops();
+                shape_ops.size_ndc_mut(|s| s * zoom);
+                match self
+                    .atlases
+                    .shape(inst.text(), inst.font_handle(), shape_ops)
+                {
+                    Ok(shaped) => batcher.queue(&shaped, inst.position(), &inst.style()),
+                    Err(e) => eprintln!("Shape error: {:?}", e),
+                }
+            }
+            self.text_renderer
+                .render(&self.queue, &self.atlases, &view, &mut encoder);
+        }
+
+        // Draw cursor circle using SDF pipeline.
+        {
+            let cursor_prim = Sdf2dPrim::circle(
+                cursor_world,
+                cursor_radius_world,
+                Mat2::IDENTITY.to_cols_array(),
+                Vec4::new(0.4, 1.0, 0.6, 1.0),
+                Vec4::new(0.4, 1.0, 0.6, 1.0),
+            );
+            self.queue.write_buffer(
+                &self.overlay_buffer,
+                0,
+                bytemuck::bytes_of(&crate::common_state::SdfHeader::new(1)),
+            );
+            self.queue.write_buffer(
+                &self.overlay_buffer,
+                crate::common_state::SDF_HEADER_SIZE as u64,
+                bytemuck::cast_slice(&[cursor_prim]),
+            );
+
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Text Cursor"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&self.sdf_pipeline);
+            pass.set_bind_group(0, &self.overlay_bind_group, &[]);
+            pass.draw(0..6, 0..1);
         }
 
         self.queue.submit(Some(encoder.finish()));
@@ -1906,191 +1817,4 @@ fn push_body_prims(
     batch.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
 
     prims.extend(batch.into_iter().map(|(_, p)| p));
-}
-
-impl RenderState {
-    pub fn render_text(&mut self, text_instances: &[TextInstance], cursor_px: [f32; 2], zoom: f32) {
-        let surface_texture = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(t)
-            | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
-            _ => return,
-        };
-        let view = surface_texture.texture.create_view(&Default::default());
-
-        // Set up globals for text rendering (cursor world computed here).
-        let res = [self.config.width as f32, self.config.height as f32];
-        let px_per_unit = res[1] / 2.0;
-        let cx = cursor_px[0] - 0.5 * res[0];
-        let cy = cursor_px[1] - 0.5 * res[1];
-        let cursor_world = Vec2::new(cx / px_per_unit, -cy / px_per_unit);
-        let cursor_radius_world = 0.008;
-
-        let globals = Globals {
-            resolution: Vec2::new(res[0], res[1]),
-            camera_pos: Vec2::ZERO,
-            cursor_world,
-            view_size: 2.0,
-            aux: 0.0,
-        };
-
-        self.queue
-            .write_buffer(&self.globals_buffer, 0, bytemuck::bytes_of(&globals));
-
-        // Write atlas size to text globals uniform.
-        let text_globals = TextGlobals {
-            atlas_size: [self.text_atlas.size as f32, self.text_atlas.size as f32],
-            msdf_edge: 0.5,
-            px_range: self.text_atlas.em_size,
-            time: 0., //TODO,
-            _pad: [0., 0.],
-        };
-        self.queue.write_buffer(
-            &self.text_globals_buffer,
-            0,
-            bytemuck::bytes_of(&text_globals),
-        );
-
-        let mut encoder = self.device.create_command_encoder(&Default::default());
-
-        // Clear background.
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Text Background"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            pass.set_pipeline(&self.solid_bg_pipeline);
-            pass.set_bind_group(0, &self.bg_bind_group, &[]);
-            pass.draw(0..3, 0..1);
-        }
-
-        // MTSDF Text Pass - shape text using atlas data and render dynamic quads.
-        // Maps Unicode chars directly to glyph entries in the atlas.
-        // Builds all quads from all text instances.
-        let mut all_quads: Vec<TextQuad> = Vec::new();
-        for instance in text_instances.iter() {
-            // Apply zoom to font size.
-            let zoomed_font_size = instance.font_size * zoom;
-
-            // Shape text into glyphs using atlas data.
-            let shaped = crate::text_layout::shape_text(
-                &self.text_atlas.glyphs,
-                instance.font_id,
-                instance.text,
-                self.text_atlas.em_size,
-            );
-
-            // Layout shaped glyphs into lines.
-            // Start at the passed position in NDC space.
-            let options = LayoutOptions::new(zoomed_font_size)
-                .with_max_width(instance.max_width.unwrap_or(1.8)) // Leave margins on left/right
-                .with_line_height(1.2)
-                .with_wrap_mode(instance.wrap_mode);
-            let lines = layout_text(
-                &shaped,
-                &options,
-                instance.position[0],
-                instance.position[1],
-            );
-
-            // Convert layout into TextQuads in NDC space.
-            let quads = glyphs_to_quads(
-                &lines,
-                &self.text_atlas.glyphs,
-                instance.font_id,
-                self.text_atlas.em_size,
-                zoomed_font_size,
-                instance.color,
-                instance.effects,
-                instance.baseline_offset,
-                instance.midline_offset,
-                instance.underline_thickness,
-                instance.strike_thickness,
-                instance.highlight_pad,
-            );
-            all_quads.extend(quads);
-        }
-
-        if !all_quads.is_empty() {
-            self.queue
-                .write_buffer(&self.text_quads_buffer, 0, bytemuck::cast_slice(&all_quads));
-            {
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("MSDF Text Pass"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &view,
-                        depth_slice: None,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
-                    depth_stencil_attachment: None,
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                    multiview_mask: None,
-                });
-                pass.set_pipeline(&self.text_pipeline);
-                pass.set_bind_group(0, &self.text_bind_group, &[]);
-                pass.draw(0..6, 0..all_quads.len() as u32);
-            }
-        }
-
-        // Draw cursor circle using SDF pipeline.
-        {
-            let cursor_prim = Sdf2dPrim::circle(
-                cursor_world,
-                cursor_radius_world,
-                Mat2::IDENTITY.to_cols_array(),
-                Vec4::new(0.4, 1.0, 0.6, 1.0),
-                Vec4::new(0.4, 1.0, 0.6, 1.0),
-            );
-            self.queue.write_buffer(
-                &self.overlay_buffer,
-                0,
-                bytemuck::bytes_of(&crate::common_state::SdfHeader::new(1)),
-            );
-            self.queue.write_buffer(
-                &self.overlay_buffer,
-                crate::common_state::SDF_HEADER_SIZE as u64,
-                bytemuck::cast_slice(&[cursor_prim]),
-            );
-
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Text Cursor"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            pass.set_pipeline(&self.sdf_pipeline);
-            pass.set_bind_group(0, &self.overlay_bind_group, &[]);
-            pass.draw(0..6, 0..1);
-        }
-
-        self.queue.submit(Some(encoder.finish()));
-        self.atlas.trim();
-        self.queue.present(surface_texture);
-    }
 }

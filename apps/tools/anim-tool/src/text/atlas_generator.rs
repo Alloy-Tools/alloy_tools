@@ -1,50 +1,20 @@
 //! MTSDF (Multi-channel Signed Distance Field) atlas generator.
 //!
 //! Uses `klyff_msdf` with the `wgpu` feature for GPU-accelerated atlas generation.
-//! Generates MTSDF atlases where the SDF is stored in the alpha channel.
-//!
-//! Uses bundled TTF font files under `font_files/`.
+//! Generates MTSDF atlases from TTF font files where the SDF is stored in the alpha channel.
 
-use crate::render::TextQuad;
+use crate::text::common::{
+    FontAtlas, FontEntry, FontError, FontMetrics, FontSpec, GlyphInfo, TextGlobals,
+};
 use image::RgbaImage;
 use klyff_msdf::{
-    skrifa::{FontRef, GlyphId, MetadataProvider},
+    skrifa::{
+        instance::{LocationRef, Size},
+        FontRef, GlyphId, MetadataProvider,
+    },
     GpuAtlasRegion, MsdfGenerator, MtsdfGpuWriter, SkrifaOutlineProvider,
 };
 use std::{collections::HashMap, path::Path};
-
-pub type MtsdfGlyphs = HashMap<(FontId, char), GlyphInfo>;
-
-/// Everything the renderer needs to draw one glyph.
-#[derive(Clone, Copy, Debug)]
-pub struct GlyphInfo {
-    /// Atlas UVs, already normalized to [0,1].
-    pub uv_min: [f32; 2],
-    pub uv_max: [f32; 2],
-    /// Quad size in pixels at the reference em size (before scaling).
-    pub quad_size: [f32; 2],
-    /// Offset from pen origin to the top-left of the quad, in pixels.
-    pub bearing: [f32; 2],
-    /// How far to advance the pen after this glyph, in pixels.
-    pub advance: f32,
-}
-
-/// A font atlas with glyph metadata for rendering.
-pub struct FontAtlas {
-    pub em_size: f32,
-    pub size: u32,
-    pub texture: wgpu::Texture,
-    pub view: wgpu::TextureView,
-    pub sampler: wgpu::Sampler,
-    pub glyphs: MtsdfGlyphs,
-}
-
-/// Font identifier.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub enum FontId {
-    Normal,
-    Bold,
-}
 
 /// A simple first-fit packer for the atlas.
 pub struct SimplePacker {
@@ -90,9 +60,10 @@ impl SimplePacker {
 }
 
 /// Configuration for atlas generation.
+#[derive(Debug, Clone, Copy)]
 pub struct AtlasGenConfig {
     pub atlas_size: u32,
-    pub em_size: f32,
+    ///REQUIREMENT: padding ≥ max(OUTLINE_WIDTH, GLOW_WIDTH)
     pub padding: u32,
 }
 
@@ -100,8 +71,6 @@ impl Default for AtlasGenConfig {
     fn default() -> Self {
         Self {
             atlas_size: 1024,
-            em_size: 48.0,
-            //REQUIREMENT: padding ≥ max(OUTLINE_WIDTH, GLOW_WIDTH)
             padding: 12,
         }
     }
@@ -111,13 +80,16 @@ impl Default for AtlasGenConfig {
 pub fn build_atlas(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-    fonts: &[(FontId, &Path)],
-    chars: &[char],
-    config: &AtlasGenConfig,
-) -> FontAtlas {
+    config: AtlasGenConfig,
+    font_specs: Vec<FontSpec>,
+    quads_buffer: &wgpu::Buffer,
+    effects_buffer: &wgpu::Buffer,
+    text_bgl: &wgpu::BindGroupLayout,
+) -> Result<FontAtlas, FontError> {
     let atlas_size = config.atlas_size;
-    let em_size = config.em_size;
     let padding = config.padding;
+    let mut fonts = Vec::new();
+    let mut atlas_full = false;
 
     // Create the atlas texture (linear, not sRGB - raw distance data).
     let texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -140,57 +112,65 @@ pub fn build_atlas(
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
     let mut packer = SimplePacker::new(atlas_size, atlas_size, padding);
-    let mut glyphs: HashMap<(FontId, char), GlyphInfo> = HashMap::new();
+    let mut names = Vec::new();
 
     let mut generator = MsdfGenerator::new();
     let mut writer = MtsdfGpuWriter::new(device);
 
-    for (font_id, font_path) in fonts {
-        let font_data = match std::fs::read(font_path) {
+    for spec in font_specs {
+        if atlas_full {
+            break;
+        }
+        let path = spec.path();
+        let name = spec.name().to_owned();
+        let em_size = spec.em_size();
+        if names.contains(&name) {
+            return Err(FontError::DuplicateName(name));
+        }
+        let font_data = match std::fs::read(path) {
             Ok(d) => d,
             Err(e) => {
-                eprintln!("Failed to read font {:?}: {}", font_path, e);
+                eprintln!("Failed to read font {} at {:?}: {}", &name, path, e);
                 continue;
             }
         };
         let font = match FontRef::from_index(&font_data, 0) {
             Ok(f) => f,
             Err(e) => {
-                eprintln!("Failed to parse font {:?}: {}", font_path, e);
+                eprintln!("Failed to parse font {} at {:?}: {}", &name, path, e);
                 continue;
             }
         };
+        let font_metrics = font.metrics(Size::new(em_size), LocationRef::default());
+        let font_glyph_metrics = font.glyph_metrics(Size::new(em_size), LocationRef::default());
 
-        // Pre-compute all metrics first (avoids borrow conflicts with outline reading).
+        // Pre-compute all metrics
         let mut glyph_data: Vec<(
             char,
             GlyphId,
             f32,
             klyff_msdf::skrifa::raw::types::BoundingBox<f32>,
         )> = Vec::new();
-        for &ch in chars {
+        for &ch in spec.charset() {
             let glyph_id = match font.charmap().map(ch) {
                 Some(g) if g.to_u32() != 0 => g,
                 _ => continue,
             };
-            let metrics = font.glyph_metrics(
-                klyff_msdf::skrifa::instance::Size::new(em_size),
-                klyff_msdf::skrifa::instance::LocationRef::default(),
-            );
-            let advance = metrics.advance_width(glyph_id).unwrap_or(0.0);
-            let bbox = metrics.bounds(glyph_id).unwrap_or_default();
+            let advance = font_glyph_metrics.advance_width(glyph_id).unwrap_or(0.0);
+            let bbox = font_glyph_metrics.bounds(glyph_id).unwrap_or_default();
             glyph_data.push((ch, glyph_id, advance, bbox));
         }
 
-        // Now read outlines and build regions (font borrowed immutably for outline).
+        let mut glyphs = HashMap::new();
+        // Read outlines and build regions
         for (codepoint, glyph_id, advance, bbox) in glyph_data {
             let outline =
                 match generator.read_glyph(&SkrifaOutlineProvider::new(font.clone(), glyph_id)) {
                     Ok(o) => o,
                     Err(_) => {
-                        // Empty-outline glyph (space or a fallback)
+                        // Empty-outline glyph
                         glyphs.insert(
-                            (*font_id, codepoint),
+                            codepoint,
                             GlyphInfo {
                                 uv_min: [0.0, 0.0],
                                 uv_max: [0.0, 0.0],
@@ -213,6 +193,7 @@ pub fn build_atlas(
                         "Atlas full ({}px). Increase size or trim charset.",
                         atlas_size
                     );
+                    atlas_full = true;
                     break;
                 }
             };
@@ -230,7 +211,7 @@ pub fn build_atlas(
             writer.add_glyph(outline, region);
 
             glyphs.insert(
-                (*font_id, codepoint),
+                codepoint,
                 GlyphInfo {
                     uv_min: [x as f32 / atlas_size as f32, y as f32 / atlas_size as f32],
                     uv_max: [
@@ -243,6 +224,49 @@ pub fn build_atlas(
                 },
             );
         }
+        if atlas_full {
+            break;
+        }
+
+        let ascent_n = font_metrics.ascent / em_size;
+        let cap_height_n = font_metrics
+            .cap_height
+            .map(|n| n / em_size)
+            .unwrap_or(ascent_n * 0.7);
+        let (underline_offset_n, underline_size_n) = font_metrics
+            .underline
+            .map(|und| (-und.offset / em_size, und.thickness / em_size))
+            .unwrap_or((-0.075, 0.05));
+        let (strikethrough_offset_n, strikethrough_size_n) = font_metrics
+            .strikeout
+            .map(|stk| (-stk.offset / em_size, stk.thickness / em_size))
+            .unwrap_or((-cap_height_n * 0.5, 0.05));
+        fonts.push(FontEntry::new(
+            spec,
+            FontMetrics::new(
+                em_size,
+                ascent_n,
+                font_metrics.descent.abs() / em_size,
+                font_metrics.leading.abs() / em_size,
+                cap_height_n,
+                font_metrics
+                    .x_height
+                    .map(|n| n / em_size)
+                    .unwrap_or(cap_height_n * 0.7),
+                underline_offset_n,
+                underline_size_n,
+                strikethrough_offset_n,
+                strikethrough_size_n,
+            ),
+            glyphs,
+        ));
+        names.push(name);
+    }
+    if atlas_full {
+        //TODO: Fill actual missing chars
+        return Err(FontError::AtlasFull {
+            missing: Vec::new(),
+        });
     }
 
     // One flush: all glyphs generated in a single GPU pass-set.
@@ -264,14 +288,60 @@ pub fn build_atlas(
         ..Default::default()
     });
 
-    FontAtlas {
-        em_size,
-        size: atlas_size,
+    let globals_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Text Globals Buffer"),
+        size: std::mem::size_of::<TextGlobals>() as u64,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+
+    //TODO: split out time?
+    queue.write_buffer(
+        &globals_buffer,
+        0,
+        bytemuck::bytes_of(&TextGlobals::new(
+            [atlas_size as f32, atlas_size as f32],
+            0.5,
+            0.,
+        )),
+    );
+
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Text Bind Group"),
+        layout: text_bgl,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: quads_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(&view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::Sampler(&sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: globals_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: effects_buffer.as_entire_binding(),
+            },
+        ],
+    });
+
+    Ok(FontAtlas::new(
+        atlas_size,
         texture,
         view,
         sampler,
-        glyphs,
-    }
+        fonts,
+        globals_buffer,
+        bind_group,
+    ))
 }
 
 /// Read a wgpu texture back to CPU as an `RgbaImage`.
@@ -355,77 +425,10 @@ pub fn save_atlas_png(
     height: u32,
     output_path: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let image = read_texture_to_image(device, queue, texture, width, height)
-        .ok_or("Failed to read atlas texture from GPU")?;
-    image.save_with_format(output_path, image::ImageFormat::Png)?;
+    read_texture_to_image(device, queue, texture, width, height)
+        .ok_or("Failed to read atlas texture from GPU")?
+        .save_with_format(output_path, image::ImageFormat::Png)?;
     Ok(())
-}
-
-/// Generate `GlyphInstance`s from a text string using the atlas.
-pub fn layout_text_instances(
-    text: &str,
-    font_id: FontId,
-    atlas: &FontAtlas,
-    origin: [f32; 2],
-    px_size: f32,
-    em_size: f32,
-    out: &mut Vec<GlyphInstance>,
-) {
-    let scale = px_size / em_size;
-    let mut pen = origin;
-
-    for ch in text.chars() {
-        match atlas.glyphs.get(&(font_id, ch)) {
-            Some(g) => {
-                let top_left = [pen[0] + g.bearing[0] * scale, pen[1] + g.bearing[1] * scale];
-
-                out.push(GlyphInstance {
-                    pos_px: top_left,
-                    size_px: [g.quad_size[0] * scale, g.quad_size[1] * scale],
-                    uv_min: g.uv_min,
-                    uv_max: g.uv_max,
-                });
-                pen[0] += g.advance * scale;
-            }
-            None => {
-                pen[0] += 0.25 * scale; // default space advance
-            }
-        }
-    }
-}
-
-pub fn instances_to_quads(
-    instances: &[GlyphInstance],
-    screen_w: f32,
-    screen_h: f32,
-    color: [f32; 4],
-    out: &mut Vec<TextQuad>,
-) {
-    out.clear();
-    for gi in instances {
-        let min = [
-            gi.pos_px[0] / screen_w * 2. - 1.,
-            gi.pos_px[1] / screen_h * 2. - 1.,
-        ];
-        let max = [
-            (gi.pos_px[0] + gi.size_px[0]) / screen_w * 2. - 1.,
-            (gi.pos_px[1] + gi.size_px[1]) / screen_h * 2. - 1.,
-        ];
-        out.push(TextQuad {
-            min,
-            max,
-            uv_min: gi.uv_min,
-            uv_max: gi.uv_max,
-            color,
-            effects: 8,
-            baseline_y: 0.,
-            midline_y: 0.5,
-            underline_thickness: 0.01,
-            strike_thickness: 0.01,
-            highlight_pad: 0.,
-            _pad: [0., 0.],
-        });
-    }
 }
 
 /// A single rendered glyph instance.

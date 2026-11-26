@@ -1,11 +1,10 @@
 mod app;
-mod atlas_generator;
 mod camera;
 mod common_state;
 mod designer_state;
 pub mod render;
 mod showcase_state;
-mod text_layout;
+mod text;
 
 fn block_on<F: std::future::Future>(future: F) -> F::Output {
     pollster::block_on(future)

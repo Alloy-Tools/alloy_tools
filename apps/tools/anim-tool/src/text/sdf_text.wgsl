@@ -1,39 +1,35 @@
-// MSDF/MTSDF Text Rendering Shader
-// Renders text from a pre-baked MSDF or MTSDF atlas.
-// Each glyph quad is drawn as two triangles directly in clip space (NDC [-1, 1]).
-// No camera transform - text position is completely static and independent of mouse/camera.
-
 struct TextQuad {
-    // Clip-space corners of the quad (in NDC [-1, 1]).
     min: vec2<f32>,
     max: vec2<f32>,
-    // Atlas UV coordinates for the quad corners.
     uv_min: vec2<f32>,
     uv_max: vec2<f32>,
     color: vec4<f32>,
-    effects: u32,
+    px_range: f32,
     baseline_y: f32,
     midline_y: f32,
+    effects: u32,
+}
+
+struct TextEffect {
+    outline_color: vec4<f32>,
+    glow_color: vec4<f32>,
+    outline_width: f32,
+    glow_width: f32,
     underline_thickness: f32,
     strike_thickness: f32,
     highlight_pad: f32,
+    glyph_wave_amp: f32,
+    glyph_wave_freq: f32,
+    glyph_wave_speed: f32,
+    style_wave_amp: f32,
+    style_wave_freq: f32,
+    style_wave_speed: f32,
+    _pad: f32,
 }
-
-@group(0) @binding(0)
-var<storage, read> text_quads: array<TextQuad>;
-
-@group(0) @binding(1)
-var text_atlas: texture_2d<f32>;
-@group(0) @binding(2)
-var text_atlas_sampler: sampler;
-
-@group(0) @binding(3)
-var<uniform> text_globals: TextGlobals;
 
 struct TextGlobals {
     atlas_size: vec2<f32>,
     msdf_edge: f32,
-    px_range: f32,
     time: f32,
 }
 
@@ -44,24 +40,24 @@ fn msdf_median(sample: vec3<f32>) -> f32 {
 struct TextVsOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) uv: vec2<f32>,
-    @location(1) color: vec4<f32>,
     @interpolate(flat)
-    @location(2) effects: u32,
+    @location(1) instance_idx: u32,
+    @location(2) ndc_x: f32,
+    @location(3) ndc_y: f32,
     @interpolate(flat)
-    @location(3) baseline_y: f32,
-    @interpolate(flat)
-    @location(4) midline_y: f32,
-    @interpolate(flat)
-    @location(5) underline_thickness: f32,
-    @interpolate(flat)
-    @location(6) strike_thickness: f32,
-    @interpolate(flat)
-    @location(7) highlight_pad: f32,
-    @location(8) ndc_x: f32,
-    @location(9) ndc_y: f32,
-    @interpolate(flat)
-    @location(10) uv_per_ndc_y: f32,
+    @location(4) uv_per_ndc_y: f32,
 }
+
+@group(0) @binding(0)
+var<storage, read> text_quads: array<TextQuad>;
+@group(0) @binding(1)
+var text_atlas: texture_2d<f32>;
+@group(0) @binding(2)
+var text_atlas_sampler: sampler;
+@group(0) @binding(3)
+var<uniform> text_globals: TextGlobals;
+@group(0) @binding(4)
+var<storage, read> text_effects: array<TextEffect>;
 
 @vertex
 fn vs_text(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> TextVsOut {
@@ -95,13 +91,7 @@ fn vs_text(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
     var out: TextVsOut;
     out.clip = vec4<f32>(pos_ndc.x, -pos_ndc.y, 0.0, 1.0);
     out.uv = uv_atlas;
-    out.color = quad.color;
-    out.effects = quad.effects;
-    out.baseline_y = quad.baseline_y;
-    out.midline_y = quad.midline_y;
-    out.underline_thickness = quad.underline_thickness;
-    out.strike_thickness = quad.strike_thickness;
-    out.highlight_pad = quad.highlight_pad;
+    out.instance_idx = ii;
     out.ndc_x = pos_ndc.x;
     out.ndc_y = pos_ndc.y;
     let quad_h_ndc = quad.max.y - quad.min.y;
@@ -112,6 +102,7 @@ fn vs_text(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
 
 @fragment
 fn fs_text(in: TextVsOut) -> @location(0) vec4<f32> {
+    let quad = text_quads[in.instance_idx];
     let s = textureSampleLevel(text_atlas, text_atlas_sampler, in.uv, 0.0);
 
     let msd = msdf_median(s.rgb);
@@ -122,10 +113,10 @@ fn fs_text(in: TextVsOut) -> @location(0) vec4<f32> {
     let dy_texels = dpdy(in.uv) * text_globals.atlas_size;
     let texels_per_px = sqrt(dot(dx_texels, dy_texels) + dot(dy_texels, dy_texels));
 
-    let screen_px_range = text_globals.px_range / max(texels_per_px, 1e-6);
+    let screen_px_range = quad.px_range / max(texels_per_px, 1e-6);
     let alpha = clamp(screen_px_range * (sd - text_globals.msdf_edge) + 0.5, 0.0, 1.0);
 
-    let color = in.color;
+    let color = quad.color;
     return vec4<f32>(color.rgb, color.a * alpha);
 }
 
@@ -153,25 +144,38 @@ const WAVE_AMP: f32 = 0.005;
 
 @fragment
 fn fs_effect_text(in: TextVsOut) -> @location(0) vec4<f32> {
-    let effects = in.effects;
+    let quad = text_quads[in.instance_idx];
+    let effects = quad.effects;
     let edge = text_globals.msdf_edge;
 
-    var sample_uv = in.uv;
+    var uv = in.uv;
+    var e = TextEffect();
     var wave_ndc = 0.;
-    if (effects & (EFFECT_WAVE_GLYPH | EFFECT_WAVE_STYLE)) != 0 {
-        wave_ndc = sin(in.ndc_x * WAVE_FREQ + text_globals.time * WAVE_SPEED) * WAVE_AMP;
-    }
-    if (effects & EFFECT_WAVE_GLYPH) != 0 {
-        sample_uv.y += wave_ndc * in.uv_per_ndc_y;
+    if effects != 0u {
+        e = text_effects[in.instance_idx];
+        if (effects & (EFFECT_WAVE_GLYPH | EFFECT_WAVE_STYLE)) != 0 {
+            wave_ndc = sin(in.ndc_x * WAVE_FREQ + text_globals.time * WAVE_SPEED) * WAVE_AMP;
+        }
+        if (effects & EFFECT_WAVE_GLYPH) != 0 {
+            uv.y += wave_ndc * in.uv_per_ndc_y;
+        }
     }
 
     // Decorations (no texture sample)
-    if (effects & EFFECT_UNDERLINE) != 0u
-        && in_underline_band(in, select(0., wave_ndc, (effects & EFFECT_WAVE_STYLE) != 0)) {
+    if (effects & EFFECT_UNDERLINE) != 0u && in_underline_band(
+            in.ndc_y,
+            select(0., wave_ndc, (effects & EFFECT_WAVE_STYLE) != 0),
+            quad.baseline_y,
+            e.underline_thickness,
+        ) {
         return UNDERLINE_COLOR;
     }
-    if (effects & EFFECT_STRIKETHROUGH) != 0u
-        && in_strike_band(in, select(0., wave_ndc, (effects & EFFECT_WAVE_STYLE) != 0)) {
+    if (effects & EFFECT_STRIKETHROUGH) != 0u && in_strike_band(
+            in.ndc_y,
+            select(0., wave_ndc, (effects & EFFECT_WAVE_STYLE) != 0),
+            quad.midline_y,
+            e.strike_thickness,
+        ) {
         return STRIKE_COLOR;
     }
 
@@ -181,7 +185,7 @@ fn fs_effect_text(in: TextVsOut) -> @location(0) vec4<f32> {
     }
 
     // Shared sample
-    let s = textureSampleLevel(text_atlas, text_atlas_sampler, sample_uv, 0.0);
+    let s = textureSampleLevel(text_atlas, text_atlas_sampler, uv, 0.0);
     let msd = msdf_median(s.rgb);
     let disagree = (msd > edge) != (s.a > edge);
     let sd = select(msd, s.a, disagree);
@@ -189,7 +193,7 @@ fn fs_effect_text(in: TextVsOut) -> @location(0) vec4<f32> {
     let dx_texels = dpdx(in.uv) * text_globals.atlas_size;
     let dy_texels = dpdy(in.uv) * text_globals.atlas_size;
     let texels_per_px = sqrt(dot(dx_texels, dy_texels) + dot(dy_texels, dy_texels));
-    let texel_scale = texels_per_px / text_globals.px_range;
+    let texel_scale = texels_per_px / quad.px_range;
     let hw = 0.5 * texel_scale;
 
     if (effects & EFFECT_GLOW) != 0u {
@@ -210,22 +214,21 @@ fn fs_effect_text(in: TextVsOut) -> @location(0) vec4<f32> {
         }
     }
     if (effects & EFFECT_FILL) != 0u {
-        let a = smoothstep(edge - hw, edge + hw, sd) * in.color.a;
+        let a = smoothstep(edge - hw, edge + hw, sd) * quad.color.a;
         if a > 0.001 {
-            color = mix(color, vec4(in.color.rgb, 1.), a);
+            color = mix(color, vec4(quad.color.rgb, 1.), a);
         }
     }
 
     return vec4<f32>(color);
 }
 
-fn in_underline_band(in: TextVsOut, wave_ndc: f32) -> bool {
-    let y = in.ndc_y + wave_ndc;
-    return y >= in.baseline_y && y <= in.baseline_y + in.underline_thickness;
+fn in_underline_band(ndc_y: f32, wave_ndc: f32, baseline_y: f32, underline_thickness: f32) -> bool {
+    let y = ndc_y + wave_ndc;
+    return y >= baseline_y && y <= baseline_y + underline_thickness;
 }
 
-fn in_strike_band(in: TextVsOut, wave_ndc: f32) -> bool {
-    let y = in.ndc_y + wave_ndc;
-    return y >= in.midline_y - in.strike_thickness * 0.5
-        && y <= in.midline_y + in.strike_thickness * 0.5;
+fn in_strike_band(ndc_y: f32, wave_ndc: f32, midline_y: f32, strike_thickness: f32) -> bool {
+    let y = ndc_y + wave_ndc;
+    return y >= midline_y - strike_thickness * 0.5 && y <= midline_y + strike_thickness * 0.5;
 }
